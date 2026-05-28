@@ -128,6 +128,8 @@ def run_review_learning(
     _write_rows(paths["manual_labels"], manual_labels, LABEL_FIELDS)
     labels = _combined_labels(labels_csv, manual_labels)
     params = manifest.get("parameters", {})
+    optimization = _optimization_summary(manual_rows, raw_review_rows, base_review_rows)
+    config_update = _maybe_update_config(config_path, optimization, update_config=update_config)
     config = load_config(config_path)
     quality = evaluate_quality_gate(
         results_csv=paths["final"],
@@ -142,8 +144,6 @@ def run_review_learning(
     write_quality_markdown(quality, paths["quality_md"])
     paths["quality_json"].write_text(json.dumps(quality, ensure_ascii=False, indent=2), encoding="utf-8")
 
-    optimization = _optimization_summary(manual_rows, raw_review_rows, base_review_rows)
-    config_update = _maybe_update_config(config_path, optimization, update_config=update_config)
     xlsx = {}
     if write_xlsx:
         xlsx = build_workbook(

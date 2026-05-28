@@ -21,6 +21,16 @@ Output directory: outputs/my_run
 
 Then Codex should do the rest: locate or clone the repo, create/update `.env` from the key files, run the workflow, verify outputs, create the simplified manual review workbook, and report final absolute paths.
 
+When the user later provides a filled manual review workbook, they should only need to tell Codex:
+
+```text
+Use amazon-official-site-finder.
+Run directory: outputs/my_run
+Filled review file: /path/to/manual_official_site_review_task.xlsx
+```
+
+Then Codex should apply the feedback, run safe workflow optimization from the learning report, verify the reviewed outputs, and report the final reviewed files. Do not ask the user to run `run_review_cycle.sh` themselves.
+
 Never print API key contents. Avoid showing `.env` values. If a key file path is missing or unreadable, ask only for the missing path.
 
 ## Required Inputs
@@ -139,17 +149,20 @@ Tell the user to fill only:
 - `manual_url`: required for `replace`; optional for `accept` when the shown `official_url` is already correct.
 - `notes`: optional short reason.
 
+After the user fills the workbook, they should hand the file path back to Codex. They do not need to run shell commands.
+
 ## Review Learning Loop
 
-When the user provides a filled review file, run this from the repo root:
+When the user provides a filled review file, Codex should run this from the repo root:
 
 ```bash
 ./run_review_cycle.sh \
   "outputs/my_run" \
-  "/path/to/filled_manual_review_task.xlsx"
+  "/path/to/filled_manual_review_task.xlsx" \
+  --update-config
 ```
 
-This calls `tools/run_review_learning.py`, which merges the filled manual decisions with existing second-pass decisions, writes reviewed final outputs, creates `manual_review_labels.csv`, reruns the quality gate, and writes `manual_review_learning_report.md`.
+This calls `tools/run_review_learning.py`, which merges the filled manual decisions with existing second-pass decisions, writes reviewed final outputs, creates `manual_review_labels.csv`, reruns the quality gate, writes `manual_review_learning_report.md`, and applies only safe repeated excluded-domain config additions.
 
 Expected reviewed outputs:
 
@@ -162,6 +175,14 @@ outputs/my_run/manual_review_labels.csv
 ```
 
 After running review learning, inspect `manual_review_learning_report.md` and `manual_review_learning_summary.json`. Only make workflow/config changes when the report shows repeated safe patterns, such as repeated rejected directory/platform domains. Then run tests and rerun the relevant workflow step.
+
+Codex follow-up checklist after a filled review file:
+
+1. Run `./run_review_cycle.sh "$RUN_DIR" "$FILLED_REVIEW" --update-config`.
+2. Read `manual_review_learning_summary.json` and `manual_review_learning_report.md`.
+3. If `config_update.updated=true`, report the added excluded domains and run `PYTHONPATH=.vendor_eval:. python3 -m unittest discover -s tests`.
+4. Verify reviewed outputs with `tools/verify_run_outputs.py` if the shell script did not complete verification.
+5. Final response must list the reviewed final CSV, reviewed clickable XLSX, reviewed unresolved CSV, learning report, manual labels, quality status, and any config optimization applied.
 
 ## Review Guidance
 

@@ -67,7 +67,8 @@ review-learning:
 	  --run-dir "$(RUN_DIR)" \
 	  --review "$(REVIEW)" \
 	  --labels "$(LABELS)" \
-	  --write-xlsx
+	  --write-xlsx \
+	  --update-config
 
 verify:
 	python3 tools/verify_run_outputs.py \

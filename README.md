@@ -39,19 +39,15 @@ After the run, review the simplified task workbook:
 outputs/my_run/manual_official_site_review_task.xlsx
 ```
 
-Fill only `manual_decision`, `manual_url`, and `notes`. Then apply the feedback and create reviewed outputs:
+Fill only `manual_decision`, `manual_url`, and `notes`. After that, hand the filled workbook back to Codex. The worker does not need to run another shell command.
 
-```bash
-./run_review_cycle.sh "outputs/my_run" "outputs/my_run/manual_official_site_review_task.xlsx"
-```
-
-In Codex, you can instead say:
+In Codex, say:
 
 ```text
 Use amazon-official-site-finder skill.
 Run directory: outputs/my_run
 Filled review file: outputs/my_run/manual_official_site_review_task.xlsx
-Please apply the review feedback, generate the reviewed outputs, inspect the learning report, and tell me any safe workflow optimizations.
+Please apply the review feedback, optimize the workflow where the learning report shows safe repeated patterns, verify everything, and report the final output files.
 ```
 
 ## What Runs, In Order
@@ -90,7 +86,7 @@ That command runs the workflow in this order:
 
 For Codex-assisted usage, `run_codex_assisted.sh` runs first. It calls `tools/configure_env_from_key_files.py` to create `.env` from local key files without printing secrets, then hands off to `run_workflow.sh`.
 
-After manual review, `run_review_cycle.sh` calls `tools/run_review_learning.py`. It merges the filled review with the second-pass decisions, writes reviewed final outputs, creates manual labels, runs the quality gate again, and writes a learning report with safe optimization suggestions.
+After manual review, the user gives the filled workbook to Codex. Codex calls `run_review_cycle.sh` internally, which runs `tools/run_review_learning.py`, merges the filled review with the second-pass decisions, writes reviewed final outputs, creates manual labels, runs the quality gate again, and writes a learning report. In Codex mode, Codex also enables safe config optimization for repeated rejected directory/platform patterns and reports whether anything changed.
 
 ## Main Outputs
 
@@ -166,6 +162,7 @@ make verify RUN_DIR=outputs/my_run
 ```
 
 `SOURCE_CSV` is intentionally not hard-coded; each user should pass their own input file path.
+`review-task` and `review-learning` are mainly for Codex or advanced maintenance. A normal worker should fill the review workbook and give the filled file path to Codex.
 
 ## Tests
 

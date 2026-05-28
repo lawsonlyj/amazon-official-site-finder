@@ -116,20 +116,16 @@ manual_url：replace 时填真实官网；accept 且原链接正确时可不填
 notes：可选，写判断依据
 ```
 
-填完后可以运行：
-
-```bash
-./run_review_cycle.sh "outputs/my_run" "outputs/my_run/manual_official_site_review_task.xlsx"
-```
-
-如果使用 Codex，只需要说：
+填完后，工作人员不需要再运行命令，只需要把填好的文件路径交给 Codex：
 
 ```text
 Use amazon-official-site-finder skill.
 Run directory: outputs/my_run
 Filled review file: outputs/my_run/manual_official_site_review_task.xlsx
-Please apply the review feedback, generate reviewed outputs, and summarize workflow optimization suggestions.
+Please apply the review feedback, optimize the workflow where safe, verify everything, and report the final output files.
 ```
+
+Codex 会在内部调用 `run_review_cycle.sh`，读取学习报告，执行安全的规则优化，并输出最终 reviewed 文件。
 
 ## 文件运行顺序
 
@@ -152,18 +148,21 @@ run_codex_assisted.sh
      -> tools/verify_run_outputs.py
 ```
 
-人工复核后：
+人工复核后由 Codex 接手：
 
 ```text
-run_review_cycle.sh
+Codex receives filled manual review workbook
+  -> run_review_cycle.sh --update-config
   -> tools/run_review_learning.py
      -> 合并 second-pass 决策和人工填写结果
      -> 重新生成 reviewed final/unresolved
      -> 生成 manual_review_labels.csv
      -> 重新跑 quality gate
      -> 生成 manual_review_learning_report.md
+     -> 对重复出现且安全的排除域名更新 config/scoring.json
      -> tools/build_linked_workbook.py
   -> tools/verify_run_outputs.py
+  -> Codex 读取 learning report 并汇报最终输出
 ```
 
 ### 每个关键文件做什么
@@ -173,7 +172,7 @@ run_review_cycle.sh
 | `run_codex_assisted.sh` | 给 Codex 用的一键入口。先从 key 文件生成 `.env`，再启动完整 workflow。 |
 | `tools/configure_env_from_key_files.py` | 从 Brave/Exa key 文件读取密钥，写入 `.env`，但不会在输出里打印密钥。 |
 | `run_workflow.sh` | 普通用户的一键入口。检查 `.env`、安装可选依赖、跑 preflight、pipeline 和最终验证。 |
-| `run_review_cycle.sh` | 人工复核填完后的一键入口。把反馈应用回结果，并生成 reviewed 输出和学习报告。 |
+| `run_review_cycle.sh` | Codex 在人工复核填完后内部调用。把反馈应用回结果，生成 reviewed 输出和学习报告，可启用安全规则优化。 |
 | `tools/preflight_report.py` | 开跑前检查输入文件、API key、依赖和搜索 API 是否可用。 |
 | `tools/run_pipeline.py` | 主调度器。负责标准化输入、搜索候选、评分、生成初版结果、质量门禁和 second-pass。 |
 | `finder/` | 核心逻辑包。包括输入清洗、搜索 query 构建、API 搜索、网页抓取、官网评分。 |
@@ -199,7 +198,7 @@ outputs/my_run/manual_official_site_review_task.xlsx
 outputs/my_run/manual_official_site_review_task.csv
 ```
 
-人工复核填完并运行 `run_review_cycle.sh` 后，主要看：
+人工复核填完并交给 Codex 后，最终主要看：
 
 ```text
 outputs/my_run/provider_final_official_websites_reviewed.csv
