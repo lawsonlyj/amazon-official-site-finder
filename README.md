@@ -4,8 +4,9 @@ This workflow takes Amazon Service Provider Network (GSPN/SPN) provider data and
 
 For a concise Chinese handoff guide with operation diagrams, open:
 
-- [Amazon Official Site Finder 使用教程 PDF](docs/amazon_official_site_finder_user_guide_cn_20260528.pdf)
-- [Codex Skill 调用版 PDF](docs/amazon_official_site_finder_codex_skill_guide_cn_20260528.pdf)
+- [Amazon Official Site Finder 使用教程 PDF](docs/guides/amazon_official_site_finder_user_guide_cn_20260528.pdf)
+- [Codex Skill 调用版 PDF](docs/guides/amazon_official_site_finder_codex_skill_guide_cn_20260528.pdf)
+- [项目目录说明](docs/PROJECT_STRUCTURE_CN.md)
 
 If the user already has Codex, this skill installed, local Brave/Exa key files, and an input CSV, they can ask Codex to run everything end to end:
 
@@ -91,7 +92,7 @@ DDGS_ENABLED=0
 
 The CLI automatically loads `.env` from the current working directory.
 
-For portable handoff-oriented execution, start with [REPRODUCIBILITY_CN.md](/Users/luojianyin/Documents/官网搜索/REPRODUCIBILITY_CN.md) and [RUNBOOK_CN.md](/Users/luojianyin/Documents/官网搜索/RUNBOOK_CN.md). Common commands are also available through `make`:
+For portable handoff-oriented execution, start with [REPRODUCIBILITY_CN.md](docs/cn/REPRODUCIBILITY_CN.md) and [RUNBOOK_CN.md](docs/cn/RUNBOOK_CN.md). Common commands are also available through `make`:
 
 ```bash
 make test
@@ -414,7 +415,7 @@ The workflow supports these sources:
 - Direct domain guesses: deterministic fallback from provider name.
 - Candidate page crawling: homepage plus common pages such as `/about`, `/contact`, `/services`, `/privacy`, `/terms`.
 
-See [TOOL_EVALUATION_CN.md](/Users/luojianyin/Documents/官网搜索/TOOL_EVALUATION_CN.md) for the tool research and local trials.
+See [TOOL_EVALUATION_CN.md](docs/research/TOOL_EVALUATION_CN.md) for the tool research and local trials.
 
 The generated local evaluation summary is [tool_eval_summary.md](/Users/luojianyin/Documents/官网搜索/outputs/tool_eval_summary.md).
 

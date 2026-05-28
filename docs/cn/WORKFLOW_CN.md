@@ -43,11 +43,17 @@ Amazon SPN 是 Amazon 官方的第三方服务商网络，Amazon 说明这些 pr
 ```text
 /Users/luojianyin/Documents/官网搜索/
   README.md
-  WORKFLOW_CN.md
-  RUNBOOK_CN.md
-  REPRODUCIBILITY_CN.md
-  UNRESOLVED_NEXT_STEPS_CN.md
-  TOOL_EVALUATION_CN.md
+  docs/
+    PROJECT_STRUCTURE_CN.md
+    cn/
+      WORKFLOW_CN.md
+      RUNBOOK_CN.md
+      REPRODUCIBILITY_CN.md
+      USER_MANUAL_CN.md
+      UNRESOLVED_NEXT_STEPS_CN.md
+    research/
+      TOOL_EVALUATION_CN.md
+      TOOL_SELECTION_MATRIX.csv
   Makefile
   .env.example
   requirements-optional.txt
@@ -83,7 +89,7 @@ Amazon SPN 是 Amazon 官方的第三方服务商网络，Amazon 说明这些 pr
 
 ## 数据处理流程
 
-接手执行优先看：[REPRODUCIBILITY_CN.md](/Users/luojianyin/Documents/官网搜索/REPRODUCIBILITY_CN.md) 和 [RUNBOOK_CN.md](/Users/luojianyin/Documents/官网搜索/RUNBOOK_CN.md)。
+接手执行优先看：[REPRODUCIBILITY_CN.md](REPRODUCIBILITY_CN.md) 和 [RUNBOOK_CN.md](RUNBOOK_CN.md)。
 
 常用命令已封装在 `Makefile`：
 
@@ -610,7 +616,7 @@ A2Z-ECOM -> low_confidence, 35
 
 这说明评分逻辑没有把所有猜测域名都直接当作官网：缺少服务语义或站点不可访问时会进入复核或不输出。
 
-工具调研和试跑记录见：[TOOL_EVALUATION_CN.md](/Users/luojianyin/Documents/官网搜索/TOOL_EVALUATION_CN.md)。
+工具调研和试跑记录见：[TOOL_EVALUATION_CN.md](../research/TOOL_EVALUATION_CN.md)。
 
 当前工具试跑摘要见：[tool_eval_summary.md](/Users/luojianyin/Documents/官网搜索/outputs/tool_eval_summary.md)。
 

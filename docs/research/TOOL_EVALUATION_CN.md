@@ -2,7 +2,7 @@
 
 目标不是直接把某个 API 写死进流程，而是比较“搜索候选、抓取网页、正文抽取、名称匹配、动态网页处理”这些环节分别适合用什么工具，然后确定最优组合。
 
-机器可读版工具选择表见：[TOOL_SELECTION_MATRIX.csv](/Users/luojianyin/Documents/官网搜索/TOOL_SELECTION_MATRIX.csv)。
+机器可读版工具选择表见：[TOOL_SELECTION_MATRIX.csv](TOOL_SELECTION_MATRIX.csv)。
 
 ## 调研过的工具
 
