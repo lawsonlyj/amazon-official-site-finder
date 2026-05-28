@@ -16,6 +16,7 @@ from finder.doctor import doctor
 from finder.finalize import finalize_results
 from finder.input_normalizer import normalize_provider_rows, read_normalized_csv, write_normalized_csv
 from finder.scoring import load_config
+from tools.build_manual_review_task import build_manual_review_task
 from tools.build_review_sheet import build_review_sheet, write_review_sheet
 from tools.enrich_result_links import enrich_result_links
 from tools.evaluate_labeled_results import read_rows as read_csv_rows
@@ -268,6 +269,15 @@ def run_pipeline(
         )
         if not second_pass["quality_overall"]["passed"]:
             manifest["summary"]["quality_passed"] = False
+    manual_review_task = build_manual_review_task(run_dir=run_dir, write_xlsx=True)
+    manifest["manual_review_task"] = manual_review_task
+    manifest["summary"]["manual_review_rows"] = manual_review_task["review_rows"]
+    manifest.setdefault("outputs", {}).update(
+        {
+            "manual_review_task_csv": manual_review_task["output_csv"],
+            "manual_review_task_xlsx": manual_review_task["output_xlsx"],
+        }
+    )
     write_manifest(paths["manifest"], manifest)
     return manifest
 
@@ -457,6 +467,18 @@ def _equivalent_commands(
                 f"--accept-threshold {second_pass_accept_threshold}{second_pass_limit_arg}{second_pass_xlsx_arg}"
             )
         )
+    commands.append(
+        (
+            f"{python} tools/build_manual_review_task.py --run-dir {paths['manifest'].parent} "
+            "--write-xlsx"
+        )
+    )
+    commands.append(
+        (
+            f"{python} tools/run_review_learning.py --run-dir {paths['manifest'].parent} "
+            "--review <filled_manual_review_task.xlsx> --write-xlsx"
+        )
+    )
     return commands
 
 

@@ -1,9 +1,10 @@
 SOURCE_CSV ?=
 RUN_DIR ?= outputs/my_run
 LABELS ?= tests/fixtures/golden_expected_websites.csv
+REVIEW ?=
 PYTHONPATH_VALUE ?= .vendor_eval:.
 
-.PHONY: help test install-optional pipeline second-pass verify
+.PHONY: help test install-optional pipeline second-pass review-task review-learning verify
 
 help:
 	@echo "Targets:"
@@ -11,6 +12,8 @@ help:
 	@echo "  install-optional  Install optional dependencies into .vendor_eval"
 	@echo "  pipeline          Run full workflow; requires SOURCE_CSV=/path/to/input.csv"
 	@echo "  second-pass       Re-run unresolved second-pass for RUN_DIR"
+	@echo "  review-task       Rebuild simplified manual review CSV/XLSX for RUN_DIR"
+	@echo "  review-learning   Apply filled REVIEW=/path/to/review.xlsx and write learning report"
 	@echo "  verify            Verify final handoff outputs for RUN_DIR"
 	@echo ""
 	@echo "Example:"
@@ -51,6 +54,19 @@ second-pass:
 	  --per-query 3 \
 	  --max-search-queries 6 \
 	  --accept-threshold 70 \
+	  --write-xlsx
+
+review-task:
+	PYTHONPATH=$(PYTHONPATH_VALUE) python3 tools/build_manual_review_task.py \
+	  --run-dir "$(RUN_DIR)" \
+	  --write-xlsx
+
+review-learning:
+	@if [ -z "$(REVIEW)" ]; then echo "Set REVIEW=/path/to/filled_manual_review.csv-or.xlsx"; exit 2; fi
+	PYTHONPATH=$(PYTHONPATH_VALUE) python3 tools/run_review_learning.py \
+	  --run-dir "$(RUN_DIR)" \
+	  --review "$(REVIEW)" \
+	  --labels "$(LABELS)" \
 	  --write-xlsx
 
 verify:

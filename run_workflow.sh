@@ -58,3 +58,5 @@ python3 tools/verify_run_outputs.py \
 echo "Done."
 echo "Final CSV: $RUN_DIR/provider_final_official_websites_second_pass.csv"
 echo "Clickable XLSX: $RUN_DIR/provider_official_websites_second_pass_with_clickable_links.xlsx"
+echo "Manual review CSV: $RUN_DIR/manual_official_site_review_task.csv"
+echo "Manual review XLSX: $RUN_DIR/manual_official_site_review_task.xlsx"

@@ -23,8 +23,10 @@ from finder.text import url_like_candidates
 from finder.cli import limit_candidates_for_scoring, read_done_provider_ids, run_workflow
 from tools.evaluate_labeled_results import evaluate as evaluate_labeled
 from tools.build_review_sheet import build_review_sheet
+from tools.build_manual_review_task import build_manual_review_task
 from tools.quality_gate import evaluate_quality_gate
 from tools.apply_review import apply_review
+from tools.run_review_learning import run_review_learning
 from tools.enrich_result_links import enrich_result_links
 from tools.run_pipeline import PipelineError, run_pipeline
 from tools.preflight_report import build_preflight_report, render_markdown
@@ -1125,6 +1127,189 @@ class OperationalCommandTests(unittest.TestCase):
         self.assertEqual(summary["sheets"], 1)
         self.assertIn("HYPERLINK(", sheet_xml)
         self.assertIn("https://example.com", sheet_xml)
+
+    def test_build_manual_review_task_creates_simplified_clickable_task(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            run_dir = Path(tmp)
+            final_rows = [
+                {
+                    "provider_id": "p-1",
+                    "provider_name": "Low Accepted",
+                    "provider_detail_url": "https://amazon.example/p-1",
+                    "official_url": "https://low.example",
+                    "official_domain": "low.example",
+                    "status": "manual_accepted",
+                    "decision_source": "manual_replace",
+                    "confidence": "64",
+                    "source_status": "needs_review",
+                    "evidence_summary": "verified",
+                    "service_apis": "[]",
+                    "provider_locations": "[]",
+                },
+                {
+                    "provider_id": "p-2",
+                    "provider_name": "Strong Match",
+                    "provider_detail_url": "https://amazon.example/p-2",
+                    "official_url": "https://strong.example",
+                    "official_domain": "strong.example",
+                    "status": "matched",
+                    "decision_source": "auto_matched",
+                    "confidence": "91",
+                    "source_status": "matched",
+                    "evidence_summary": "strong",
+                    "service_apis": "[]",
+                    "provider_locations": "[]",
+                },
+                {
+                    "provider_id": "p-3",
+                    "provider_name": "Still Missing",
+                    "provider_detail_url": "https://amazon.example/p-3",
+                    "official_url": "",
+                    "official_domain": "",
+                    "status": "unresolved",
+                    "decision_source": "pending_review",
+                    "confidence": "38",
+                    "source_status": "low_confidence",
+                    "evidence_summary": "weak",
+                    "service_apis": "[]",
+                    "provider_locations": "[]",
+                },
+            ]
+            second_pass_rows = [
+                {
+                    "provider_id": "p-3",
+                    "provider_name": "Still Missing",
+                    "official_url": "https://candidate.example",
+                    "official_domain": "candidate.example",
+                    "confidence": "58",
+                    "accepted_for_final": "false",
+                    "previous_top_candidate_url": "https://candidate.example",
+                }
+            ]
+            _write_test_csv(run_dir / "provider_final_official_websites_second_pass.csv", final_rows)
+            _write_test_csv(run_dir / "unresolved_second_pass_results.csv", second_pass_rows)
+
+            summary = build_manual_review_task(run_dir=run_dir, write_xlsx=True)
+            with (run_dir / "manual_official_site_review_task.csv").open(newline="", encoding="utf-8") as f:
+                task_rows = list(csv.DictReader(f))
+            task_xlsx_exists = (run_dir / "manual_official_site_review_task.xlsx").exists()
+
+        self.assertEqual(summary["review_rows"], 2)
+        self.assertEqual([row["provider_id"] for row in task_rows], ["p-1", "p-3"])
+        self.assertEqual(task_rows[0]["review_reason"], "precision_second_pass_accepted_lt70")
+        self.assertEqual(task_rows[1]["top_candidate_url"], "https://candidate.example")
+        self.assertTrue(task_xlsx_exists)
+
+    def test_run_review_learning_applies_manual_feedback_and_writes_report(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            run_dir = Path(tmp)
+            source_rows = [
+                {
+                    "provider_id": "p-1",
+                    "provider_name": "One",
+                    "provider_detail_url": "https://amazon.example/p-1",
+                    "official_url": "https://one.example",
+                    "official_domain": "one.example",
+                    "confidence": "90",
+                    "status": "matched",
+                    "evidence_summary": "strong",
+                    "candidate_count": "1",
+                    "scored_candidate_count": "1",
+                    "service_apis": "[]",
+                    "provider_locations": "[]",
+                },
+                {
+                    "provider_id": "p-2",
+                    "provider_name": "Two",
+                    "provider_detail_url": "https://amazon.example/p-2",
+                    "official_url": "",
+                    "official_domain": "",
+                    "confidence": "35",
+                    "status": "low_confidence",
+                    "evidence_summary": "weak",
+                    "candidate_count": "1",
+                    "scored_candidate_count": "1",
+                    "service_apis": "[]",
+                    "provider_locations": "[]",
+                },
+                {
+                    "provider_id": "p-3",
+                    "provider_name": "Three",
+                    "provider_detail_url": "https://amazon.example/p-3",
+                    "official_url": "https://wrong.example",
+                    "official_domain": "wrong.example",
+                    "confidence": "71",
+                    "status": "needs_review",
+                    "evidence_summary": "borderline",
+                    "candidate_count": "1",
+                    "scored_candidate_count": "1",
+                    "service_apis": "[]",
+                    "provider_locations": "[]",
+                },
+            ]
+            second_pass_review = [
+                {
+                    "provider_id": "p-2",
+                    "provider_name": "Two",
+                    "manual_decision": "replace",
+                    "manual_url": "https://two-auto.example",
+                    "notes": "second_pass_auto_accept",
+                }
+            ]
+            manual_review = [
+                {
+                    "provider_id": "p-2",
+                    "provider_name": "Two",
+                    "official_url": "https://two-auto.example",
+                    "manual_decision": "replace",
+                    "manual_url": "https://two-true.example",
+                    "notes": "human corrected",
+                },
+                {
+                    "provider_id": "p-3",
+                    "provider_name": "Three",
+                    "official_url": "https://wrong.example",
+                    "manual_decision": "reject",
+                    "manual_url": "",
+                    "notes": "wrong company",
+                },
+            ]
+            labels = [{"provider_id": "p-1", "provider_name": "One", "expected_domain": "one.example"}]
+            _write_test_csv(run_dir / "provider_official_websites_enriched.csv", source_rows)
+            _write_test_csv(run_dir / "unresolved_second_pass_review_decisions.csv", second_pass_review)
+            _write_test_csv(run_dir / "manual_review.csv", manual_review)
+            _write_test_csv(run_dir / "labels.csv", labels)
+            manifest = {
+                "parameters": {
+                    "total_to_run": 3,
+                    "min_domain_accuracy": 1.0,
+                    "min_auto_precision": 1.0,
+                    "min_official_url_rate": 0.0,
+                    "max_unresolved_rate": 1.0,
+                },
+                "outputs": {
+                    "results_enriched": str(run_dir / "provider_official_websites_enriched.csv"),
+                },
+                "summary": {"status": "complete"},
+            }
+            (run_dir / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+
+            summary = run_review_learning(
+                run_dir=run_dir,
+                review_path=run_dir / "manual_review.csv",
+                labels_csv=run_dir / "labels.csv",
+                write_xlsx=True,
+            )
+            with (run_dir / "provider_final_official_websites_reviewed.csv").open(newline="", encoding="utf-8") as f:
+                reviewed = {row["provider_id"]: row for row in csv.DictReader(f)}
+            report_exists = (run_dir / "manual_review_learning_report.md").exists()
+            xlsx_exists = (run_dir / "provider_official_websites_reviewed_with_clickable_links.xlsx").exists()
+
+        self.assertEqual(reviewed["p-2"]["official_domain"], "two-true.example")
+        self.assertEqual(reviewed["p-3"]["status"], "rejected")
+        self.assertEqual(summary["overall"]["applied_manual_rows"], 2)
+        self.assertTrue(report_exists)
+        self.assertTrue(xlsx_exists)
 
     def test_plan_unresolved_second_pass_assigns_actionable_tiers(self):
         with tempfile.TemporaryDirectory() as tmp:

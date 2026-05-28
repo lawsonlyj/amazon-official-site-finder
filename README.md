@@ -1,6 +1,6 @@
 # Amazon Official Site Finder
 
-This project takes an Amazon GSPN/SPN provider CSV and finds each provider's independent official website. It produces a final CSV, a clickable XLSX, unresolved rows, evidence, and a quality report.
+This project takes an Amazon GSPN/SPN provider CSV and finds each provider's independent official website. It produces a final CSV, a clickable XLSX, unresolved rows, evidence, a quality report, and a manual-review learning loop.
 
 ## Quick Start
 
@@ -33,6 +33,27 @@ Output directory: outputs/my_run
 Please configure, run, verify, and report the final output files. Do not print API keys.
 ```
 
+After the run, review the simplified task workbook:
+
+```text
+outputs/my_run/manual_official_site_review_task.xlsx
+```
+
+Fill only `manual_decision`, `manual_url`, and `notes`. Then apply the feedback and create reviewed outputs:
+
+```bash
+./run_review_cycle.sh "outputs/my_run" "outputs/my_run/manual_official_site_review_task.xlsx"
+```
+
+In Codex, you can instead say:
+
+```text
+Use amazon-official-site-finder skill.
+Run directory: outputs/my_run
+Filled review file: outputs/my_run/manual_official_site_review_task.xlsx
+Please apply the review feedback, generate the reviewed outputs, inspect the learning report, and tell me any safe workflow optimizations.
+```
+
 ## What Runs, In Order
 
 For a normal worker, the easiest path is one command:
@@ -58,13 +79,18 @@ That command runs the workflow in this order:
 5. `tools/run_unresolved_second_pass.py`
    Runs the Brave/Exa second-pass on unresolved providers and accepts only candidates meeting the configured threshold and identity checks.
 
-6. `tools/build_linked_workbook.py`
+6. `tools/build_manual_review_task.py`
+   Builds the simplified manual review CSV/XLSX. This is the worker-facing task file for checking uncertain official websites and unresolved top candidates.
+
+7. `tools/build_linked_workbook.py`
    Creates the clickable XLSX workbook so URLs can be opened directly in spreadsheet software.
 
-7. `tools/verify_run_outputs.py`
+8. `tools/verify_run_outputs.py`
    Verifies the final CSV, unresolved CSV, quality JSON, and XLSX hyperlink formulas.
 
 For Codex-assisted usage, `run_codex_assisted.sh` runs first. It calls `tools/configure_env_from_key_files.py` to create `.env` from local key files without printing secrets, then hands off to `run_workflow.sh`.
+
+After manual review, `run_review_cycle.sh` calls `tools/run_review_learning.py`. It merges the filled review with the second-pass decisions, writes reviewed final outputs, creates manual labels, runs the quality gate again, and writes a learning report with safe optimization suggestions.
 
 ## Main Outputs
 
@@ -75,9 +101,21 @@ outputs/my_run/provider_final_official_websites_second_pass.csv
 outputs/my_run/provider_official_websites_second_pass_with_clickable_links.xlsx
 outputs/my_run/provider_unresolved_second_pass.csv
 outputs/my_run/quality_gate_provider_second_pass_final.json
+outputs/my_run/manual_official_site_review_task.xlsx
+outputs/my_run/manual_official_site_review_task.csv
 ```
 
 Use the XLSX for manual browsing and the CSV for downstream processing.
+
+After applying manual review, the important reviewed files are:
+
+```text
+outputs/my_run/provider_final_official_websites_reviewed.csv
+outputs/my_run/provider_official_websites_reviewed_with_clickable_links.xlsx
+outputs/my_run/provider_unresolved_reviewed.csv
+outputs/my_run/manual_review_learning_report.md
+outputs/my_run/manual_review_labels.csv
+```
 
 ## Project Directory
 
@@ -90,6 +128,7 @@ amazon-official-site-finder/
   requirements-optional.txt
   run_workflow.sh
   run_codex_assisted.sh
+  run_review_cycle.sh
 
   config/
     scoring.json
@@ -121,6 +160,8 @@ make test
 make install-optional
 make pipeline SOURCE_CSV=/path/to/provider_details.csv RUN_DIR=outputs/my_run
 make second-pass RUN_DIR=outputs/my_run
+make review-task RUN_DIR=outputs/my_run
+make review-learning RUN_DIR=outputs/my_run REVIEW=/path/to/filled_review.xlsx
 make verify RUN_DIR=outputs/my_run
 ```
 
@@ -132,7 +173,7 @@ make verify RUN_DIR=outputs/my_run
 python3 -m unittest discover -s tests
 ```
 
-The tests cover input normalization, search-source parsing, scoring, second-pass behavior, XLSX generation, output verification, quality gates, manual review application, and Codex key-file configuration.
+The tests cover input normalization, search-source parsing, scoring, second-pass behavior, XLSX generation, output verification, quality gates, manual review task generation, manual review learning, and Codex key-file configuration.
 
 ## Local Files Not Committed
 

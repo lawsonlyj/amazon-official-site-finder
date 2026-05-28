@@ -1,6 +1,6 @@
 # 项目目录说明
 
-这个仓库现在是“产品交付版”：只保留能完整运行官网识别 workflow、Codex skill 调用、质量验证、可点击 XLSX 输出和测试验证的文件。
+这个仓库现在是“产品交付版”：只保留能完整运行官网识别 workflow、Codex skill 调用、质量验证、可点击 XLSX 输出、人工复核学习闭环和测试验证的文件。
 
 ## 最终目录
 
@@ -13,6 +13,7 @@ amazon-official-site-finder/
   requirements-optional.txt
   run_workflow.sh
   run_codex_assisted.sh
+  run_review_cycle.sh
 
   config/
     scoring.json
@@ -23,6 +24,7 @@ amazon-official-site-finder/
   tools/
     apply_review.py
     build_linked_workbook.py
+    build_manual_review_task.py
     build_review_sheet.py
     configure_env_from_key_files.py
     enrich_result_links.py
@@ -32,6 +34,7 @@ amazon-official-site-finder/
     preflight_report.py
     quality_gate.py
     run_pipeline.py
+    run_review_learning.py
     run_unresolved_second_pass.py
     verify_run_outputs.py
 
@@ -97,6 +100,37 @@ Codex 会调用：
   --run-dir "outputs/my_run"
 ```
 
+### 人工复核后的闭环
+
+完整流程跑完后，会自动生成一个简化复核表：
+
+```text
+outputs/my_run/manual_official_site_review_task.xlsx
+```
+
+工作人员只填三列：
+
+```text
+manual_decision：accept / replace / reject / unsure
+manual_url：replace 时填真实官网；accept 且原链接正确时可不填
+notes：可选，写判断依据
+```
+
+填完后可以运行：
+
+```bash
+./run_review_cycle.sh "outputs/my_run" "outputs/my_run/manual_official_site_review_task.xlsx"
+```
+
+如果使用 Codex，只需要说：
+
+```text
+Use amazon-official-site-finder skill.
+Run directory: outputs/my_run
+Filled review file: outputs/my_run/manual_official_site_review_task.xlsx
+Please apply the review feedback, generate reviewed outputs, and summarize workflow optimization suggestions.
+```
+
 ## 文件运行顺序
 
 ### Codex-assisted 顺序
@@ -114,7 +148,22 @@ run_codex_assisted.sh
         -> tools/run_unresolved_second_pass.py
            -> tools/plan_unresolved_second_pass.py
            -> tools/build_linked_workbook.py
+        -> tools/build_manual_review_task.py
      -> tools/verify_run_outputs.py
+```
+
+人工复核后：
+
+```text
+run_review_cycle.sh
+  -> tools/run_review_learning.py
+     -> 合并 second-pass 决策和人工填写结果
+     -> 重新生成 reviewed final/unresolved
+     -> 生成 manual_review_labels.csv
+     -> 重新跑 quality gate
+     -> 生成 manual_review_learning_report.md
+     -> tools/build_linked_workbook.py
+  -> tools/verify_run_outputs.py
 ```
 
 ### 每个关键文件做什么
@@ -124,10 +173,13 @@ run_codex_assisted.sh
 | `run_codex_assisted.sh` | 给 Codex 用的一键入口。先从 key 文件生成 `.env`，再启动完整 workflow。 |
 | `tools/configure_env_from_key_files.py` | 从 Brave/Exa key 文件读取密钥，写入 `.env`，但不会在输出里打印密钥。 |
 | `run_workflow.sh` | 普通用户的一键入口。检查 `.env`、安装可选依赖、跑 preflight、pipeline 和最终验证。 |
+| `run_review_cycle.sh` | 人工复核填完后的一键入口。把反馈应用回结果，并生成 reviewed 输出和学习报告。 |
 | `tools/preflight_report.py` | 开跑前检查输入文件、API key、依赖和搜索 API 是否可用。 |
 | `tools/run_pipeline.py` | 主调度器。负责标准化输入、搜索候选、评分、生成初版结果、质量门禁和 second-pass。 |
 | `finder/` | 核心逻辑包。包括输入清洗、搜索 query 构建、API 搜索、网页抓取、官网评分。 |
 | `tools/run_unresolved_second_pass.py` | 对第一轮没解决的商家做二轮补漏，用 Brave/Exa 找更可能的官网。 |
+| `tools/build_manual_review_task.py` | 生成简化人工复核 CSV/XLSX，只保留工作人员需要判断和填写的列。 |
+| `tools/run_review_learning.py` | 读取填好的复核表，合并人工反馈，输出 reviewed 结果、人工标签和优化建议。 |
 | `tools/build_linked_workbook.py` | 生成链接可点击的 XLSX。 |
 | `tools/verify_run_outputs.py` | 检查最终 CSV、unresolved CSV、质量 JSON、XLSX 链接公式是否正常。 |
 | `tools/apply_review.py` | 人工复核后，把人工 decision 应用回已有 run。 |
@@ -143,6 +195,18 @@ outputs/my_run/provider_final_official_websites_second_pass.csv
 outputs/my_run/provider_official_websites_second_pass_with_clickable_links.xlsx
 outputs/my_run/provider_unresolved_second_pass.csv
 outputs/my_run/quality_gate_provider_second_pass_final.json
+outputs/my_run/manual_official_site_review_task.xlsx
+outputs/my_run/manual_official_site_review_task.csv
+```
+
+人工复核填完并运行 `run_review_cycle.sh` 后，主要看：
+
+```text
+outputs/my_run/provider_final_official_websites_reviewed.csv
+outputs/my_run/provider_official_websites_reviewed_with_clickable_links.xlsx
+outputs/my_run/provider_unresolved_reviewed.csv
+outputs/my_run/manual_review_learning_report.md
+outputs/my_run/manual_review_labels.csv
 ```
 
 ## 本地生成但不提交的目录

@@ -1,6 +1,6 @@
 ---
 name: amazon-official-site-finder
-description: Use when a user wants Codex to run the Amazon GSPN/SPN provider official-website finder end to end from a same-format provider CSV, including using local Brave/Exa API key files, creating .env, cloning or locating the repo, running the workflow, verifying outputs, troubleshooting, unresolved review, and sampling.
+description: Use when a user wants Codex to run the Amazon GSPN/SPN provider official-website finder end to end from a same-format provider CSV, including using local Brave/Exa API key files, creating .env, cloning or locating the repo, running the workflow, verifying outputs, creating manual review tasks, applying filled review feedback, troubleshooting, unresolved review, and sampling.
 ---
 
 # Amazon Official Site Finder
@@ -19,7 +19,7 @@ Input CSV: /path/to/provider_details.csv
 Output directory: outputs/my_run
 ```
 
-Then Codex should do the rest: locate or clone the repo, create/update `.env` from the key files, run the workflow, verify outputs, and report final absolute paths.
+Then Codex should do the rest: locate or clone the repo, create/update `.env` from the key files, run the workflow, verify outputs, create the simplified manual review workbook, and report final absolute paths.
 
 Never print API key contents. Avoid showing `.env` values. If a key file path is missing or unreadable, ask only for the missing path.
 
@@ -77,7 +77,7 @@ python3 tools/configure_env_from_key_files.py \
 ./run_workflow.sh "/path/to/provider_details.csv" "outputs/my_run"
 ```
 
-This runs preflight, first pass, second pass, XLSX generation, and verification.
+This runs preflight, first pass, second pass, simplified manual review task generation, XLSX generation, and verification.
 
 ## Expected Outputs
 
@@ -88,6 +88,8 @@ outputs/my_run/provider_unresolved_second_pass.csv
 outputs/my_run/unresolved_second_pass_results.csv
 outputs/my_run/unresolved_second_pass_evidence.jsonl
 outputs/my_run/quality_gate_provider_second_pass_final.json
+outputs/my_run/manual_official_site_review_task.csv
+outputs/my_run/manual_official_site_review_task.xlsx
 outputs/my_run/manifest.json
 ```
 
@@ -119,8 +121,47 @@ Report:
 - The final CSV absolute path.
 - The clickable XLSX absolute path.
 - The unresolved CSV absolute path and count if available.
+- The manual review task XLSX absolute path.
 - Whether quality verification passed.
 - Any blocker, without exposing keys.
+
+## Manual Review Task
+
+The workflow now creates a simplified worker-facing review workbook:
+
+```text
+outputs/my_run/manual_official_site_review_task.xlsx
+```
+
+Tell the user to fill only:
+
+- `manual_decision`: `accept`, `replace`, `reject`, or `unsure`.
+- `manual_url`: required for `replace`; optional for `accept` when the shown `official_url` is already correct.
+- `notes`: optional short reason.
+
+## Review Learning Loop
+
+When the user provides a filled review file, run this from the repo root:
+
+```bash
+./run_review_cycle.sh \
+  "outputs/my_run" \
+  "/path/to/filled_manual_review_task.xlsx"
+```
+
+This calls `tools/run_review_learning.py`, which merges the filled manual decisions with existing second-pass decisions, writes reviewed final outputs, creates `manual_review_labels.csv`, reruns the quality gate, and writes `manual_review_learning_report.md`.
+
+Expected reviewed outputs:
+
+```text
+outputs/my_run/provider_final_official_websites_reviewed.csv
+outputs/my_run/provider_official_websites_reviewed_with_clickable_links.xlsx
+outputs/my_run/provider_unresolved_reviewed.csv
+outputs/my_run/manual_review_learning_report.md
+outputs/my_run/manual_review_labels.csv
+```
+
+After running review learning, inspect `manual_review_learning_report.md` and `manual_review_learning_summary.json`. Only make workflow/config changes when the report shows repeated safe patterns, such as repeated rejected directory/platform domains. Then run tests and rerun the relevant workflow step.
 
 ## Review Guidance
 

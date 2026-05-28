@@ -61,7 +61,7 @@ def verify_run_outputs(
     if expected_unresolved is not None and len(unresolved_rows) != expected_unresolved:
         failures.append(f"unresolved_rows:{len(unresolved_rows)}!=expected:{expected_unresolved}")
 
-    final_unresolved_count = sum(1 for row in final_rows if row.get("status") == "unresolved")
+    final_unresolved_count = sum(1 for row in final_rows if _is_unresolved_final_row(row))
     if len(unresolved_rows) != final_unresolved_count:
         failures.append(f"unresolved_csv_rows:{len(unresolved_rows)}!=final_unresolved:{final_unresolved_count}")
 
@@ -107,6 +107,10 @@ def _read_rows(path: Path, failures: list[str]) -> list[dict[str, str]]:
         return []
     with path.open(newline="", encoding="utf-8-sig") as f:
         return list(csv.DictReader(f))
+
+
+def _is_unresolved_final_row(row: dict[str, str]) -> bool:
+    return not row.get("official_url") or row.get("status") in {"unresolved", "rejected", "invalid_manual_decision"}
 
 
 def _resolve(run_dir: Path, path: str | Path) -> Path:

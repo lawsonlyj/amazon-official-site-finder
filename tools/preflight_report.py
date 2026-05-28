@@ -421,6 +421,14 @@ def _recommended_commands(
                 f"--min-official-url-rate {min_official_url_rate} --max-unresolved-rate {max_unresolved_rate}"
             )
         ),
+        "build_manual_review_task": (
+            f"PYTHONPATH=.vendor_eval:. python3 tools/build_manual_review_task.py --run-dir {run_dir} --write-xlsx"
+        ),
+        "review_learning_after_manual_fill": (
+            f"PYTHONPATH=.vendor_eval:. python3 tools/run_review_learning.py --run-dir {run_dir} "
+            f"--review {run_dir / 'manual_official_site_review_task.xlsx'} --write-xlsx"
+            + (f" --labels {labels_csv}" if labels_csv else "")
+        ),
     }
 
 
