@@ -1,0 +1,6 @@
+# Optional tools used for evaluation/prototyping. The core workflow still runs
+# with the Python standard library when API keys are configured.
+ddgs==9.14.4
+trafilatura==2.0.0
+rapidfuzz==3.14.5
+playwright==1.57.0

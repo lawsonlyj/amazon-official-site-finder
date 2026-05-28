@@ -1,0 +1,3 @@
+provider_id,provider_name,official_url,official_domain,confidence,status,evidence_summary,manual_decision,manual_url,notes
+87a5ae1c-8ceb-4575-93db-44ea9fa8ca9c,247Tasker,https://www.247tasker.com/,247tasker.com,64,needs_review,domain_exact_provider_slug; http_ok_home; page_contains_exact_provider_name; http_ok_supporting_page,accept,,JS-only homepage reviewed; accept candidate domain.
+612a2ef2-0fbe-451c-82d7-f92d140496c2,A2Z-ECOM,,,35,low_confidence,domain_exact_provider_slug,replace,https://a2z-ecom.com/,Manual search confirmed official domain.

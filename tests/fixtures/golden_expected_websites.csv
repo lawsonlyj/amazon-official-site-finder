@@ -1,0 +1,6 @@
+provider_id,provider_name,expected_domain,expected_url,expected_status,notes
+c7c66fdc-3dee-489b-b44d-821f5e5e8cfb,247EASYSUPPORT,247easysupport.com,https://www.247easysupport.com/,official,Confirmed from direct domain page and search result snippets.
+87a5ae1c-8ceb-4575-93db-44ea9fa8ca9c,247Tasker,247tasker.com,https://247tasker.com/,official_needs_js_review,Official domain found by search; homepage requires JavaScript in static extraction.
+64f0050b-ef6a-4faf-a031-14f52d0d5f28,5starsecommerce,5starsecommerce.com,https://5starsecommerce.com/,official,Confirmed from direct domain page and search result snippets.
+fdfe7029-1fa5-4dfa-a40c-1ce5f115512f,9THSIGHT PRIVATE LIMITED,9thsight.com,https://9thsight.com/,official,Confirmed from direct domain page and search result snippets.
+612a2ef2-0fbe-451c-82d7-f92d140496c2,A2Z-ECOM,a2z-ecom.com,https://a2z-ecom.com/,official,Found by DDGS search; direct a2zecom.com guess is not sufficient.
