@@ -21,14 +21,11 @@ from finder import search_sources
 from finder.search_sources import SearchCandidate
 from finder.text import url_like_candidates
 from finder.cli import limit_candidates_for_scoring, read_done_provider_ids, run_workflow
-from tools.summarize_tool_eval import summarize
 from tools.evaluate_labeled_results import evaluate as evaluate_labeled
 from tools.build_review_sheet import build_review_sheet
 from tools.quality_gate import evaluate_quality_gate
-from tools.rescore_evidence import rescore_evidence
 from tools.apply_review import apply_review
 from tools.enrich_result_links import enrich_result_links
-from tools.merge_discovery_runs import merge_runs
 from tools.run_pipeline import PipelineError, run_pipeline
 from tools.preflight_report import build_preflight_report, render_markdown
 from tools.build_linked_workbook import build_workbook
@@ -769,42 +766,6 @@ class OperationalCommandTests(unittest.TestCase):
         self.assertEqual(rows[0]["provider_detail_url"], "https://sellercentral.amazon.example/provider/p-1")
         self.assertEqual(rows[0]["listing_logo_url"], "https://images.example/logo.png")
 
-    def test_tool_eval_summary_counts_strong_candidates(self):
-        rows = [
-            {
-                "provider_name": "Example Provider",
-                "url": "https://example.com",
-                "excluded": "False",
-                "extract_chars": "1000",
-                "domain_slug_match": "True",
-                "service_terms_in_text": "True",
-                "provider_name_in_text": "False",
-                "domain": "example.com",
-                "query": '"Example Provider" official website',
-                "rank": "1",
-            },
-            {
-                "provider_name": "Example Provider",
-                "url": "https://linkedin.com/company/example",
-                "excluded": "True",
-                "extract_chars": "0",
-                "domain_slug_match": "False",
-                "service_terms_in_text": "False",
-                "provider_name_in_text": "False",
-                "domain": "linkedin.com",
-                "query": '"Example Provider" official website',
-                "rank": "2",
-            },
-        ]
-
-        summary = summarize(rows)
-
-        self.assertEqual(summary["overall"]["providers"], 1)
-        self.assertEqual(summary["overall"]["usable_results"], 1)
-        self.assertEqual(summary["overall"]["excluded_results"], 1)
-        self.assertEqual(summary["overall"]["extractable_results"], 1)
-        self.assertEqual(summary["overall"]["strong_candidate_results"], 1)
-
     def test_run_workflow_append_and_done_ids_support_batch_resume(self):
         providers = [
             {"provider_id": "p-1", "provider_name": "One", "service_apis": [], "provider_locations": []},
@@ -836,99 +797,6 @@ class OperationalCommandTests(unittest.TestCase):
         self.assertEqual([row["provider_id"] for row in rows], ["p-1", "p-2"])
         self.assertEqual(done_ids, {"p-1", "p-2"})
         self.assertEqual(len(evidence_lines), 2)
-
-    def test_merge_discovery_runs_preserves_provider_order_and_source(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            tmp_path = Path(tmp)
-            providers = tmp_path / "providers.csv"
-            with providers.open("w", newline="", encoding="utf-8") as f:
-                writer = csv.DictWriter(
-                    f,
-                    fieldnames=["provider_id", "provider_name", "service_apis", "provider_locations"],
-                )
-                writer.writeheader()
-                writer.writerows(
-                    [
-                        {"provider_id": "p-1", "provider_name": "One", "service_apis": "[]", "provider_locations": "[]"},
-                        {"provider_id": "p-2", "provider_name": "Two", "service_apis": "[]", "provider_locations": "[]"},
-                        {"provider_id": "p-3", "provider_name": "Three", "service_apis": "[]", "provider_locations": "[]"},
-                    ]
-                )
-            first_results = tmp_path / "first.csv"
-            second_results = tmp_path / "second.csv"
-            first_evidence = tmp_path / "first.jsonl"
-            second_evidence = tmp_path / "second.jsonl"
-            fields = [
-                "provider_id",
-                "provider_name",
-                "official_url",
-                "official_domain",
-                "confidence",
-                "status",
-                "evidence_summary",
-            ]
-            for path, rows in [
-                (
-                    first_results,
-                    [
-                        {"provider_id": "p-1", "provider_name": "One", "official_url": "https://one.example", "official_domain": "one.example", "confidence": "90", "status": "matched", "evidence_summary": "first"},
-                        {"provider_id": "p-2", "provider_name": "Two", "official_url": "", "official_domain": "", "confidence": "35", "status": "low_confidence", "evidence_summary": "first"},
-                    ],
-                ),
-                (
-                    second_results,
-                    [
-                        {"provider_id": "p-2", "provider_name": "Two", "official_url": "https://two.example", "official_domain": "two.example", "confidence": "90", "status": "matched", "evidence_summary": "second"},
-                        {"provider_id": "p-3", "provider_name": "Three", "official_url": "https://three.example", "official_domain": "three.example", "confidence": "90", "status": "matched", "evidence_summary": "second"},
-                    ],
-                ),
-            ]:
-                with path.open("w", newline="", encoding="utf-8") as f:
-                    writer = csv.DictWriter(f, fieldnames=fields)
-                    writer.writeheader()
-                    writer.writerows(rows)
-            first_evidence.write_text(
-                "\n".join(
-                    [
-                        json.dumps({"provider_id": "p-1", "provider_name": "One", "candidates": []}),
-                        json.dumps({"provider_id": "p-2", "provider_name": "Two", "candidates": []}),
-                    ]
-                )
-                + "\n",
-                encoding="utf-8",
-            )
-            second_evidence.write_text(
-                "\n".join(
-                    [
-                        json.dumps({"provider_id": "p-2", "provider_name": "Two", "candidates": []}),
-                        json.dumps({"provider_id": "p-3", "provider_name": "Three", "candidates": []}),
-                    ]
-                )
-                + "\n",
-                encoding="utf-8",
-            )
-            output = tmp_path / "merged.csv"
-            evidence = tmp_path / "merged.jsonl"
-
-            summary = merge_runs(
-                providers_csv=providers,
-                run_specs=[
-                    f"first={first_results}:{first_evidence}",
-                    f"second={second_results}:{second_evidence}",
-                ],
-                output_results=output,
-                output_evidence=evidence,
-            )
-            with output.open(newline="", encoding="utf-8") as f:
-                rows = list(csv.DictReader(f))
-            evidence_rows = [json.loads(line) for line in evidence.read_text(encoding="utf-8").splitlines()]
-
-        self.assertEqual(summary["merged_rows"], 3)
-        self.assertEqual(summary["duplicate_result_rows_skipped"], 1)
-        self.assertEqual([row["provider_id"] for row in rows], ["p-1", "p-2", "p-3"])
-        self.assertEqual(rows[1]["discovery_run"], "first")
-        self.assertEqual(rows[2]["discovery_run"], "second")
-        self.assertEqual([row["provider_id"] for row in evidence_rows], ["p-1", "p-2", "p-3"])
 
     def test_candidate_limit_preserves_domain_guesses_and_trims_search_results(self):
         candidates = [
@@ -1158,60 +1026,6 @@ class OperationalCommandTests(unittest.TestCase):
         self.assertEqual(len(final_rows), 2)
         self.assertEqual(final_rows[1]["official_domain"], "two.example")
         self.assertEqual(unresolved_rows, [])
-
-    def test_rescore_evidence_uses_current_exclusions_without_researching(self):
-        providers = [
-            {
-                "provider_id": "p-1",
-                "provider_name": "Example Agency LLC",
-                "service_apis": ["Account Management"],
-                "provider_locations": ["United Kingdom"],
-            }
-        ]
-        config = load_config("config/scoring.json")
-        with tempfile.TemporaryDirectory() as tmp:
-            evidence_path = Path(tmp) / "evidence.jsonl"
-            output_path = Path(tmp) / "rescored.csv"
-            evidence = {
-                "provider_id": "p-1",
-                "provider_name": "Example Agency LLC",
-                "candidate_count": 2,
-                "scored_candidate_count": 2,
-                "candidates": [
-                    {
-                        "url": "https://www.scribd.com/document/example-agency",
-                        "domain": "scribd.com",
-                        "score": 100,
-                        "reject": False,
-                        "reasons": ["domain_exact_provider_slug"],
-                        "title": "Example Agency LLC document",
-                        "source": "ddgs",
-                        "query": '"Example Agency LLC" official website',
-                        "rank": 1,
-                    },
-                    {
-                        "url": "https://www.exampleagency.com",
-                        "domain": "exampleagency.com",
-                        "score": 88,
-                        "reject": False,
-                        "reasons": ["domain_exact_provider_slug", "search_result_contains_exact_name"],
-                        "title": "Example Agency LLC official website",
-                        "snippet": "Amazon marketplace account management in United Kingdom.",
-                        "source": "ddgs",
-                        "query": '"Example Agency LLC" official website',
-                        "rank": 2,
-                    },
-                ],
-            }
-            evidence_path.write_text(json.dumps(evidence) + "\n", encoding="utf-8")
-
-            with patch("finder.scoring.fetch_text", side_effect=AssertionError("unexpected refetch")):
-                summary = rescore_evidence(evidence_path, providers, output_path, config)
-            with output_path.open(newline="", encoding="utf-8") as f:
-                rows = list(csv.DictReader(f))
-
-        self.assertEqual(summary["written_rows"], 1)
-        self.assertEqual(rows[0]["official_domain"], "exampleagency.com")
 
     def test_build_review_sheet_expands_top_candidates_from_evidence(self):
         with tempfile.TemporaryDirectory() as tmp:
