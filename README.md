@@ -2,6 +2,10 @@
 
 This workflow takes Amazon Service Provider Network (GSPN/SPN) provider data and outputs the likely independent official website for each provider.
 
+For a concise Chinese handoff guide with operation diagrams, open:
+
+- [Amazon Official Site Finder 使用教程 PDF](docs/amazon_official_site_finder_user_guide_cn_20260528.pdf)
+
 The current source file is:
 
 ```text
