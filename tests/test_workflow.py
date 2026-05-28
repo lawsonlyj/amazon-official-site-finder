@@ -1,10 +1,12 @@
 import csv
+import io
 import json
 import os
 import tempfile
 import unittest
 import urllib.error
 import zipfile
+from contextlib import redirect_stdout
 from pathlib import Path
 from unittest.mock import patch
 
@@ -33,6 +35,7 @@ from tools.build_linked_workbook import build_workbook
 from tools.plan_unresolved_second_pass import build_second_pass_plan
 from tools.verify_run_outputs import verify_run_outputs
 from tools.run_unresolved_second_pass import run_unresolved_second_pass, _accepted
+from tools.configure_env_from_key_files import extract_key_from_file, main as configure_env_main
 
 
 def _write_test_csv(path: Path, rows: list[dict[str, str]]) -> None:
@@ -44,6 +47,46 @@ def _write_test_csv(path: Path, rows: list[dict[str, str]]) -> None:
 
 
 class WorkflowTests(unittest.TestCase):
+    def test_configure_env_from_key_files_reads_plain_and_env_style_keys(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            brave_file = root / "brave.txt"
+            exa_file = root / "exa.env"
+            env_file = root / ".env"
+            example_file = root / ".env.example"
+            brave_file.write_text("brave-secret-key\n", encoding="utf-8")
+            exa_file.write_text("EXA_API_KEY='exa-secret-key'\n", encoding="utf-8")
+            example_file.write_text("BRAVE_API_KEY=\nEXA_API_KEY=\nDDGS_ENABLED=1\nFINDER_HTTP_TIMEOUT=12\n", encoding="utf-8")
+
+            out = io.StringIO()
+            with redirect_stdout(out):
+                configure_env_main(
+                    [
+                        "--brave-key-file",
+                        str(brave_file),
+                        "--exa-key-file",
+                        str(exa_file),
+                        "--env",
+                        str(env_file),
+                        "--example",
+                        str(example_file),
+                    ]
+                )
+
+            text = env_file.read_text(encoding="utf-8")
+            self.assertIn("BRAVE_API_KEY=brave-secret-key", text)
+            self.assertIn("EXA_API_KEY=exa-secret-key", text)
+            self.assertIn("FINDER_HTTP_TIMEOUT=12", text)
+            self.assertNotIn("brave-secret-key", out.getvalue())
+            self.assertNotIn("exa-secret-key", out.getvalue())
+
+    def test_extract_key_from_json_key_file(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            key_file = Path(tmp) / "brave.json"
+            key_file.write_text(json.dumps({"brave": {"api_key": "json-secret"}}), encoding="utf-8")
+
+            self.assertEqual(extract_key_from_file(key_file, "BRAVE_API_KEY"), "json-secret")
+
     def test_normalizer_merges_duplicate_provider_rows_and_skips_description_row(self):
         with tempfile.TemporaryDirectory() as tmp:
             source = Path(tmp) / "providers.csv"

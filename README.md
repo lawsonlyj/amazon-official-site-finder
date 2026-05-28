@@ -5,6 +5,18 @@ This workflow takes Amazon Service Provider Network (GSPN/SPN) provider data and
 For a concise Chinese handoff guide with operation diagrams, open:
 
 - [Amazon Official Site Finder 使用教程 PDF](docs/amazon_official_site_finder_user_guide_cn_20260528.pdf)
+- [Codex Skill 调用版 PDF](docs/amazon_official_site_finder_codex_skill_guide_cn_20260528.pdf)
+
+If the user already has Codex, this skill installed, local Brave/Exa key files, and an input CSV, they can ask Codex to run everything end to end:
+
+```text
+Use amazon-official-site-finder skill.
+Brave key file: /path/to/brave_key.txt
+Exa key file: /path/to/exa_key.txt
+Input CSV: /path/to/provider_details.csv
+Output directory: outputs/my_run
+Please configure, run, verify, and report the final output files. Do not print API keys.
+```
 
 The current source file is:
 
