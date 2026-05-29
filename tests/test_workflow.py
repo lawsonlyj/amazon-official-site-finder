@@ -1717,6 +1717,98 @@ class OperationalCommandTests(unittest.TestCase):
         self.assertEqual(rows[0]["manual_url"], "")
         self.assertEqual(rows[0]["reason_for_unsure"], "replacement_candidate_needs_human_confirmation")
 
+    def test_agent_b_resume_reuses_existing_rows_and_writes_incremental_outputs(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            run_dir = Path(tmp)
+            final_rows = [
+                {
+                    "provider_id": "p-1",
+                    "provider_name": "Existing Brand",
+                    "provider_detail_url": "https://amazon.example/p-1",
+                    "official_url": "https://existing.example",
+                    "status": "matched",
+                    "confidence": "90",
+                    "evidence_summary": "existing",
+                },
+                {
+                    "provider_id": "p-2",
+                    "provider_name": "New Brand",
+                    "provider_detail_url": "https://amazon.example/p-2",
+                    "official_url": "https://new.example",
+                    "status": "matched",
+                    "confidence": "90",
+                    "evidence_summary": "new",
+                },
+            ]
+            manual_rows = [
+                {
+                    "provider_id": "p-1",
+                    "provider_name": "Existing Brand",
+                    "official_url": "https://existing.example",
+                    "review_reason": "precision_low_confidence_auto_match",
+                },
+                {
+                    "provider_id": "p-2",
+                    "provider_name": "New Brand",
+                    "official_url": "https://new.example",
+                    "review_reason": "precision_low_confidence_auto_match",
+                },
+            ]
+            existing_agent_b = [
+                {
+                    "provider_id": "p-1",
+                    "provider_name": "Existing Brand",
+                    "candidate_url": "https://existing.example",
+                    "candidate_domain": "existing.example",
+                    "agent_b_decision": "accept",
+                    "manual_decision": "accept",
+                    "manual_url": "",
+                    "confidence": "90",
+                    "evidence_score": "90",
+                    "evidence_urls": "https://existing.example",
+                    "supporting_facts": "cached",
+                    "counter_evidence": "",
+                    "reason_for_unsure": "",
+                    "notes": "cached row",
+                    "independent_search_queries": "",
+                    "replacement_url": "",
+                    "replacement_domain": "",
+                    "source_status": "matched",
+                    "source_confidence": "90",
+                    "review_reason": "precision_low_confidence_auto_match",
+                }
+            ]
+            _write_test_csv(run_dir / "official_sites.csv", final_rows)
+            _write_test_csv(run_dir / "review_task.csv", manual_rows)
+            _write_test_csv(run_dir / "agent_b/check.csv", existing_agent_b)
+            (run_dir / "agent_b/check.jsonl").write_text(
+                json.dumps({"provider_id": "p-1", "provider_name": "Existing Brand", "decision": "accept"}) + "\n",
+                encoding="utf-8",
+            )
+
+            def fake_fetch(url):
+                html = """
+                <html><head><title>New Brand</title></head>
+                <body>New Brand LLC. About us. Contact us.
+                Amazon marketplace account management ecommerce services.</body></html>
+                """
+                return {"ok": True, "status": 200, "final_url": url, "text": html}
+
+            with patch("tools.run_agent_b_verification.fetch_text", side_effect=fake_fetch), patch(
+                "tools.run_agent_b_verification.collect_candidates_for_queries", return_value=[]
+            ):
+                summary = run_agent_b_verification(run_dir=run_dir, write_xlsx=False, resume=True)
+            with (run_dir / "agent_b/check.csv").open(newline="", encoding="utf-8") as f:
+                rows = list(csv.DictReader(f))
+            jsonl_lines = (run_dir / "agent_b/check.jsonl").read_text(encoding="utf-8").strip().splitlines()
+
+        self.assertEqual(summary["output_rows"], 2)
+        self.assertEqual(summary["resumed_rows"], 1)
+        self.assertEqual(summary["processed_rows"], 1)
+        self.assertEqual([row["provider_id"] for row in rows], ["p-1", "p-2"])
+        self.assertEqual(rows[0]["notes"], "cached row")
+        self.assertEqual(len(jsonl_lines), 2)
+
     def test_agent_c_recommends_and_agent_a_applies_only_safe_rules(self):
         with tempfile.TemporaryDirectory() as tmp:
             run_dir = Path(tmp)

@@ -66,6 +66,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--per-query", type=int, default=2)
     parser.add_argument("--write-xlsx", action="store_true")
     parser.add_argument("--include-all-final", action="store_true")
+    parser.add_argument("--resume", action="store_true", help="Reuse existing output rows and keep incremental progress.")
     args = parser.parse_args(argv)
 
     load_dotenv(Path(".env"))
@@ -79,6 +80,7 @@ def main(argv: list[str] | None = None) -> int:
         per_query=args.per_query,
         write_xlsx=args.write_xlsx,
         include_all_final=args.include_all_final,
+        resume=args.resume,
     )
     print(json.dumps(summary, ensure_ascii=False, indent=2))
     return 0
@@ -95,6 +97,7 @@ def run_agent_b_verification(
     per_query: int = 2,
     write_xlsx: bool = True,
     include_all_final: bool = False,
+    resume: bool = False,
 ) -> dict:
     run_dir = Path(run_dir)
     config = load_config(config_path)
@@ -107,18 +110,29 @@ def run_agent_b_verification(
     output_jsonl_path = Path(output_jsonl) if output_jsonl else canonical["jsonl"]
     output_xlsx_path = Path(output_xlsx) if output_xlsx else canonical["xlsx"]
 
+    existing_rows = _index_existing_rows(output_csv_path) if resume else {}
+    existing_json = _index_existing_json(output_jsonl_path) if resume else {}
     result_rows = []
     json_rows = []
+    resumed_rows = 0
+    processed_rows = 0
     for index, row in enumerate(rows, 1):
+        key = _row_key(row)
+        if key and key in existing_rows:
+            result_rows.append(existing_rows[key])
+            json_rows.append(existing_json.get(key) or _details_from_output_row(existing_rows[key]))
+            resumed_rows += 1
+            continue
         print(f"agent-b {index}/{len(rows)} {row.get('provider_name', '')}", file=sys.stderr)
         result = verify_row(row, config=config, per_query=per_query)
         result_rows.append(result["row"])
         json_rows.append(result["details"])
+        processed_rows += 1
+        _write_rows(output_csv_path, result_rows, AGENT_B_FIELDS)
+        _write_jsonl(output_jsonl_path, json_rows)
 
     _write_rows(output_csv_path, result_rows, AGENT_B_FIELDS)
-    with output_jsonl_path.open("w", encoding="utf-8") as f:
-        for item in json_rows:
-            f.write(json.dumps(item, ensure_ascii=False) + "\n")
+    _write_jsonl(output_jsonl_path, json_rows)
 
     xlsx_summary = {}
     if write_xlsx:
@@ -128,6 +142,8 @@ def run_agent_b_verification(
         "workflow_version": WORKFLOW_VERSION,
         "input_rows": len(rows),
         "output_rows": len(result_rows),
+        "processed_rows": processed_rows,
+        "resumed_rows": resumed_rows,
         "decision_counts": _counts(result_rows, "agent_b_decision"),
         "outputs": {
             "csv": str(output_csv_path),
@@ -621,6 +637,54 @@ def _write_rows(path: Path, rows: list[dict[str, str]], fields: list[str]) -> No
         writer = csv.DictWriter(f, fieldnames=fields, extrasaction="ignore")
         writer.writeheader()
         writer.writerows(rows)
+
+
+def _write_jsonl(path: Path, rows: list[dict]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", encoding="utf-8") as f:
+        for row in rows:
+            f.write(json.dumps(row, ensure_ascii=False) + "\n")
+
+
+def _index_existing_rows(path: Path) -> dict[str, dict[str, str]]:
+    return {_row_key(row): row for row in _read_rows(path) if _row_key(row)}
+
+
+def _index_existing_json(path: Path) -> dict[str, dict]:
+    if not path.exists():
+        return {}
+    out: dict[str, dict] = {}
+    with path.open(encoding="utf-8") as f:
+        for line in f:
+            try:
+                row = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            key = _row_key(row)
+            if key:
+                out[key] = row
+    return out
+
+
+def _details_from_output_row(row: dict[str, str]) -> dict:
+    return {
+        "provider_id": row.get("provider_id", ""),
+        "provider_name": row.get("provider_name", ""),
+        "candidate": {
+            "url": row.get("candidate_url", ""),
+            "domain": row.get("candidate_domain", ""),
+            "score": _to_int(row.get("evidence_score")),
+            "evidence_urls": [item.strip() for item in row.get("evidence_urls", "").split(";") if item.strip()],
+            "supporting_facts": [item.strip() for item in row.get("supporting_facts", "").split(";") if item.strip()],
+            "counter_evidence": [item.strip() for item in row.get("counter_evidence", "").split(";") if item.strip()],
+        },
+        "replacement": {
+            "url": row.get("replacement_url", ""),
+            "domain": row.get("replacement_domain", ""),
+        },
+        "search_queries": [item.strip() for item in row.get("independent_search_queries", "").split(";") if item.strip()],
+        "decision": row.get("agent_b_decision", ""),
+    }
 
 
 def _index_rows(path: Path) -> dict[str, dict[str, str]]:

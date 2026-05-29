@@ -27,6 +27,8 @@ Use the Codex-assisted script when API keys are stored in local key files:
 
 The current workflow version is `agent-loop-v6.1-balance-tuned`. This version adds country/language-aware search terms, country TLD and page-location corroboration, identity caps for same-name/service/country conflicts, logo-only risk handling, and no-official regression fixtures learned from human review. It also relaxes the ambiguous-name cap when a candidate has page-level provider identity plus at least weak marketplace/service evidence, which reduces over-rejection of otherwise correct official sites. Logo similarity is useful positive evidence, but a logo alone is not enough to auto-accept a site. The manual-review builder now tracks review capture metrics and adds a narrow high-confidence ambiguous-identity review lane instead of globally tightening thresholds; AgentB keeps 70-84 score rows in that lane as `unsure` unless exact logo evidence supports the candidate. The balance evaluator also reports AgentB false-official catch rate, correct-official accept rate, and unresolved recovery quality.
 
+For larger AgentB checks, run `python3 tools/run_agent_b_verification.py --run-dir outputs/my_run --resume --write-xlsx`. The command writes progress incrementally and reuses completed rows, so interrupted 300-row or full-run checks can continue without starting over.
+
 If using Codex, ask:
 
 ```text
