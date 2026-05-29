@@ -49,6 +49,7 @@ from tools.run_calibration_cycle import run_calibration_cycle
 from tools.simulate_pattern_release import simulate_pattern_release
 from tools.apply_pattern_release_experiment import apply_pattern_release_experiment
 from tools.apply_pattern_release_to_run import apply_pattern_release_to_run
+from tools.build_release_policy_report import build_release_policy_report
 from tools.output_layout import DEFAULT_SECOND_PASS_ACCEPT_THRESHOLD, WORKFLOW_VERSION
 
 
@@ -3269,6 +3270,106 @@ class OperationalCommandTests(unittest.TestCase):
         self.assertIn("Prefer narrow pattern release over global threshold relaxation", md_text)
         self.assertIn("Pattern Release", md_text)
         self.assertTrue(json_exists)
+
+    def test_build_release_policy_report_recommends_guarded_pattern_release(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            baseline = root / "baseline.json"
+            calibrated = root / "calibrated.json"
+            pattern = root / "pattern.json"
+            balance = root / "balance.json"
+            batch = root / "batch.json"
+            output_json = root / "policy.json"
+            output_md = root / "policy.md"
+            baseline.write_text(
+                json.dumps(
+                    {
+                        "overall": {
+                            "overall_accuracy": 0.81,
+                            "auto_precision": 0.9024,
+                            "official_recall": 0.8605,
+                            "false_official_rows": 8,
+                            "over_rejected_rows": 11,
+                            "official_output_rows": 82,
+                            "correct_official_rows": 74,
+                        }
+                    }
+                ),
+                encoding="utf-8",
+            )
+            calibrated.write_text(
+                json.dumps(
+                    {
+                        "overall": {
+                            "overall_accuracy": 0.85,
+                            "auto_precision": 0.907,
+                            "official_recall": 0.907,
+                            "false_official_rows": 8,
+                            "over_rejected_rows": 7,
+                            "official_output_rows": 86,
+                            "correct_official_rows": 78,
+                        }
+                    }
+                ),
+                encoding="utf-8",
+            )
+            pattern.write_text(
+                json.dumps(
+                    {
+                        "summary": {
+                            "selected_actionable_pattern_count": 2,
+                            "selected_actionable_correct_recovery_rows": 4,
+                            "selected_actionable_wrong_release_rows": 0,
+                        }
+                    }
+                ),
+                encoding="utf-8",
+            )
+            balance.write_text(
+                json.dumps(
+                    {
+                        "summary": {
+                            "recommended_threshold": 75,
+                            "agent_b_recall_release_correct_rows": 6,
+                            "agent_b_recall_release_wrong_rows": 9,
+                        }
+                    }
+                ),
+                encoding="utf-8",
+            )
+            batch.write_text(
+                json.dumps(
+                    {
+                        "run_dir": "outputs/current_workflow_300_cycle3_20260529",
+                        "released_rows": 0,
+                        "official_url_rows": 276,
+                        "unresolved_rows": 24,
+                        "quality_passed": True,
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            report = build_release_policy_report(
+                baseline_eval_json=baseline,
+                calibrated_eval_json=calibrated,
+                pattern_release_json=pattern,
+                balance_report_json=balance,
+                batch_application_jsons=[batch],
+                output_json=output_json,
+                output_md=output_md,
+            )
+            md_text = output_md.read_text(encoding="utf-8")
+            output_json_exists = output_json.exists()
+
+        self.assertEqual(report["summary"]["recommended_first_pass_threshold"], 75)
+        self.assertEqual(report["summary"]["recommended_second_pass_threshold"], 75)
+        self.assertEqual(report["summary"]["raw_agent_b_recall_release"], "manual_only")
+        self.assertEqual(report["summary"]["calibrated_pattern_release"], "enabled_with_guard_no_batch_release")
+        self.assertEqual(report["summary"]["accuracy_delta"], 0.04)
+        self.assertEqual(report["summary"]["false_official_delta"], 0)
+        self.assertIn("do not globally lower thresholds", md_text)
+        self.assertTrue(output_json_exists)
 
     def test_build_calibration_review_sample_prioritizes_high_value_rows(self):
         with tempfile.TemporaryDirectory() as tmp:

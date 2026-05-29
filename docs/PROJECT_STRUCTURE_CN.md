@@ -201,6 +201,7 @@ Codex receives filled manual review workbook
 | `tools/verify_run_outputs.py` | 检查最终 CSV、unresolved CSV、质量 JSON、XLSX 链接公式是否正常。 |
 | `tools/evaluate_workflow_balance.py` | 调参评估工具。用基线结果、候选结果和人工标黄复核表计算 false official、over-reject、precision、recall、manual review rows，并模拟 AgentB unresolved recall 候选在不同证据阈值下自动放行会恢复多少正确官网、放出多少错误官网。 |
 | `tools/build_balance_report.py` | 汇总 100 条有标签评估、300/全量无标签 AgentB 分布和 `simulate_pattern_release.py` 的 pattern-release 结果，生成可重复的阈值、review lane、AgentB recall 是否只能人工处理、以及是否可采用窄口证据组合放行的建议报告。 |
+| `tools/build_release_policy_report.py` | 汇总基线/候选有标签评估、pattern-release 模拟和 100/300 条应用结果，生成最终发布策略报告：阈值是否保持、原始 AgentB recall 是否只能人工处理、窄口 pattern release 是否可在风险子域 guard 下启用。 |
 | `tools/run_calibration_cycle.py` | 一键生成下一轮校准材料：recall/precision 证据组合报告、recall pattern 放行模拟、selected actionable pattern-release set、均衡 pattern-validation 审核表、空表评估和 cycle summary；也可用 `--filled-sample` 读取填好的样本并汇总 pattern 采纳/拒绝建议，同时输出 `pattern_rule_candidates.json/md`，把候选规则、需更多标签和必须阻断的 pattern 分开。 |
 | `tools/mine_evidence_patterns.py` | 证据组合挖掘工具。读取有标签 balance JSON 和 AgentB 证据，找出零错误但仍需更多标签验证的候选规则，以及会释放错误官网的危险组合。 |
 | `tools/simulate_pattern_release.py` | 规则放行模拟工具。读取有标签 balance JSON、AgentB 证据和 pattern JSON，计算每个窄 pattern 如果被 A 自动放行，会恢复多少 over-rejected 正确官网、释放多少错误官网，以及 precision/recall/accuracy 的变化；同时区分纯统计安全和可解释的 actionable safe pattern，并输出 selected actionable pattern set，优先选择“身份锚点 + 佐证锚点”的零错误组合；docs/help/support/api/app/login 类子域不会计入可释放候选。 |
