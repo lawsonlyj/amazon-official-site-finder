@@ -2592,6 +2592,8 @@ class OperationalCommandTests(unittest.TestCase):
 
         self.assertEqual(report["summary"]["safe_pattern_count"], 1)
         self.assertEqual(report["summary"]["actionable_safe_pattern_count"], 1)
+        self.assertEqual(report["summary"]["selected_actionable_pattern_count"], 1)
+        self.assertEqual(report["summary"]["selected_actionable_correct_recovery_rows"], 2)
         self.assertEqual(safe["pattern"], "domain_relation:exact_provider_slug AND has:schema_org_organization_seen")
         self.assertTrue(safe["actionable"])
         self.assertEqual(safe["correct_recovery_rows"], 2)
@@ -2599,6 +2601,163 @@ class OperationalCommandTests(unittest.TestCase):
         self.assertEqual(safe["simulated_overall"]["overall_accuracy"], 1.0)
         self.assertTrue(output_json_exists)
         self.assertIn("Pattern Release Simulation", md_text)
+
+    def test_simulate_pattern_release_selects_actionable_set_from_all_patterns(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            balance_json = root / "balance.json"
+            agent_b = root / "agent_b.csv"
+            patterns = root / "patterns.json"
+            balance_json.write_text(
+                json.dumps(
+                    {
+                        "overall": {
+                            "labeled_rows": 6,
+                            "expected_official_rows": 5,
+                            "expected_no_official_rows": 1,
+                            "official_output_rows": 1,
+                            "correct_official_rows": 1,
+                            "correct_no_official_rows": 1,
+                            "false_official_rows": 0,
+                            "over_rejected_rows": 4,
+                            "auto_precision": 1.0,
+                            "official_recall": 0.2,
+                            "overall_accuracy": 0.3333,
+                        },
+                        "details": [
+                            {
+                                "provider_id": "exact-1",
+                                "provider_name": "Exact One",
+                                "expected_kind": "official",
+                                "expected_domain": "exactone.example",
+                                "outcome": "over_rejected",
+                                "manual_review_reason": "recall_unresolved_top_candidate",
+                            },
+                            {
+                                "provider_id": "exact-2",
+                                "provider_name": "Exact Two",
+                                "expected_kind": "official",
+                                "expected_domain": "exacttwo.example",
+                                "outcome": "over_rejected",
+                                "manual_review_reason": "recall_unresolved_top_candidate",
+                            },
+                            {
+                                "provider_id": "service-1",
+                                "provider_name": "Service One Consulting",
+                                "expected_kind": "official",
+                                "expected_domain": "serviceone.example",
+                                "outcome": "over_rejected",
+                                "manual_review_reason": "recall_unresolved_top_candidate",
+                            },
+                            {
+                                "provider_id": "service-2",
+                                "provider_name": "Service Two Consulting",
+                                "expected_kind": "official",
+                                "expected_domain": "servicetwo.example",
+                                "outcome": "over_rejected",
+                                "manual_review_reason": "recall_unresolved_top_candidate",
+                            },
+                        ],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            _write_test_csv(
+                agent_b,
+                [
+                    {
+                        "provider_id": "exact-1",
+                        "provider_name": "Exact One",
+                        "candidate_url": "https://exactone.example",
+                        "candidate_domain": "exactone.example",
+                        "agent_b_decision": "unsure",
+                        "evidence_score": "31",
+                        "supporting_facts": "candidate_pages_fetch_ok; schema_org_organization_seen",
+                        "counter_evidence": "",
+                        "reason_for_unsure": "recall_candidate_needs_human_confirmation",
+                        "review_reason": "recall_unresolved_top_candidate",
+                    },
+                    {
+                        "provider_id": "exact-2",
+                        "provider_name": "Exact Two",
+                        "candidate_url": "https://exacttwo.example",
+                        "candidate_domain": "exacttwo.example",
+                        "agent_b_decision": "unsure",
+                        "evidence_score": "31",
+                        "supporting_facts": "candidate_pages_fetch_ok; schema_org_organization_seen",
+                        "counter_evidence": "",
+                        "reason_for_unsure": "recall_candidate_needs_human_confirmation",
+                        "review_reason": "recall_unresolved_top_candidate",
+                    },
+                    {
+                        "provider_id": "service-1",
+                        "provider_name": "Service One Consulting",
+                        "candidate_url": "https://serviceone.example",
+                        "candidate_domain": "serviceone.example",
+                        "agent_b_decision": "unsure",
+                        "evidence_score": "31",
+                        "supporting_facts": "candidate_pages_fetch_ok; some_service_content_matches",
+                        "counter_evidence": "",
+                        "reason_for_unsure": "recall_candidate_needs_human_confirmation",
+                        "review_reason": "recall_unresolved_top_candidate",
+                    },
+                    {
+                        "provider_id": "service-2",
+                        "provider_name": "Service Two Consulting",
+                        "candidate_url": "https://servicetwo.example",
+                        "candidate_domain": "servicetwo.example",
+                        "agent_b_decision": "unsure",
+                        "evidence_score": "31",
+                        "supporting_facts": "candidate_pages_fetch_ok; some_service_content_matches",
+                        "counter_evidence": "",
+                        "reason_for_unsure": "recall_candidate_needs_human_confirmation",
+                        "review_reason": "recall_unresolved_top_candidate",
+                    },
+                ],
+            )
+            patterns.write_text(
+                json.dumps(
+                    {
+                        "summary": {"scope": "recall"},
+                        "durable_safe_patterns": [],
+                        "all_patterns": [
+                            {
+                                "pattern": "domain_relation:exact_provider_slug AND has:schema_org_organization_seen",
+                                "features": [
+                                    "domain_relation:exact_provider_slug",
+                                    "has:schema_org_organization_seen",
+                                ],
+                                "correct_recovery_rows": 2,
+                                "wrong_release_rows": 0,
+                            },
+                            {
+                                "pattern": "domain_relation:provider_slug_contains_domain AND has:some_service_content_matches",
+                                "features": [
+                                    "domain_relation:provider_slug_contains_domain",
+                                    "has:some_service_content_matches",
+                                ],
+                                "correct_recovery_rows": 2,
+                                "wrong_release_rows": 0,
+                            },
+                        ],
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            report = simulate_pattern_release(
+                balance_json=balance_json,
+                agent_b_csv=agent_b,
+                pattern_jsons=[patterns],
+                min_support=2,
+            )
+
+        self.assertEqual(report["summary"]["patterns_loaded"], 2)
+        self.assertEqual(report["summary"]["actionable_safe_pattern_count"], 2)
+        self.assertEqual(report["summary"]["selected_actionable_pattern_count"], 2)
+        self.assertEqual(report["summary"]["selected_actionable_correct_recovery_rows"], 4)
+        self.assertEqual(report["summary"]["selected_actionable_wrong_release_rows"], 0)
+        self.assertEqual(report["summary"]["selected_actionable_accuracy"], 1.0)
 
     def test_apply_pattern_release_experiment_outputs_candidate_final(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -2685,7 +2844,7 @@ class OperationalCommandTests(unittest.TestCase):
                 json.dumps(
                     {
                         "summary": {"scope": "recall"},
-                        "actionable_safe_patterns": [
+                        "selected_actionable_pattern_set": [
                             {
                                 "pattern": "agent_b_score<60 AND domain_relation:exact_provider_slug AND has:schema_org_organization_seen",
                                 "features": [
@@ -2693,7 +2852,18 @@ class OperationalCommandTests(unittest.TestCase):
                                     "domain_relation:exact_provider_slug",
                                     "has:schema_org_organization_seen",
                                 ],
-                                "correct_recovery_rows": 2,
+                                "correct_recovery_rows": 1,
+                                "wrong_release_rows": 0,
+                            }
+                        ],
+                        "actionable_safe_patterns": [
+                            {
+                                "pattern": "domain_relation:no_such_pattern AND has:schema_org_organization_seen",
+                                "features": [
+                                    "domain_relation:no_such_pattern",
+                                    "has:schema_org_organization_seen",
+                                ],
+                                "correct_recovery_rows": 99,
                                 "wrong_release_rows": 0,
                             }
                         ],

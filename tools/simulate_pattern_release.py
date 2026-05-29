@@ -83,6 +83,13 @@ def simulate_pattern_release(
         if row["correct_recovery_rows"] >= min_support and row["wrong_release_rows"] <= max_wrong
     ]
     actionable_safe = [row for row in safe if row["actionable"]]
+    selected_actionable = _select_actionable_pattern_set(
+        actionable_safe,
+        recall_rows=recall_rows,
+        baseline=baseline,
+        max_wrong=max_wrong,
+    )
+    selected_summary = selected_actionable["summary"]
     report = {
         "summary": {
             "scope": scope,
@@ -107,10 +114,19 @@ def simulate_pattern_release(
             "best_actionable_safe_correct_recovery_rows": actionable_safe[0]["correct_recovery_rows"] if actionable_safe else 0,
             "best_actionable_safe_wrong_release_rows": actionable_safe[0]["wrong_release_rows"] if actionable_safe else 0,
             "best_actionable_safe_accuracy": actionable_safe[0]["simulated_overall"]["overall_accuracy"] if actionable_safe else None,
+            "selected_actionable_pattern_count": selected_summary["pattern_count"],
+            "selected_actionable_release_rows": selected_summary["release_rows"],
+            "selected_actionable_correct_recovery_rows": selected_summary["correct_recovery_rows"],
+            "selected_actionable_wrong_release_rows": selected_summary["wrong_release_rows"],
+            "selected_actionable_accuracy": selected_summary["simulated_overall"].get("overall_accuracy"),
+            "selected_actionable_auto_precision": selected_summary["simulated_overall"].get("auto_precision"),
+            "selected_actionable_official_recall": selected_summary["simulated_overall"].get("official_recall"),
         },
         "baseline": baseline,
         "safe_patterns": safe[:top],
         "actionable_safe_patterns": actionable_safe[:top],
+        "selected_actionable_pattern_set": selected_actionable["patterns"],
+        "selected_actionable_release_summary": selected_summary,
         "all_simulations": simulations[: max(top, 100)],
         "inputs": {
             "balance_json": str(balance_json),
@@ -200,7 +216,14 @@ def _load_patterns(pattern_jsons: list[str | Path]) -> list[dict]:
 
 def _pattern_items(data: dict) -> list[dict]:
     items: list[dict] = []
-    for key in ("durable_safe_patterns", "candidate_for_rule", "needs_more_labels", "reject_pattern"):
+    for key in (
+        "durable_safe_patterns",
+        "actionable_safe_patterns",
+        "all_patterns",
+        "candidate_for_rule",
+        "needs_more_labels",
+        "reject_pattern",
+    ):
         value = data.get(key)
         if isinstance(value, list):
             items.extend(item for item in value if isinstance(item, dict))
@@ -244,9 +267,61 @@ def _simulate_pattern(pattern: dict, rows: list[dict], baseline: dict) -> dict:
         "auto_precision_delta": _delta(simulated.get("auto_precision"), baseline.get("auto_precision")),
         "released_correct_provider_ids": [row.get("provider_id", "") for row in correct],
         "released_wrong_provider_ids": [row.get("provider_id", "") for row in wrong],
+        "released_correct_row_keys": [_row_key(row) for row in correct],
+        "released_wrong_row_keys": [_row_key(row) for row in wrong],
         "simulated_overall": simulated,
         "actionable": _is_actionable_pattern(features),
         "actionability_reason": _actionability_reason(features),
+    }
+
+
+def _select_actionable_pattern_set(
+    patterns: list[dict],
+    *,
+    recall_rows: list[dict],
+    baseline: dict,
+    max_wrong: int,
+) -> dict:
+    row_by_key = {_row_key(row): row for row in recall_rows if _row_key(row)}
+    selected: list[dict] = []
+    correct_keys: set[str] = set()
+    wrong_keys: set[str] = set()
+    candidates = sorted(
+        patterns,
+        key=lambda row: (
+            row["wrong_release_rows"],
+            -row["correct_recovery_rows"],
+            len(row["features"]),
+            row["pattern"],
+        ),
+    )
+    for pattern in candidates:
+        pattern_correct = {key for key in pattern.get("released_correct_row_keys", []) if key}
+        pattern_wrong = {key for key in pattern.get("released_wrong_row_keys", []) if key}
+        new_correct = pattern_correct - correct_keys
+        candidate_wrong = wrong_keys | pattern_wrong
+        if not new_correct:
+            continue
+        if len(candidate_wrong) > max_wrong:
+            continue
+        selected.append(pattern)
+        correct_keys |= pattern_correct
+        wrong_keys = candidate_wrong
+
+    correct_rows = [row for key, row in row_by_key.items() if key in correct_keys]
+    wrong_rows = [row for key, row in row_by_key.items() if key in wrong_keys]
+    simulated = _apply_release_to_overall(baseline, correct_rows, wrong_rows)
+    return {
+        "patterns": selected,
+        "summary": {
+            "pattern_count": len(selected),
+            "release_rows": len(correct_rows) + len(wrong_rows),
+            "correct_recovery_rows": len(correct_rows),
+            "wrong_release_rows": len(wrong_rows),
+            "released_correct_provider_ids": [row.get("provider_id", "") for row in correct_rows],
+            "released_wrong_provider_ids": [row.get("provider_id", "") for row in wrong_rows],
+            "simulated_overall": simulated,
+        },
     }
 
 
@@ -312,6 +387,9 @@ def _render_markdown(report: dict) -> str:
         f"- Best actionable safe pattern: {summary['best_actionable_safe_pattern'] or 'None'}",
         f"- Best actionable safe correct/wrong release: {summary['best_actionable_safe_correct_recovery_rows']}/{summary['best_actionable_safe_wrong_release_rows']}",
         f"- Best actionable safe accuracy: {summary['best_actionable_safe_accuracy']}",
+        f"- Selected actionable pattern count: {summary['selected_actionable_pattern_count']}",
+        f"- Selected actionable correct/wrong release: {summary['selected_actionable_correct_recovery_rows']}/{summary['selected_actionable_wrong_release_rows']}",
+        f"- Selected actionable accuracy: {summary['selected_actionable_accuracy']}",
         "",
         "## Safe Patterns",
         "",
@@ -345,6 +423,19 @@ def _render_markdown(report: dict) -> str:
         )
     if not report.get("actionable_safe_patterns"):
         lines.append("- None")
+    lines.extend(["", "## Selected Actionable Pattern Set", ""])
+    selected_summary = report.get("selected_actionable_release_summary", {})
+    lines.append(
+        "- correct={correct}, wrong={wrong}, accuracy={accuracy}, precision={precision}, recall={recall}".format(
+            correct=selected_summary.get("correct_recovery_rows", 0),
+            wrong=selected_summary.get("wrong_release_rows", 0),
+            accuracy=(selected_summary.get("simulated_overall") or {}).get("overall_accuracy"),
+            precision=(selected_summary.get("simulated_overall") or {}).get("auto_precision"),
+            recall=(selected_summary.get("simulated_overall") or {}).get("official_recall"),
+        )
+    )
+    for row in report.get("selected_actionable_pattern_set", [])[:20]:
+        lines.append(f"- {row['pattern']}")
     lines.extend(["", "## Top Simulations", ""])
     for row in report.get("all_simulations", [])[:20]:
         sim = row["simulated_overall"]

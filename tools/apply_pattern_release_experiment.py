@@ -115,7 +115,8 @@ def _load_release_patterns(
     seen: set[tuple[str, ...]] = set()
     for path_like in paths:
         data = json.loads(Path(path_like).read_text(encoding="utf-8"))
-        items = list(data.get("actionable_safe_patterns") or [])
+        selected = data.get("selected_actionable_pattern_set")
+        items = list(selected if isinstance(selected, list) else data.get("actionable_safe_patterns") or [])
         if include_non_actionable:
             items.extend(data.get("safe_patterns") or [])
         candidates = data.get("candidate_for_rule")
