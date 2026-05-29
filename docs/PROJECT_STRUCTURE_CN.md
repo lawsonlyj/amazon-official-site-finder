@@ -199,6 +199,7 @@ Codex receives filled manual review workbook
 | `tools/build_linked_workbook.py` | 生成链接可点击的 XLSX。 |
 | `tools/verify_run_outputs.py` | 检查最终 CSV、unresolved CSV、质量 JSON、XLSX 链接公式是否正常。 |
 | `tools/evaluate_workflow_balance.py` | 调参评估工具。用基线结果、候选结果和人工标黄复核表计算 false official、over-reject、precision、recall、manual review rows，以及人工复核队列和 AgentB 对错误官网、正确官网、过度 unresolved 的处理质量。 |
+| `tools/build_balance_report.py` | 汇总 100 条有标签评估和 300/全量无标签 AgentB 分布，生成可重复的阈值和 review lane 建议报告。 |
 | `tools/apply_review.py` | 人工复核后，把人工 decision 应用回已有 run。 |
 | `tests/` | 自动化测试，确保精简或改代码后 workflow 没坏。 |
 | `docs/guides/` | 给工作人员看的 PDF 教程。 |

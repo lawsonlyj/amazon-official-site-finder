@@ -170,7 +170,7 @@ When the user provides a filled review file, Codex should run this from the repo
 This calls `tools/run_review_learning.py`, which merges the filled manual decisions with existing second-pass decisions, writes reviewed final outputs, creates `reviewed/labels.csv`, reruns the quality gate, writes `reviewed/learning.md`, and applies only safe repeated excluded-domain config additions.
 It also writes AgentB suggestions and, with `--update-config`, applies only safe AgentB excluded-domain recommendations plus human/identity/no-official/reachability regression artifacts.
 
-For calibration work, run `tools/evaluate_workflow_balance.py` against the baseline final CSV, candidate final CSV, and filled yellow-row review workbook to compare false official URLs, over-rejected correct sites, precision, recall, unresolved rows, and manual-review workload before deciding whether a threshold/rule change is better.
+For calibration work, run `tools/evaluate_workflow_balance.py` against the baseline final CSV, candidate final CSV, and filled yellow-row review workbook to compare false official URLs, over-rejected correct sites, precision, recall, unresolved rows, and manual-review workload before deciding whether a threshold/rule change is better. Then run `tools/build_balance_report.py` with the labeled balance JSON plus larger unlabeled review/AgentB batches to create a repeatable recommendation report.
 
 Expected reviewed outputs:
 

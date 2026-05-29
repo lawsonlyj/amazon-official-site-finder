@@ -100,7 +100,7 @@ After manual review, the user gives the filled workbook to Codex. Codex calls `r
 
 The review cycle also runs `tools/run_agent_b_recommendations.py`. B reads AgentB verification, filled human-review notes, and manual-review learning reports, then writes suggestion files. When `--update-config` is enabled, `tools/apply_agent_optimizations.py` applies only safe, explainable excluded-domain additions and writes human/identity/no-official/reachability regression fixtures. Query, threshold, and new identity-constraint logic changes should still be implemented deliberately with tests.
 
-For threshold/rule tuning, use `tools/evaluate_workflow_balance.py` with a baseline final CSV, a candidate final CSV, and the filled yellow-row review workbook. It reports false official URLs, over-rejected correct sites, automatic precision, official-site recall, unresolved rows, and manual-review workload under the same assumptions used for the 100-row calibration set.
+For threshold/rule tuning, use `tools/evaluate_workflow_balance.py` with a baseline final CSV, a candidate final CSV, and the filled yellow-row review workbook. It reports false official URLs, over-rejected correct sites, automatic precision, official-site recall, unresolved rows, and manual-review workload under the same assumptions used for the 100-row calibration set. Then use `tools/build_balance_report.py` to combine the labeled balance JSON with larger unlabeled review/AgentB batches and write a repeatable threshold/review-lane recommendation report.
 
 ## Main Outputs
 

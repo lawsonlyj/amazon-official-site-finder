@@ -41,6 +41,7 @@ from tools.run_agent_b_verification import run_agent_b_verification
 from tools.run_agent_c_recommendations import run_agent_c_recommendations
 from tools.apply_agent_optimizations import apply_agent_optimizations
 from tools.evaluate_workflow_balance import evaluate_balance
+from tools.build_balance_report import build_balance_report
 from tools.output_layout import DEFAULT_SECOND_PASS_ACCEPT_THRESHOLD, WORKFLOW_VERSION
 
 
@@ -2264,6 +2265,68 @@ class OperationalCommandTests(unittest.TestCase):
         detail_by_id = {row["provider_id"]: row for row in summary["details"]}
         self.assertEqual(detail_by_id["p-4"]["manual_review_reason"], "identity_weak_or_conflicting")
         self.assertEqual(detail_by_id["p-3"]["agent_b_suggested_domain"], "three.example")
+
+    def test_build_balance_report_recommends_current_threshold_and_summarizes_batch(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            labeled = root / "balance.json"
+            review = root / "review.csv"
+            agent_b = root / "agent_b.csv"
+            out_json = root / "report.json"
+            out_md = root / "report.md"
+            labeled.write_text(
+                json.dumps(
+                    {
+                        "overall": {
+                            "labeled_rows": 4,
+                            "auto_precision": 0.9,
+                            "official_recall": 0.86,
+                            "false_official_rows": 1,
+                            "over_rejected_rows": 1,
+                            "manual_review_rows": 2,
+                            "manual_review_false_official_capture_rate": 1.0,
+                            "agent_b_false_official_accept_rate": 0.0,
+                        },
+                        "threshold_simulations": [
+                            {"threshold": 75, "overall_accuracy": 0.81, "official_recall": 0.86, "false_official_rows": 8},
+                            {"threshold": 82, "overall_accuracy": 0.81, "official_recall": 0.83, "false_official_rows": 6},
+                        ],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            _write_test_csv(
+                review,
+                [
+                    {"provider_id": "p-1", "review_reason": "precision_low_confidence_auto_match"},
+                    {"provider_id": "p-2", "review_reason": "recall_unresolved_top_candidate"},
+                ],
+            )
+            _write_test_csv(
+                agent_b,
+                [
+                    {"provider_id": "p-1", "review_reason": "precision_low_confidence_auto_match", "agent_b_decision": "accept", "reason_for_unsure": ""},
+                    {"provider_id": "p-2", "review_reason": "recall_unresolved_top_candidate", "agent_b_decision": "unsure", "reason_for_unsure": "agent_b_row_timeout"},
+                ],
+            )
+
+            report = build_balance_report(
+                labeled_eval_json=labeled,
+                batch_review_csv=review,
+                batch_agent_b_csv=agent_b,
+                batch_total_rows=4,
+                output_json=out_json,
+                output_md=out_md,
+            )
+            md_text = out_md.read_text(encoding="utf-8")
+            json_exists = out_json.exists()
+
+        self.assertEqual(report["summary"]["recommended_threshold"], 75)
+        self.assertEqual(report["summary"]["batch_review_rows"], 2)
+        self.assertEqual(report["summary"]["batch_review_rate"], 0.5)
+        self.assertEqual(report["summary"]["batch_agent_b_timeout_rows"], 1)
+        self.assertIn("Keep auto-accept threshold at 75", md_text)
+        self.assertTrue(json_exists)
 
     def test_scoring_tries_www_variant_before_giving_up_on_candidate(self):
         config = load_config("config/scoring.json")
