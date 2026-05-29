@@ -25,6 +25,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--max-per-pattern", type=int, default=5)
     parser.add_argument("--min-support", type=int, default=2)
     parser.add_argument("--max-pattern-size", type=int, default=3)
+    parser.add_argument("--filled-sample", help="Optional filled calibration sample CSV/XLSX to evaluate in the same cycle.")
     args = parser.parse_args(argv)
 
     report = run_calibration_cycle(
@@ -39,6 +40,7 @@ def main(argv: list[str] | None = None) -> int:
         max_per_pattern=args.max_per_pattern,
         min_support=args.min_support,
         max_pattern_size=args.max_pattern_size,
+        filled_sample=args.filled_sample,
     )
     print(json.dumps(report["summary"], ensure_ascii=False, indent=2))
     return 0
@@ -57,6 +59,7 @@ def run_calibration_cycle(
     max_per_pattern: int = 5,
     min_support: int = 2,
     max_pattern_size: int = 3,
+    filled_sample: str | Path | None = None,
 ) -> dict:
     out_dir = Path(output_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -70,6 +73,9 @@ def run_calibration_cycle(
     eval_json = out_dir / f"{sample_prefix}_eval_empty.json"
     eval_md = out_dir / f"{sample_prefix}_eval_empty.md"
     eval_csv = out_dir / f"{sample_prefix}_eval_empty_details.csv"
+    filled_eval_json = out_dir / f"{sample_prefix}_eval_filled.json"
+    filled_eval_md = out_dir / f"{sample_prefix}_eval_filled.md"
+    filled_eval_csv = out_dir / f"{sample_prefix}_eval_filled_details.csv"
     summary_json = out_dir / "calibration_cycle_summary.json"
     summary_md = out_dir / "calibration_cycle_summary.md"
 
@@ -107,6 +113,15 @@ def run_calibration_cycle(
         output_md=eval_md,
         output_csv=eval_csv,
     )
+    filled_eval = {}
+    if filled_sample:
+        filled_eval = evaluate_calibration_review_sample(
+            sample=filled_sample,
+            output_json=filled_eval_json,
+            output_md=filled_eval_md,
+            output_csv=filled_eval_csv,
+        )
+    pattern_recommendation_counts = _pattern_recommendation_counts(filled_eval)
     report = {
         "summary": {
             "recall_durable_safe_patterns": recall_report["summary"].get("durable_safe_patterns"),
@@ -118,12 +133,16 @@ def run_calibration_cycle(
             "pattern_count": len(sample_summary.get("pattern_match_counts", {})),
             "max_per_pattern": sample_summary.get("max_per_pattern"),
             "empty_eval_labeled_rows": empty_eval["summary"].get("labeled_rows"),
+            "filled_eval_labeled_rows": filled_eval.get("summary", {}).get("labeled_rows") if filled_eval else None,
+            "filled_eval_decisive_rows": filled_eval.get("summary", {}).get("decisive_rows") if filled_eval else None,
+            "filled_pattern_recommendation_counts": pattern_recommendation_counts,
         },
         "inputs": {
             "labeled_eval_json": str(labeled_eval_json),
             "labeled_agent_b_csv": str(labeled_agent_b_csv),
             "review_csv": str(review_csv),
             "batch_agent_b_csv": str(batch_agent_b_csv),
+            "filled_sample": str(filled_sample or ""),
         },
         "outputs": {
             "recall_json": str(recall_json),
@@ -135,6 +154,9 @@ def run_calibration_cycle(
             "eval_json": str(eval_json),
             "eval_md": str(eval_md),
             "eval_csv": str(eval_csv),
+            "filled_eval_json": str(filled_eval_json) if filled_sample else "",
+            "filled_eval_md": str(filled_eval_md) if filled_sample else "",
+            "filled_eval_csv": str(filled_eval_csv) if filled_sample else "",
             "summary_json": str(summary_json),
             "summary_md": str(summary_md),
         },
@@ -142,6 +164,8 @@ def run_calibration_cycle(
         "precision_recommendations": precision_report.get("recommendations", []),
         "sample": sample_summary,
         "empty_evaluation_summary": empty_eval.get("summary", {}),
+        "filled_evaluation_summary": filled_eval.get("summary", {}) if filled_eval else {},
+        "filled_pattern_recommendations": filled_eval.get("pattern_recommendations", []) if filled_eval else [],
     }
     summary_json.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
     summary_md.write_text(_render_markdown(report), encoding="utf-8")
@@ -164,6 +188,8 @@ def _render_markdown(report: dict) -> str:
         f"- Pattern count: {summary['pattern_count']}",
         f"- Max per pattern: {summary['max_per_pattern']}",
         f"- Empty evaluation labeled rows: {summary['empty_eval_labeled_rows']}",
+        f"- Filled evaluation labeled rows: {summary['filled_eval_labeled_rows']}",
+        f"- Filled evaluation decisive rows: {summary['filled_eval_decisive_rows']}",
         "",
         "## Outputs",
         "",
@@ -176,8 +202,34 @@ def _render_markdown(report: dict) -> str:
     lines.extend(["", "## Precision Recommendations", ""])
     for item in report.get("precision_recommendations", []):
         lines.append(f"- {item}")
+    if report.get("filled_pattern_recommendations"):
+        lines.extend(["", "## Filled Pattern Recommendations", ""])
+        counts = summary.get("filled_pattern_recommendation_counts", {})
+        for key, value in sorted(counts.items()):
+            lines.append(f"- {key}: {value}")
+        lines.append("")
+        for item in report["filled_pattern_recommendations"][:20]:
+            lines.append(
+                "- {recommendation}: rows={rows}, decisive={decisive}, support={support}, block={block} :: {pattern}".format(
+                    recommendation=item.get("recommendation"),
+                    rows=item.get("rows"),
+                    decisive=item.get("decisive_rows"),
+                    support=item.get("supporting_rows"),
+                    block=item.get("blocking_rows"),
+                    pattern=item.get("pattern"),
+                )
+            )
     lines.append("")
     return "\n".join(lines)
+
+
+def _pattern_recommendation_counts(filled_eval: dict) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for item in filled_eval.get("pattern_recommendations", []) if filled_eval else []:
+        recommendation = str(item.get("recommendation") or "")
+        if recommendation:
+            counts[recommendation] = counts.get(recommendation, 0) + 1
+    return counts
 
 
 if __name__ == "__main__":
