@@ -76,6 +76,8 @@ def run_calibration_cycle(
     filled_eval_json = out_dir / f"{sample_prefix}_eval_filled.json"
     filled_eval_md = out_dir / f"{sample_prefix}_eval_filled.md"
     filled_eval_csv = out_dir / f"{sample_prefix}_eval_filled_details.csv"
+    rule_candidates_json = out_dir / "pattern_rule_candidates.json"
+    rule_candidates_md = out_dir / "pattern_rule_candidates.md"
     summary_json = out_dir / "calibration_cycle_summary.json"
     summary_md = out_dir / "calibration_cycle_summary.md"
 
@@ -121,6 +123,11 @@ def run_calibration_cycle(
             output_md=filled_eval_md,
             output_csv=filled_eval_csv,
         )
+        _write_rule_candidates(
+            filled_eval.get("pattern_rule_candidates", {}),
+            rule_candidates_json,
+            rule_candidates_md,
+        )
     pattern_recommendation_counts = _pattern_recommendation_counts(filled_eval)
     report = {
         "summary": {
@@ -136,6 +143,16 @@ def run_calibration_cycle(
             "filled_eval_labeled_rows": filled_eval.get("summary", {}).get("labeled_rows") if filled_eval else None,
             "filled_eval_decisive_rows": filled_eval.get("summary", {}).get("decisive_rows") if filled_eval else None,
             "filled_pattern_recommendation_counts": pattern_recommendation_counts,
+            "filled_rule_candidate_count": len(
+                filled_eval.get("pattern_rule_candidates", {}).get("candidate_for_rule", [])
+            )
+            if filled_eval
+            else None,
+            "filled_rejected_pattern_count": len(
+                filled_eval.get("pattern_rule_candidates", {}).get("reject_pattern", [])
+            )
+            if filled_eval
+            else None,
         },
         "inputs": {
             "labeled_eval_json": str(labeled_eval_json),
@@ -157,6 +174,8 @@ def run_calibration_cycle(
             "filled_eval_json": str(filled_eval_json) if filled_sample else "",
             "filled_eval_md": str(filled_eval_md) if filled_sample else "",
             "filled_eval_csv": str(filled_eval_csv) if filled_sample else "",
+            "rule_candidates_json": str(rule_candidates_json) if filled_sample else "",
+            "rule_candidates_md": str(rule_candidates_md) if filled_sample else "",
             "summary_json": str(summary_json),
             "summary_md": str(summary_md),
         },
@@ -166,6 +185,7 @@ def run_calibration_cycle(
         "empty_evaluation_summary": empty_eval.get("summary", {}),
         "filled_evaluation_summary": filled_eval.get("summary", {}) if filled_eval else {},
         "filled_pattern_recommendations": filled_eval.get("pattern_recommendations", []) if filled_eval else [],
+        "filled_pattern_rule_candidates": filled_eval.get("pattern_rule_candidates", {}) if filled_eval else {},
     }
     summary_json.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
     summary_md.write_text(_render_markdown(report), encoding="utf-8")
@@ -190,6 +210,8 @@ def _render_markdown(report: dict) -> str:
         f"- Empty evaluation labeled rows: {summary['empty_eval_labeled_rows']}",
         f"- Filled evaluation labeled rows: {summary['filled_eval_labeled_rows']}",
         f"- Filled evaluation decisive rows: {summary['filled_eval_decisive_rows']}",
+        f"- Filled candidate-for-rule patterns: {summary['filled_rule_candidate_count']}",
+        f"- Filled rejected patterns: {summary['filled_rejected_pattern_count']}",
         "",
         "## Outputs",
         "",
@@ -219,7 +241,69 @@ def _render_markdown(report: dict) -> str:
                     pattern=item.get("pattern"),
                 )
             )
+    rule_candidates = report.get("filled_pattern_rule_candidates", {})
+    if rule_candidates:
+        lines.extend(["", "## Filled Candidate Rule Export", ""])
+        for key, title in [
+            ("candidate_for_rule", "Candidate For Rule"),
+            ("needs_more_labels", "Needs More Labels"),
+            ("reject_pattern", "Rejected Pattern"),
+        ]:
+            items = rule_candidates.get(key) or []
+            lines.append(f"### {title}")
+            if not items:
+                lines.append("- None")
+                continue
+            for item in items[:10]:
+                lines.append(
+                    "- scope={scope}, support={support}, block={block}: {pattern} -- {action}".format(
+                        scope=item.get("pattern_scope", ""),
+                        support=item.get("supporting_rows"),
+                        block=item.get("blocking_rows"),
+                        pattern=item.get("pattern"),
+                        action=item.get("required_action", ""),
+                    )
+                )
     lines.append("")
+    return "\n".join(lines)
+
+
+def _write_rule_candidates(rule_candidates: dict, output_json: Path, output_md: Path) -> None:
+    output_json.write_text(json.dumps(rule_candidates, ensure_ascii=False, indent=2), encoding="utf-8")
+    output_md.write_text(_render_rule_candidates_markdown(rule_candidates), encoding="utf-8")
+
+
+def _render_rule_candidates_markdown(rule_candidates: dict) -> str:
+    lines = [
+        "# Pattern Rule Candidates",
+        "",
+        "These are advisory outputs from filled calibration labels. Production workflow rules should only change after matching regression tests are added.",
+        "",
+    ]
+    for key, title in [
+        ("candidate_for_rule", "Candidate For Rule"),
+        ("needs_more_labels", "Needs More Labels"),
+        ("reject_pattern", "Rejected Pattern"),
+    ]:
+        lines.extend([f"## {title}", ""])
+        items = rule_candidates.get(key) or []
+        if not items:
+            lines.append("- None")
+            lines.append("")
+            continue
+        for item in items:
+            lines.append(
+                "- scope={scope}, rows={rows}, decisive={decisive}, support={support}, block={block}: {pattern}".format(
+                    scope=item.get("pattern_scope", ""),
+                    rows=item.get("rows"),
+                    decisive=item.get("decisive_rows"),
+                    support=item.get("supporting_rows"),
+                    block=item.get("blocking_rows"),
+                    pattern=item.get("pattern"),
+                )
+            )
+            lines.append(f"  Action: {item.get('required_action', '')}")
+        lines.append("")
     return "\n".join(lines)
 
 

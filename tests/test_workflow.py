@@ -3128,12 +3128,19 @@ class OperationalCommandTests(unittest.TestCase):
                 filled_sample=filled_sample,
             )
             filled_eval_exists = (output_dir / "pattern_validation_sample_50_eval_filled.json").exists()
+            rule_candidates_json_exists = (output_dir / "pattern_rule_candidates.json").exists()
+            rule_candidates_md = output_dir / "pattern_rule_candidates.md"
+            rule_candidates_md_text = rule_candidates_md.read_text(encoding="utf-8")
             summary_text = (output_dir / "calibration_cycle_summary.md").read_text(encoding="utf-8")
 
         self.assertTrue(filled_eval_exists)
+        self.assertTrue(rule_candidates_json_exists)
         self.assertEqual(report["summary"]["filled_eval_labeled_rows"], 2)
         self.assertEqual(report["summary"]["filled_pattern_recommendation_counts"]["reject_pattern"], 1)
+        self.assertEqual(report["summary"]["filled_rejected_pattern_count"], 1)
+        self.assertIn("Rejected Pattern", rule_candidates_md_text)
         self.assertIn("Filled Pattern Recommendations", summary_text)
+        self.assertIn("Filled Candidate Rule Export", summary_text)
 
     def test_evaluate_calibration_review_sample_turns_labels_into_rule_guidance(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -3228,8 +3235,11 @@ class OperationalCommandTests(unittest.TestCase):
         self.assertEqual(report["by_sample_reason"]["agent_b_accept_risky_lane"]["outcome_counts"]["candidate_incorrect"], 1)
         self.assertEqual(report["pattern_recommendations"][0]["pattern"], "has:schema_org_organization_seen")
         self.assertEqual(report["pattern_recommendations"][0]["recommendation"], "needs_more_labels")
+        self.assertEqual(report["pattern_rule_candidates"]["needs_more_labels"][0]["pattern"], "has:schema_org_organization_seen")
+        self.assertIn("Keep this pattern in calibration samples", report["pattern_rule_candidates"]["needs_more_labels"][0]["required_action"])
         self.assertIn("Keep AgentB risky accepts in manual review", md_text)
         self.assertIn("Pattern Validation", md_text)
+        self.assertIn("Candidate Rule Export", md_text)
         self.assertTrue(out_json_exists)
         self.assertEqual(detail_rows[1]["normalized_manual_url"], "https://real-recall.example")
 
@@ -3277,6 +3287,41 @@ class OperationalCommandTests(unittest.TestCase):
 
         self.assertEqual(report["pattern_recommendations"][0]["recommendation"], "reject_pattern")
         self.assertEqual(report["pattern_recommendations"][0]["blocking_rows"], 1)
+        self.assertEqual(report["pattern_rule_candidates"]["reject_pattern"][0]["pattern"], "has:page_contains_exact_provider_name")
+        self.assertIn("Do not release", report["pattern_rule_candidates"]["reject_pattern"][0]["required_action"])
+
+    def test_evaluate_calibration_review_sample_exports_candidate_rule_patterns(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            sample = root / "pattern_sample.csv"
+            rows = []
+            for idx in range(5):
+                rows.append(
+                    {
+                        "provider_id": f"p-{idx}",
+                        "provider_name": f"Good {idx}",
+                        "sample_reason": "pattern_candidate_validation",
+                        "pattern_scope": "recall",
+                        "pattern_match": "domain_relation:exact_provider_slug AND has:schema_org_organization_seen",
+                        "review_reason": "recall_unresolved_top_candidate",
+                        "agent_b_decision": "unsure",
+                        "reason_for_unsure": "",
+                        "official_url": "",
+                        "candidate_url": f"https://good{idx}.example",
+                        "manual_decision": "accept",
+                        "manual_url": "",
+                        "notes": "",
+                    }
+                )
+            _write_test_csv(sample, rows)
+
+            report = evaluate_calibration_review_sample(sample=sample)
+
+        candidates = report["pattern_rule_candidates"]["candidate_for_rule"]
+        self.assertEqual(len(candidates), 1)
+        self.assertEqual(candidates[0]["supporting_rows"], 5)
+        self.assertEqual(candidates[0]["blocking_rows"], 0)
+        self.assertIn("narrow recall recovery rule", candidates[0]["required_action"])
 
     def test_scoring_tries_www_variant_before_giving_up_on_candidate(self):
         config = load_config("config/scoring.json")

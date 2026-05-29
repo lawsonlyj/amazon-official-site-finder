@@ -72,13 +72,19 @@ def evaluate_calibration_review_sample(
         "recall_not_useful_rows": sum(1 for row in details if row["calibration_outcome"] == "recall_candidate_not_useful"),
         "unsure_rows": sum(1 for row in details if row["calibration_outcome"] == "manual_unsure"),
     }
+    pattern_recommendations = _pattern_recommendations(details)
+    pattern_rule_candidates = _pattern_rule_candidates(pattern_recommendations)
+    summary["pattern_rule_candidate_rows"] = len(pattern_rule_candidates["candidate_for_rule"])
+    summary["pattern_rejected_rows"] = len(pattern_rule_candidates["reject_pattern"])
+    summary["pattern_needs_more_label_rows"] = len(pattern_rule_candidates["needs_more_labels"])
     report = {
         "summary": summary,
         "by_sample_reason": _group_stats(details, "sample_reason"),
         "by_review_reason": _group_stats(details, "review_reason"),
         "by_agent_b_decision": _group_stats(details, "agent_b_decision"),
         "by_pattern_match": _group_stats(details, "pattern_match"),
-        "pattern_recommendations": _pattern_recommendations(details),
+        "pattern_recommendations": pattern_recommendations,
+        "pattern_rule_candidates": pattern_rule_candidates,
         "recommendations": _recommendations(details),
         "details": details,
         "inputs": {"sample": str(sample)},
@@ -305,6 +311,38 @@ def _pattern_recommendations(details: list[dict[str, str]]) -> list[dict]:
     return out
 
 
+def _pattern_rule_candidates(pattern_recommendations: list[dict]) -> dict[str, list[dict]]:
+    buckets = {
+        "candidate_for_rule": [],
+        "needs_more_labels": [],
+        "reject_pattern": [],
+    }
+    for item in pattern_recommendations:
+        recommendation = item.get("recommendation", "")
+        if recommendation not in buckets:
+            continue
+        enriched = dict(item)
+        enriched["required_action"] = _required_action_for_pattern(item)
+        buckets[recommendation].append(enriched)
+    return buckets
+
+
+def _required_action_for_pattern(item: dict) -> str:
+    recommendation = item.get("recommendation", "")
+    scope = item.get("pattern_scope", "")
+    if recommendation == "candidate_for_rule":
+        if scope == "recall":
+            return "Add regression tests, then consider a narrow recall recovery rule for this exact evidence pattern."
+        if scope == "precision":
+            return "Add regression tests, then consider narrowing manual-review routing for this exact precision pattern."
+        return "Add regression tests before any production rule change."
+    if recommendation == "needs_more_labels":
+        return "Keep this pattern in calibration samples until it reaches five decisive supporting labels with zero blockers."
+    if recommendation == "reject_pattern":
+        return "Do not release this pattern automatically; keep matching rows in manual review or add a blocking regression fixture."
+    return "No action."
+
+
 def _decision(row: dict[str, str]) -> str:
     raw = _first(row, "manual_decision", "your_decision", "decision").casefold()
     aliases = {
@@ -419,6 +457,29 @@ def _render_markdown(report: dict) -> str:
                     pattern=row["pattern"],
                 )
             )
+    rule_candidates = report.get("pattern_rule_candidates", {})
+    if rule_candidates:
+        lines.extend(["", "## Candidate Rule Export", ""])
+        for key, title in [
+            ("candidate_for_rule", "Candidate For Rule"),
+            ("needs_more_labels", "Needs More Labels"),
+            ("reject_pattern", "Rejected Pattern"),
+        ]:
+            items = rule_candidates.get(key) or []
+            lines.append(f"### {title}")
+            if not items:
+                lines.append("- None")
+                continue
+            for row in items[:10]:
+                lines.append(
+                    "- scope={scope}, support={support}, block={block}: {pattern} -- {action}".format(
+                        scope=row.get("pattern_scope", ""),
+                        support=row.get("supporting_rows"),
+                        block=row.get("blocking_rows"),
+                        pattern=row.get("pattern"),
+                        action=row.get("required_action", ""),
+                    )
+                )
     lines.append("")
     return "\n".join(lines)
 
