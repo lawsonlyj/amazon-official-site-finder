@@ -42,13 +42,18 @@ def build_balance_report(
     labeled = json.loads(Path(labeled_eval_json).read_text(encoding="utf-8"))
     overall = labeled.get("overall", {})
     threshold_recommendation = _threshold_recommendation(labeled.get("threshold_simulations", []))
+    recall_release = _recall_release_recommendation(labeled.get("agent_b_recall_release_simulations", []))
     batch_review = _review_summary(Path(batch_review_csv), batch_total_rows) if batch_review_csv else {}
     batch_agent_b = _agent_b_summary(Path(batch_agent_b_csv)) if batch_agent_b_csv else {}
-    recommendations = _recommendations(overall, threshold_recommendation, batch_review, batch_agent_b)
+    recommendations = _recommendations(overall, threshold_recommendation, recall_release, batch_review, batch_agent_b)
     report = {
         "summary": {
             "recommended_threshold": threshold_recommendation.get("recommended_threshold"),
             "recommended_threshold_reason": threshold_recommendation.get("reason", ""),
+            "recommended_agent_b_recall_release": recall_release.get("recommendation"),
+            "recommended_agent_b_recall_release_threshold": recall_release.get("threshold"),
+            "agent_b_recall_release_correct_rows": recall_release.get("correct_recovery_rows"),
+            "agent_b_recall_release_wrong_rows": recall_release.get("wrong_release_rows"),
             "labeled_rows": overall.get("labeled_rows"),
             "auto_precision": overall.get("auto_precision"),
             "official_recall": overall.get("official_recall"),
@@ -67,6 +72,8 @@ def build_balance_report(
             "recommendation": threshold_recommendation,
             "simulations": labeled.get("threshold_simulations", []),
         },
+        "agent_b_recall_release": recall_release,
+        "agent_b_recall_release_simulations": labeled.get("agent_b_recall_release_simulations", []),
         "labeled_overall": overall,
         "batch_review": batch_review,
         "batch_agent_b": batch_agent_b,
@@ -104,6 +111,45 @@ def _threshold_recommendation(simulations: list[dict]) -> dict:
     }
 
 
+def _recall_release_recommendation(simulations: list[dict]) -> dict:
+    if not simulations:
+        return {"recommendation": "not_evaluated", "reason": "No AgentB recall release simulation data."}
+    zero_wrong = [
+        row
+        for row in simulations
+        if int(row.get("wrong_release_rows") or 0) == 0 and int(row.get("correct_recovery_rows") or 0) > 0
+    ]
+    if zero_wrong:
+        chosen = max(
+            zero_wrong,
+            key=lambda row: (int(row.get("correct_recovery_rows") or 0), -int(row.get("agent_b_evidence_threshold") or 0)),
+        )
+        return {
+            "recommendation": "narrow_auto_release_candidate",
+            "threshold": chosen.get("agent_b_evidence_threshold"),
+            "correct_recovery_rows": chosen.get("correct_recovery_rows"),
+            "wrong_release_rows": chosen.get("wrong_release_rows"),
+            "reason": "A simulated AgentB evidence threshold recovers labeled official sites without releasing labeled wrong candidates.",
+            "chosen": chosen,
+        }
+    best = max(
+        simulations,
+        key=lambda row: (
+            float(row.get("release_precision") or 0),
+            int(row.get("correct_recovery_rows") or 0),
+            -int(row.get("wrong_release_rows") or 0),
+        ),
+    )
+    return {
+        "recommendation": "manual_only",
+        "threshold": best.get("agent_b_evidence_threshold"),
+        "correct_recovery_rows": best.get("correct_recovery_rows"),
+        "wrong_release_rows": best.get("wrong_release_rows"),
+        "reason": "Every simulated AgentB recall-release threshold releases at least one labeled wrong candidate; keep recall candidates manual-only.",
+        "chosen": best,
+    }
+
+
 def _review_summary(path: Path, total_rows: int) -> dict:
     rows = _read_rows(path)
     reason_counts = Counter(row.get("review_reason", "") for row in rows)
@@ -136,7 +182,13 @@ def _agent_b_summary(path: Path) -> dict:
     }
 
 
-def _recommendations(overall: dict, threshold: dict, batch_review: dict, batch_agent_b: dict) -> list[str]:
+def _recommendations(
+    overall: dict,
+    threshold: dict,
+    recall_release: dict,
+    batch_review: dict,
+    batch_agent_b: dict,
+) -> list[str]:
     out = []
     recommended = threshold.get("recommended_threshold")
     if recommended is not None:
@@ -145,6 +197,12 @@ def _recommendations(overall: dict, threshold: dict, batch_review: dict, batch_a
         out.append("Keep current high-risk review lanes; labeled false official rows are fully captured.")
     if overall.get("agent_b_false_official_accept_rate") == 0.0:
         out.append("Keep AgentB conservative on high-risk rows; it is not releasing labeled false official rows.")
+    if recall_release.get("recommendation") == "manual_only":
+        out.append("Keep AgentB unresolved recall candidates manual-only; simulated auto-release would add labeled wrong official URLs.")
+    elif recall_release.get("recommendation") == "narrow_auto_release_candidate":
+        out.append(
+            f"Consider a narrow AgentB recall release at evidence threshold {recall_release.get('threshold')} after adding regression tests."
+        )
     if batch_review.get("review_rate") and batch_review["review_rate"] > 0.4:
         out.append("Review workload is high on the batch sample; require more labels before widening review lanes.")
     if batch_agent_b.get("timeout_rate") and batch_agent_b["timeout_rate"] > 0.1:
@@ -182,6 +240,9 @@ def _render_markdown(report: dict) -> str:
             "",
             f"- Recommended threshold: {summary.get('recommended_threshold')}",
             f"- Reason: {summary.get('recommended_threshold_reason')}",
+            f"- AgentB recall release: {summary.get('recommended_agent_b_recall_release')}",
+            f"- AgentB recall release threshold: {summary.get('recommended_agent_b_recall_release_threshold')}",
+            f"- AgentB recall release correct/wrong rows: {summary.get('agent_b_recall_release_correct_rows')}/{summary.get('agent_b_recall_release_wrong_rows')}",
             "",
             "## Batch Review",
             "",
@@ -201,6 +262,18 @@ def _render_markdown(report: dict) -> str:
     for reason, counts in report.get("batch_agent_b", {}).get("reason_decision_counts", {}).items():
         parts = ", ".join(f"{key}={value}" for key, value in counts.items())
         lines.append(f"- {reason}: {parts}")
+    if report.get("agent_b_recall_release_simulations"):
+        lines.extend(["", "## AgentB Recall Release Simulation", ""])
+        for row in report["agent_b_recall_release_simulations"]:
+            lines.append(
+                "- threshold {threshold}: release={release}, correct={correct}, wrong={wrong}, precision={precision}".format(
+                    threshold=row.get("agent_b_evidence_threshold"),
+                    release=row.get("release_rows"),
+                    correct=row.get("correct_recovery_rows"),
+                    wrong=row.get("wrong_release_rows"),
+                    precision=row.get("release_precision"),
+                )
+            )
     lines.append("")
     return "\n".join(lines)
 

@@ -2268,6 +2268,96 @@ class OperationalCommandTests(unittest.TestCase):
         self.assertEqual(detail_by_id["p-4"]["manual_review_reason"], "identity_weak_or_conflicting")
         self.assertEqual(detail_by_id["p-3"]["agent_b_suggested_domain"], "three.example")
 
+    def test_evaluate_workflow_balance_simulates_agent_b_recall_release_risk(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            run_dir = root / "run"
+            run_dir.mkdir()
+            baseline = root / "baseline.csv"
+            candidate = root / "candidate.csv"
+            human = root / "human.csv"
+            review = run_dir / "review_task.csv"
+            agent_b = run_dir / "agent_b/check.csv"
+            unresolved = run_dir / "unresolved.csv"
+            human.write_text("provider_id,manual_decision,manual_url\n", encoding="utf-8")
+            _write_test_csv(
+                baseline,
+                [
+                    {"provider_id": "p-1", "provider_name": "One", "official_url": "https://one.example", "official_domain": "one.example"},
+                    {"provider_id": "p-2", "provider_name": "Two", "official_url": "https://two.example", "official_domain": "two.example"},
+                    {"provider_id": "p-3", "provider_name": "None", "official_url": "", "official_domain": ""},
+                ],
+            )
+            _write_test_csv(
+                candidate,
+                [
+                    {"provider_id": "p-1", "provider_name": "One", "official_url": "", "official_domain": "", "status": "unresolved", "confidence": "69"},
+                    {"provider_id": "p-2", "provider_name": "Two", "official_url": "", "official_domain": "", "status": "unresolved", "confidence": "69"},
+                    {"provider_id": "p-3", "provider_name": "None", "official_url": "", "official_domain": "", "status": "unresolved", "confidence": "69"},
+                ],
+            )
+            _write_test_csv(
+                review,
+                [
+                    {"provider_id": "p-1", "provider_name": "One", "review_reason": "recall_unresolved_top_candidate"},
+                    {"provider_id": "p-2", "provider_name": "Two", "review_reason": "recall_unresolved_top_candidate"},
+                    {"provider_id": "p-3", "provider_name": "None", "review_reason": "recall_unresolved_top_candidate"},
+                ],
+            )
+            _write_test_csv(unresolved, [{"provider_id": "p-1"}])
+            _write_test_csv(
+                agent_b,
+                [
+                    {
+                        "provider_id": "p-1",
+                        "provider_name": "One",
+                        "candidate_url": "https://one.example",
+                        "candidate_domain": "one.example",
+                        "agent_b_decision": "unsure",
+                        "evidence_score": "80",
+                        "confidence": "69",
+                        "reason_for_unsure": "recall_candidate_needs_human_confirmation",
+                    },
+                    {
+                        "provider_id": "p-2",
+                        "provider_name": "Two",
+                        "candidate_url": "https://wrong.example",
+                        "candidate_domain": "wrong.example",
+                        "agent_b_decision": "unsure",
+                        "evidence_score": "80",
+                        "confidence": "69",
+                        "reason_for_unsure": "recall_candidate_needs_human_confirmation",
+                    },
+                    {
+                        "provider_id": "p-3",
+                        "provider_name": "None",
+                        "candidate_url": "https://ghost.example",
+                        "candidate_domain": "ghost.example",
+                        "agent_b_decision": "unsure",
+                        "evidence_score": "80",
+                        "confidence": "69",
+                        "reason_for_unsure": "recall_candidate_needs_human_confirmation",
+                    },
+                ],
+            )
+
+            summary = evaluate_balance(
+                baseline_final=baseline,
+                candidate_final=candidate,
+                human_review=human,
+                run_dir=run_dir,
+            )
+            sim_by_threshold = {
+                row["agent_b_evidence_threshold"]: row for row in summary["agent_b_recall_release_simulations"]
+            }
+            details_by_id = {row["provider_id"]: row for row in summary["details"]}
+
+        self.assertEqual(sim_by_threshold[75]["release_rows"], 3)
+        self.assertEqual(sim_by_threshold[75]["correct_recovery_rows"], 1)
+        self.assertEqual(sim_by_threshold[75]["wrong_release_rows"], 2)
+        self.assertEqual(sim_by_threshold[75]["release_precision"], 0.3333)
+        self.assertEqual(details_by_id["p-1"]["agent_b_candidate_domain"], "one.example")
+
     def test_build_balance_report_recommends_current_threshold_and_summarizes_batch(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -2292,6 +2382,15 @@ class OperationalCommandTests(unittest.TestCase):
                         "threshold_simulations": [
                             {"threshold": 75, "overall_accuracy": 0.81, "official_recall": 0.86, "false_official_rows": 8},
                             {"threshold": 82, "overall_accuracy": 0.81, "official_recall": 0.83, "false_official_rows": 6},
+                        ],
+                        "agent_b_recall_release_simulations": [
+                            {
+                                "agent_b_evidence_threshold": 75,
+                                "release_rows": 4,
+                                "correct_recovery_rows": 1,
+                                "wrong_release_rows": 3,
+                                "release_precision": 0.25,
+                            }
                         ],
                     }
                 ),
@@ -2324,10 +2423,12 @@ class OperationalCommandTests(unittest.TestCase):
             json_exists = out_json.exists()
 
         self.assertEqual(report["summary"]["recommended_threshold"], 75)
+        self.assertEqual(report["summary"]["recommended_agent_b_recall_release"], "manual_only")
         self.assertEqual(report["summary"]["batch_review_rows"], 2)
         self.assertEqual(report["summary"]["batch_review_rate"], 0.5)
         self.assertEqual(report["summary"]["batch_agent_b_timeout_rows"], 1)
         self.assertIn("Keep auto-accept threshold at 75", md_text)
+        self.assertIn("AgentB Recall Release Simulation", md_text)
         self.assertTrue(json_exists)
 
     def test_build_calibration_review_sample_prioritizes_high_value_rows(self):

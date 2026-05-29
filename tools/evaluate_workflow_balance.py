@@ -29,8 +29,10 @@ DETAIL_FIELDS = [
     "manual_review_reason",
     "agent_b_checked",
     "agent_b_decision",
+    "agent_b_candidate_domain",
     "agent_b_suggested_domain",
     "agent_b_confidence",
+    "agent_b_candidate_score",
     "agent_b_reason_for_unsure",
 ]
 
@@ -94,17 +96,20 @@ def evaluate_balance(
             agent_b_rows = _read_rows(agent_b_path)
             details = _annotate_agent_b(details, agent_b_rows)
     overall = _summarize(details)
+    agent_b_recall_release_simulations = []
     if run_dir:
         if review_task_rows is not None:
             overall.update(_summarize_manual_review_capture(details, len(review_task_rows)))
         if agent_b_rows is not None:
             overall.update(_summarize_agent_b_balance(details, agent_b_rows))
+            agent_b_recall_release_simulations = _agent_b_recall_release_simulations(details)
         unresolved = _find_unresolved(run_dir)
         if unresolved.exists():
             overall["unresolved_rows"] = len(_read_rows(unresolved))
     summary = {
         "overall": overall,
         "threshold_simulations": _threshold_simulations(labels, candidate_rows, simulate_thresholds),
+        "agent_b_recall_release_simulations": agent_b_recall_release_simulations,
         "inputs": {
             "baseline_final": str(baseline_final),
             "candidate_final": str(candidate_final),
@@ -285,8 +290,10 @@ def _annotate_agent_b(details: list[dict[str, str]], agent_b_rows: list[dict[str
         annotated = dict(row)
         annotated["agent_b_checked"] = "yes" if agent_b_row else ""
         annotated["agent_b_decision"] = _first(agent_b_row, "agent_b_decision", "manual_decision") if agent_b_row else ""
+        annotated["agent_b_candidate_domain"] = _agent_b_candidate_domain(agent_b_row)
         annotated["agent_b_suggested_domain"] = _agent_b_suggested_domain(agent_b_row)
         annotated["agent_b_confidence"] = _first(agent_b_row, "confidence", "evidence_score") if agent_b_row else ""
+        annotated["agent_b_candidate_score"] = _first(agent_b_row, "evidence_score", "confidence") if agent_b_row else ""
         annotated["agent_b_reason_for_unsure"] = _first(agent_b_row, "reason_for_unsure") if agent_b_row else ""
         out.append(annotated)
     return out
@@ -374,6 +381,62 @@ def _agent_b_suggested_domain(row: dict[str, str]) -> str:
     return ""
 
 
+def _agent_b_candidate_domain(row: dict[str, str]) -> str:
+    return domain_from_url(_first(row, "candidate_domain", "candidate_url", "replacement_domain", "replacement_url"))
+
+
+def _agent_b_recall_release_simulations(details: list[dict[str, str]]) -> list[dict]:
+    thresholds = [0, 30, 45, 50, 60, 70, 75, 80, 85]
+    recall_rows = [
+        row
+        for row in details
+        if row.get("manual_review_reason") == "recall_unresolved_top_candidate"
+        and row.get("agent_b_checked") == "yes"
+        and row.get("agent_b_candidate_domain")
+    ]
+    if not recall_rows:
+        return []
+    expected_official = [row for row in recall_rows if row.get("expected_kind") == "official"]
+    out = []
+    for threshold in thresholds:
+        released = [row for row in recall_rows if _numeric(row.get("agent_b_candidate_score")) >= threshold]
+        correct = [
+            row
+            for row in released
+            if row.get("expected_kind") == "official"
+            and row.get("agent_b_candidate_domain") == row.get("expected_domain")
+        ]
+        wrong = [
+            row
+            for row in released
+            if row.get("expected_kind") != "official"
+            or row.get("agent_b_candidate_domain") != row.get("expected_domain")
+        ]
+        held_correct = [
+            row
+            for row in recall_rows
+            if row not in released
+            and row.get("expected_kind") == "official"
+            and row.get("agent_b_candidate_domain") == row.get("expected_domain")
+        ]
+        out.append(
+            {
+                "agent_b_evidence_threshold": threshold,
+                "recall_rows": len(recall_rows),
+                "expected_official_rows": len(expected_official),
+                "release_rows": len(released),
+                "correct_recovery_rows": len(correct),
+                "wrong_release_rows": len(wrong),
+                "held_correct_recovery_rows": len(held_correct),
+                "release_precision": _ratio(len(correct), len(released)),
+                "official_recovery_rate": _ratio(len(correct), len(expected_official)),
+                "released_correct_provider_ids": [row.get("provider_id", "") for row in correct],
+                "released_wrong_provider_ids": [row.get("provider_id", "") for row in wrong],
+            }
+        )
+    return out
+
+
 def _counts(values) -> dict[str, int]:
     counts: dict[str, int] = {}
     for value in values:
@@ -385,6 +448,13 @@ def _counts(values) -> dict[str, int]:
 
 def _ratio(num: int, den: int) -> float | None:
     return round(num / den, 4) if den else None
+
+
+def _numeric(value: object) -> float:
+    try:
+        return float(value or 0)
+    except (TypeError, ValueError):
+        return 0.0
 
 
 def _find_review_task(run_dir: Path) -> Path | None:

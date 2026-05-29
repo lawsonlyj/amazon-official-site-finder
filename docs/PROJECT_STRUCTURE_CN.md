@@ -198,8 +198,8 @@ Codex receives filled manual review workbook
 | `tools/apply_agent_optimizations.py` | A 的安全应用器，只自动写入可解释、可回滚的 excluded_domains 配置，并生成 human/identity/no_official/reachability 回归样例。 |
 | `tools/build_linked_workbook.py` | 生成链接可点击的 XLSX。 |
 | `tools/verify_run_outputs.py` | 检查最终 CSV、unresolved CSV、质量 JSON、XLSX 链接公式是否正常。 |
-| `tools/evaluate_workflow_balance.py` | 调参评估工具。用基线结果、候选结果和人工标黄复核表计算 false official、over-reject、precision、recall、manual review rows，以及人工复核队列和 AgentB 对错误官网、正确官网、过度 unresolved 的处理质量。 |
-| `tools/build_balance_report.py` | 汇总 100 条有标签评估和 300/全量无标签 AgentB 分布，生成可重复的阈值和 review lane 建议报告。 |
+| `tools/evaluate_workflow_balance.py` | 调参评估工具。用基线结果、候选结果和人工标黄复核表计算 false official、over-reject、precision、recall、manual review rows，并模拟 AgentB unresolved recall 候选在不同证据阈值下自动放行会恢复多少正确官网、放出多少错误官网。 |
+| `tools/build_balance_report.py` | 汇总 100 条有标签评估和 300/全量无标签 AgentB 分布，生成可重复的阈值、review lane、AgentB recall 是否只能人工处理的建议报告。 |
 | `tools/build_calibration_review_sample.py` | 从大批量 review task 和 AgentB 输出里抽取高价值人工标注样本，优先覆盖 timeout、AgentB reject、风险 lane accept、recall unresolved 和 unsure 行。 |
 | `tools/evaluate_calibration_review_sample.py` | 读取填好的校准样本 CSV/XLSX，按 sample reason、review lane、AgentB decision 汇总人工标签，并输出保留、收窄、放宽或继续人工复核的建议。 |
 | `tools/apply_review.py` | 人工复核后，把人工 decision 应用回已有 run。 |
