@@ -46,6 +46,7 @@ from tools.build_calibration_review_sample import build_calibration_review_sampl
 from tools.evaluate_calibration_review_sample import evaluate_calibration_review_sample
 from tools.mine_evidence_patterns import mine_evidence_patterns
 from tools.run_calibration_cycle import run_calibration_cycle
+from tools.simulate_pattern_release import simulate_pattern_release
 from tools.output_layout import DEFAULT_SECOND_PASS_ACCEPT_THRESHOLD, WORKFLOW_VERSION
 
 
@@ -2458,6 +2459,146 @@ class OperationalCommandTests(unittest.TestCase):
         self.assertTrue(output_json_exists)
         self.assertIn("Best candidate pattern", md_text)
 
+    def test_simulate_pattern_release_scores_safe_recall_rules(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            balance_json = root / "balance.json"
+            agent_b = root / "agent_b.csv"
+            patterns = root / "patterns.json"
+            output_json = root / "simulation.json"
+            output_md = root / "simulation.md"
+            balance_json.write_text(
+                json.dumps(
+                    {
+                        "overall": {
+                            "labeled_rows": 4,
+                            "expected_official_rows": 3,
+                            "expected_no_official_rows": 1,
+                            "official_output_rows": 1,
+                            "correct_official_rows": 1,
+                            "correct_no_official_rows": 1,
+                            "false_official_rows": 0,
+                            "over_rejected_rows": 2,
+                            "auto_precision": 1.0,
+                            "official_recall": 0.3333,
+                            "overall_accuracy": 0.5,
+                        },
+                        "details": [
+                            {
+                                "provider_id": "p-good-1",
+                                "provider_name": "Good One",
+                                "expected_kind": "official",
+                                "expected_domain": "goodone.example",
+                                "outcome": "over_rejected",
+                                "manual_review_reason": "recall_unresolved_top_candidate",
+                            },
+                            {
+                                "provider_id": "p-good-2",
+                                "provider_name": "Good Two",
+                                "expected_kind": "official",
+                                "expected_domain": "goodtwo.example",
+                                "outcome": "over_rejected",
+                                "manual_review_reason": "recall_unresolved_top_candidate",
+                            },
+                            {
+                                "provider_id": "p-bad",
+                                "provider_name": "Bad One",
+                                "expected_kind": "no_official",
+                                "expected_domain": "",
+                                "outcome": "correct_no_official",
+                                "manual_review_reason": "recall_unresolved_top_candidate",
+                            },
+                        ],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            _write_test_csv(
+                agent_b,
+                [
+                    {
+                        "provider_id": "p-good-1",
+                        "provider_name": "Good One",
+                        "candidate_url": "https://goodone.example",
+                        "candidate_domain": "goodone.example",
+                        "agent_b_decision": "unsure",
+                        "evidence_score": "31",
+                        "supporting_facts": "candidate_pages_fetch_ok; schema_org_organization_seen",
+                        "counter_evidence": "",
+                        "reason_for_unsure": "recall_candidate_needs_human_confirmation",
+                        "review_reason": "recall_unresolved_top_candidate",
+                    },
+                    {
+                        "provider_id": "p-good-2",
+                        "provider_name": "Good Two",
+                        "candidate_url": "https://goodtwo.example",
+                        "candidate_domain": "goodtwo.example",
+                        "agent_b_decision": "unsure",
+                        "evidence_score": "31",
+                        "supporting_facts": "candidate_pages_fetch_ok; schema_org_organization_seen",
+                        "counter_evidence": "",
+                        "reason_for_unsure": "recall_candidate_needs_human_confirmation",
+                        "review_reason": "recall_unresolved_top_candidate",
+                    },
+                    {
+                        "provider_id": "p-bad",
+                        "provider_name": "Bad One",
+                        "candidate_url": "https://bad.example",
+                        "candidate_domain": "bad.example",
+                        "agent_b_decision": "unsure",
+                        "evidence_score": "31",
+                        "supporting_facts": "candidate_pages_fetch_ok; shared_fact",
+                        "counter_evidence": "",
+                        "reason_for_unsure": "recall_candidate_needs_human_confirmation",
+                        "review_reason": "recall_unresolved_top_candidate",
+                    },
+                ],
+            )
+            patterns.write_text(
+                json.dumps(
+                    {
+                        "summary": {"scope": "recall"},
+                        "durable_safe_patterns": [
+                            {
+                                "pattern": "domain_relation:exact_provider_slug AND has:schema_org_organization_seen",
+                                "features": ["domain_relation:exact_provider_slug", "has:schema_org_organization_seen"],
+                                "correct_recovery_rows": 2,
+                                "wrong_release_rows": 0,
+                            },
+                            {
+                                "pattern": "has:candidate_pages_fetch_ok",
+                                "features": ["has:candidate_pages_fetch_ok"],
+                                "correct_recovery_rows": 2,
+                                "wrong_release_rows": 1,
+                            },
+                        ],
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            report = simulate_pattern_release(
+                balance_json=balance_json,
+                agent_b_csv=agent_b,
+                pattern_jsons=[patterns],
+                min_support=2,
+                output_json=output_json,
+                output_md=output_md,
+            )
+            safe = report["safe_patterns"][0]
+            md_text = output_md.read_text(encoding="utf-8")
+            output_json_exists = output_json.exists()
+
+        self.assertEqual(report["summary"]["safe_pattern_count"], 1)
+        self.assertEqual(report["summary"]["actionable_safe_pattern_count"], 1)
+        self.assertEqual(safe["pattern"], "domain_relation:exact_provider_slug AND has:schema_org_organization_seen")
+        self.assertTrue(safe["actionable"])
+        self.assertEqual(safe["correct_recovery_rows"], 2)
+        self.assertEqual(safe["wrong_release_rows"], 0)
+        self.assertEqual(safe["simulated_overall"]["overall_accuracy"], 1.0)
+        self.assertTrue(output_json_exists)
+        self.assertIn("Pattern Release Simulation", md_text)
+
     def test_build_balance_report_recommends_current_threshold_and_summarizes_batch(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -2978,6 +3119,7 @@ class OperationalCommandTests(unittest.TestCase):
             output_exists = {
                 "recall_json": (output_dir / "evidence_patterns_recall.json").exists(),
                 "precision_md": (output_dir / "evidence_patterns_precision.md").exists(),
+                "release_simulation_md": (output_dir / "pattern_release_simulation.md").exists(),
                 "sample_xlsx": (output_dir / "pattern_validation_sample_50.xlsx").exists(),
                 "eval_json": (output_dir / "pattern_validation_sample_50_eval_empty.json").exists(),
                 "summary_md": (output_dir / "calibration_cycle_summary.md").exists(),
@@ -2986,10 +3128,12 @@ class OperationalCommandTests(unittest.TestCase):
         self.assertEqual(report["summary"]["sample_rows"], 2)
         self.assertTrue(output_exists["recall_json"])
         self.assertTrue(output_exists["precision_md"])
+        self.assertTrue(output_exists["release_simulation_md"])
         self.assertTrue(output_exists["sample_xlsx"])
         self.assertTrue(output_exists["eval_json"])
         self.assertTrue(output_exists["summary_md"])
         self.assertEqual(report["summary"]["empty_eval_labeled_rows"], 0)
+        self.assertIn("release_actionable_safe_patterns", report["summary"])
 
     def test_run_calibration_cycle_can_evaluate_filled_pattern_sample(self):
         with tempfile.TemporaryDirectory() as tmp:

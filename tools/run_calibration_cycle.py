@@ -10,6 +10,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from tools.build_calibration_review_sample import build_calibration_review_sample
 from tools.evaluate_calibration_review_sample import evaluate_calibration_review_sample
 from tools.mine_evidence_patterns import mine_evidence_patterns
+from tools.simulate_pattern_release import simulate_pattern_release
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -68,6 +69,8 @@ def run_calibration_cycle(
     recall_md = out_dir / "evidence_patterns_recall.md"
     precision_json = out_dir / "evidence_patterns_precision.json"
     precision_md = out_dir / "evidence_patterns_precision.md"
+    release_sim_json = out_dir / "pattern_release_simulation.json"
+    release_sim_md = out_dir / "pattern_release_simulation.md"
     sample_csv = out_dir / f"{sample_prefix}.csv"
     sample_xlsx = out_dir / f"{sample_prefix}.xlsx"
     eval_json = out_dir / f"{sample_prefix}_eval_empty.json"
@@ -98,6 +101,15 @@ def run_calibration_cycle(
         min_support=min_support,
         output_json=precision_json,
         output_md=precision_md,
+    )
+    release_simulation = simulate_pattern_release(
+        balance_json=labeled_eval_json,
+        agent_b_csv=labeled_agent_b_csv,
+        pattern_jsons=[recall_json],
+        scope="recall",
+        min_support=min_support,
+        output_json=release_sim_json,
+        output_md=release_sim_md,
     )
     sample_summary = build_calibration_review_sample(
         review_csv=review_csv,
@@ -133,6 +145,12 @@ def run_calibration_cycle(
         "summary": {
             "recall_durable_safe_patterns": recall_report["summary"].get("durable_safe_patterns"),
             "precision_durable_safe_patterns": precision_report["summary"].get("durable_safe_patterns"),
+            "release_safe_patterns": release_simulation["summary"].get("safe_pattern_count"),
+            "release_actionable_safe_patterns": release_simulation["summary"].get("actionable_safe_pattern_count"),
+            "best_actionable_release_pattern": release_simulation["summary"].get("best_actionable_safe_pattern"),
+            "best_actionable_release_correct_rows": release_simulation["summary"].get("best_actionable_safe_correct_recovery_rows"),
+            "best_actionable_release_wrong_rows": release_simulation["summary"].get("best_actionable_safe_wrong_release_rows"),
+            "best_actionable_release_accuracy": release_simulation["summary"].get("best_actionable_safe_accuracy"),
             "sample_rows": sample_summary.get("sample_rows"),
             "pattern_validation_rows": sample_summary.get("sample_reason_counts", {}).get("pattern_candidate_validation", 0),
             "pattern_control_rows": sample_summary.get("sample_reason_counts", {}).get("pattern_control_validation", 0),
@@ -166,6 +184,8 @@ def run_calibration_cycle(
             "recall_md": str(recall_md),
             "precision_json": str(precision_json),
             "precision_md": str(precision_md),
+            "release_simulation_json": str(release_sim_json),
+            "release_simulation_md": str(release_sim_md),
             "sample_csv": str(sample_csv),
             "sample_xlsx": str(sample_xlsx),
             "eval_json": str(eval_json),
@@ -181,6 +201,8 @@ def run_calibration_cycle(
         },
         "recall_recommendations": recall_report.get("recommendations", []),
         "precision_recommendations": precision_report.get("recommendations", []),
+        "release_simulation_summary": release_simulation.get("summary", {}),
+        "actionable_release_patterns": release_simulation.get("actionable_safe_patterns", []),
         "sample": sample_summary,
         "empty_evaluation_summary": empty_eval.get("summary", {}),
         "filled_evaluation_summary": filled_eval.get("summary", {}) if filled_eval else {},
@@ -201,6 +223,11 @@ def _render_markdown(report: dict) -> str:
         "",
         f"- Recall durable safe patterns: {summary['recall_durable_safe_patterns']}",
         f"- Precision durable safe patterns: {summary['precision_durable_safe_patterns']}",
+        f"- Recall release safe patterns: {summary['release_safe_patterns']}",
+        f"- Recall release actionable safe patterns: {summary['release_actionable_safe_patterns']}",
+        f"- Best actionable release pattern: {summary['best_actionable_release_pattern'] or 'None'}",
+        f"- Best actionable release correct/wrong rows: {summary['best_actionable_release_correct_rows']}/{summary['best_actionable_release_wrong_rows']}",
+        f"- Best actionable release accuracy: {summary['best_actionable_release_accuracy']}",
         f"- Sample rows: {summary['sample_rows']}",
         f"- Pattern candidate validation rows: {summary['pattern_validation_rows']}",
         f"- Pattern control validation rows: {summary['pattern_control_rows']}",
@@ -224,6 +251,17 @@ def _render_markdown(report: dict) -> str:
     lines.extend(["", "## Precision Recommendations", ""])
     for item in report.get("precision_recommendations", []):
         lines.append(f"- {item}")
+    if report.get("actionable_release_patterns"):
+        lines.extend(["", "## Actionable Recall Release Patterns", ""])
+        for item in report["actionable_release_patterns"][:10]:
+            lines.append(
+                "- correct={correct}, wrong={wrong}, accuracy={accuracy}: {pattern}".format(
+                    correct=item.get("correct_recovery_rows"),
+                    wrong=item.get("wrong_release_rows"),
+                    accuracy=item.get("simulated_overall", {}).get("overall_accuracy"),
+                    pattern=item.get("pattern"),
+                )
+            )
     if report.get("filled_pattern_recommendations"):
         lines.extend(["", "## Filled Pattern Recommendations", ""])
         counts = summary.get("filled_pattern_recommendation_counts", {})
