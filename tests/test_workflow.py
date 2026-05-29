@@ -1305,6 +1305,7 @@ class OperationalCommandTests(unittest.TestCase):
         self.assertEqual(rows["p-4"]["agent_b_decision"], "unsure")
         self.assertTrue(xlsx_exists)
         self.assertIn("https://amazon.example/p-1", rows["p-1"]["provider_detail_url"])
+        self.assertEqual(summary["workflow_version"], "agent-loop-v2")
 
     def test_agent_c_recommends_and_agent_a_applies_only_safe_rules(self):
         with tempfile.TemporaryDirectory() as tmp:

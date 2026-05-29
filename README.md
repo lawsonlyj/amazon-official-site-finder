@@ -23,7 +23,7 @@ Use the Codex-assisted script when API keys are stored in local key files:
   --run-agent-b
 ```
 
-`--run-agent-b` is optional. It adds a candidate-first verification pass after the standard second-pass outputs are verified.
+`--run-agent-b` is optional. It adds the `agent-loop-v2` B step after the standard second-pass outputs are verified: candidate-first verification plus optimization recommendations. Add `--apply-agent-optimizations` only when A should apply safe B recommendations such as repeated excluded-domain additions.
 
 If using Codex, ask:
 
@@ -87,8 +87,8 @@ That command runs the workflow in this order:
 8. `tools/verify_run_outputs.py`
    Verifies the final CSV, unresolved CSV, quality JSON, and XLSX hyperlink formulas.
 
-9. Optional `tools/run_agent_b_verification.py`
-   Re-checks the existing official/top-candidate URL first, inspects company pages and lightweight independent search corroboration, and writes structured `accept`/`replace`/`reject`/`unsure` evidence while preserving `manual_decision`, `manual_url`, and `notes`.
+9. Optional B loop
+   `tools/run_agent_b_verification.py` re-checks the existing official/top-candidate URL first, inspects company pages and lightweight independent search corroboration, and writes structured `accept`/`replace`/`reject`/`unsure` evidence while preserving `manual_decision`, `manual_url`, and `notes`. `tools/run_agent_c_recommendations.py` is now the recommendation half of B, and `tools/apply_agent_optimizations.py` is A's safe apply step.
 
 For Codex-assisted usage, `run_codex_assisted.sh` runs first. It calls `tools/configure_env_from_key_files.py` to create `.env` from local key files without printing secrets, then hands off to `run_workflow.sh`.
 
@@ -109,6 +109,7 @@ outputs/my_run/manual_official_site_review_task.xlsx
 outputs/my_run/manual_official_site_review_task.csv
 outputs/my_run/agent_b_verification_results.csv
 outputs/my_run/agent_b_verification_results.xlsx
+outputs/my_run/agent_c_optimization_recommendations.md
 ```
 
 Use the XLSX for manual browsing and the CSV for downstream processing.

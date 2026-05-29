@@ -2,7 +2,7 @@
 set -euo pipefail
 
 if [[ $# -lt 2 ]]; then
-  echo "Usage: ./run_workflow.sh /path/to/input.csv outputs/run_dir [labels.csv] [--run-agent-b] [--agent-b-limit N]" >&2
+  echo "Usage: ./run_workflow.sh /path/to/input.csv outputs/run_dir [labels.csv] [--run-agent-b] [--apply-agent-optimizations] [--agent-b-limit N]" >&2
   exit 2
 fi
 
@@ -10,12 +10,17 @@ SOURCE_CSV="$1"
 RUN_DIR="$2"
 LABELS_CSV=""
 RUN_AGENT_B=0
+APPLY_AGENT_OPTIMIZATIONS=0
 AGENT_B_LIMIT=0
 shift 2
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --run-agent-b)
+      RUN_AGENT_B=1
+      ;;
+    --apply-agent-optimizations)
+      APPLY_AGENT_OPTIMIZATIONS=1
       RUN_AGENT_B=1
       ;;
     --agent-b-limit)
@@ -88,6 +93,10 @@ if [[ "$RUN_AGENT_B" == "1" ]]; then
     AGENT_B_ARGS+=(--limit "$AGENT_B_LIMIT")
   fi
   PYTHONPATH=.vendor_eval:. python3 tools/run_agent_b_verification.py "${AGENT_B_ARGS[@]}"
+  PYTHONPATH=.vendor_eval:. python3 tools/run_agent_c_recommendations.py --run-dir "$RUN_DIR"
+  if [[ "$APPLY_AGENT_OPTIMIZATIONS" == "1" ]]; then
+    PYTHONPATH=.vendor_eval:. python3 tools/apply_agent_optimizations.py --run-dir "$RUN_DIR" --apply
+  fi
 fi
 
 echo "Done."
@@ -98,4 +107,5 @@ echo "Manual review XLSX: $RUN_DIR/manual_official_site_review_task.xlsx"
 if [[ "$RUN_AGENT_B" == "1" ]]; then
   echo "AgentB verification CSV: $RUN_DIR/agent_b_verification_results.csv"
   echo "AgentB verification XLSX: $RUN_DIR/agent_b_verification_results.xlsx"
+  echo "AgentB recommendations: $RUN_DIR/agent_c_optimization_recommendations.md"
 fi

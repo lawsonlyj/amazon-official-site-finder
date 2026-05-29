@@ -43,6 +43,8 @@ AGENT_B_FIELDS = [
     "source_confidence",
 ]
 
+WORKFLOW_VERSION = "agent-loop-v2"
+
 SUPPORTING_PATHS = ["/", "/about", "/contact", "/services", "/privacy", "/terms", "/about-us", "/contact-us"]
 
 
@@ -115,6 +117,7 @@ def run_agent_b_verification(
         xlsx_summary = build_workbook([("AgentB_Verification", output_csv_path)], output_xlsx_path)
 
     summary = {
+        "workflow_version": WORKFLOW_VERSION,
         "input_rows": len(rows),
         "output_rows": len(result_rows),
         "decision_counts": _counts(result_rows, "agent_b_decision"),
@@ -271,14 +274,15 @@ def _verify_url(url: str, provider: dict[str, str], config: dict) -> dict:
             score += 7
             supporting_facts.append(f"location_matches:{location}")
             break
-        if schema_org:
-            score += 5
-            supporting_facts.append("schema_org_organization_seen")
-        if _looks_non_independent(url):
-            score -= 35
-            counter_evidence.append("candidate_not_independent_official_site")
-        if score >= 75 and len(evidence_urls) >= 2:
-            break
+    if schema_org:
+        score += 5
+        supporting_facts.append("schema_org_organization_seen")
+    if _looks_non_independent(url):
+        score -= 35
+        counter_evidence.append("candidate_not_independent_official_site")
+    if _has_identity_gap(provider, combined, supporting_facts):
+        score -= 12
+        counter_evidence.append("identity_gap_location_or_service_context_missing")
     return {
         "url": url,
         "domain": domain_from_url(url),
@@ -375,6 +379,40 @@ def _looks_non_independent(url: str) -> bool:
     if domain in risky_domains or any(domain.endswith(f".{item}") for item in risky_domains):
         return True
     return any(marker in path for marker in ["/profile", "/company/", "/login", "/signin", "/sign-in"])
+
+
+def _has_identity_gap(provider: dict[str, str], combined_text: str, supporting_facts: list[str]) -> bool:
+    if not combined_text:
+        return True
+    name = provider.get("provider_name", "")
+    provider_tokens = tokens(name)
+    generic_tokens = {
+        "amazon",
+        "account",
+        "management",
+        "service",
+        "services",
+        "seller",
+        "ecommerce",
+        "e-commerce",
+        "marketplace",
+        "boosting",
+        "growth",
+        "consulting",
+        "consultancy",
+    }
+    meaningful_tokens = [token for token in provider_tokens if token not in generic_tokens]
+    if provider_tokens and not meaningful_tokens and "page_contains_exact_provider_name" not in supporting_facts:
+        return True
+    locations = _parse_locations(provider.get("provider_locations", ""))
+    if locations and not any(normalize_text(location) in combined_text for location in locations):
+        has_strong_identity = any(
+            fact in supporting_facts
+            for fact in ["page_contains_exact_provider_name", "legal_entity_marker_found", "contact_email_found"]
+        )
+        if not has_strong_identity:
+            return True
+    return False
 
 
 def _max_pages_to_fetch() -> int:

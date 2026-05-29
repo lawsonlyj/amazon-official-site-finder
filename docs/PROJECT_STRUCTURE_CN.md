@@ -148,7 +148,8 @@ run_codex_assisted.sh
            -> tools/plan_unresolved_second_pass.py
            -> tools/build_linked_workbook.py
      -> tools/build_manual_review_task.py
-     -> 可选 tools/run_agent_b_verification.py
+     -> 可选 B：tools/run_agent_b_verification.py + tools/run_agent_c_recommendations.py
+     -> 可选 A 安全应用：tools/apply_agent_optimizations.py --apply
      -> tools/verify_run_outputs.py
 ```
 
@@ -186,10 +187,10 @@ Codex receives filled manual review workbook
 | `finder/` | 核心逻辑包。包括输入清洗、搜索 query 构建、API 搜索、网页抓取、官网评分。 |
 | `tools/run_unresolved_second_pass.py` | 对第一轮没解决的商家做二轮补漏，用 Brave/Exa 找更可能的官网。 |
 | `tools/build_manual_review_task.py` | 生成简化人工复核 CSV/XLSX，只保留工作人员需要判断和填写的列。 |
-| `tools/run_agent_b_verification.py` | AgentB 候选优先复核。先验证当前候选官网，再做少量独立搜索，输出 accept/replace/reject/unsure 和结构化证据。 |
+| `tools/run_agent_b_verification.py` | B 的候选优先复核部分。先验证当前候选官网，再做少量独立搜索，输出 accept/replace/reject/unsure 和结构化证据。 |
 | `tools/run_review_learning.py` | 读取填好的复核表，合并人工反馈，输出 reviewed 结果、人工标签和优化建议。 |
-| `tools/run_agent_c_recommendations.py` | AgentC 读取 AgentB 结果和人工复核学习报告，输出可执行或需人工评估的优化建议。 |
-| `tools/apply_agent_optimizations.py` | AgentA 安全应用器，只自动写入可解释、可回滚的 excluded_domains 配置。 |
+| `tools/run_agent_c_recommendations.py` | B 的建议部分。读取复核结果和人工复核学习报告，输出可执行或需人工评估的优化建议。 |
+| `tools/apply_agent_optimizations.py` | A 的安全应用器，只自动写入可解释、可回滚的 excluded_domains 配置。 |
 | `tools/build_linked_workbook.py` | 生成链接可点击的 XLSX。 |
 | `tools/verify_run_outputs.py` | 检查最终 CSV、unresolved CSV、质量 JSON、XLSX 链接公式是否正常。 |
 | `tools/apply_review.py` | 人工复核后，把人工 decision 应用回已有 run。 |

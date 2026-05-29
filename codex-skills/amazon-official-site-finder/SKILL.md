@@ -70,7 +70,7 @@ Run this from the repo root. Substitute the paths provided by the user.
 
 This command creates/updates `.env` and then runs the full workflow. The configure step prints only a boolean summary and must not print secrets.
 If the user did not provide an output directory, omit `--run-dir`; the script will create `outputs/codex_run_YYYYMMDD_HHMMSS`.
-Use `--run-agent-b` when the user asks for the AgentB/AgentC optimization loop or candidate-first verification. It does not change the legacy final CSV names.
+Use `--run-agent-b` when the user asks for the `agent-loop-v2` optimization loop or candidate-first verification. In v2, B means verification plus recommendations. Add `--apply-agent-optimizations` when A should apply only safe B recommendations. This does not change the legacy final CSV names.
 
 If you need to run the two steps separately:
 
@@ -104,6 +104,7 @@ outputs/my_run/manual_official_site_review_task.csv
 outputs/my_run/manual_official_site_review_task.xlsx
 outputs/my_run/agent_b_verification_results.csv
 outputs/my_run/agent_b_verification_results.xlsx
+outputs/my_run/agent_c_optimization_recommendations.md
 outputs/my_run/manifest.json
 ```
 

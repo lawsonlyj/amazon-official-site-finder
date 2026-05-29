@@ -13,6 +13,7 @@ Optional:
   --run-dir outputs/my_run
   --labels /path/to/golden_expected_websites.csv
   --run-agent-b
+  --apply-agent-optimizations
   --agent-b-limit N
 USAGE
 }
@@ -23,6 +24,7 @@ SOURCE_CSV=""
 RUN_DIR=""
 LABELS_CSV=""
 RUN_AGENT_B=0
+APPLY_AGENT_OPTIMIZATIONS=0
 AGENT_B_LIMIT=0
 
 while [[ $# -gt 0 ]]; do
@@ -48,6 +50,11 @@ while [[ $# -gt 0 ]]; do
       shift 2
       ;;
     --run-agent-b)
+      RUN_AGENT_B=1
+      shift
+      ;;
+    --apply-agent-optimizations)
+      APPLY_AGENT_OPTIMIZATIONS=1
       RUN_AGENT_B=1
       shift
       ;;
@@ -91,6 +98,9 @@ if [[ -n "$LABELS_CSV" ]]; then
 fi
 if [[ "$RUN_AGENT_B" == "1" ]]; then
   WORKFLOW_ARGS+=(--run-agent-b)
+  if [[ "$APPLY_AGENT_OPTIMIZATIONS" == "1" ]]; then
+    WORKFLOW_ARGS+=(--apply-agent-optimizations)
+  fi
   if [[ "$AGENT_B_LIMIT" != "0" ]]; then
     WORKFLOW_ARGS+=(--agent-b-limit "$AGENT_B_LIMIT")
   fi
