@@ -48,6 +48,7 @@ from tools.mine_evidence_patterns import mine_evidence_patterns
 from tools.run_calibration_cycle import run_calibration_cycle
 from tools.simulate_pattern_release import simulate_pattern_release
 from tools.apply_pattern_release_experiment import apply_pattern_release_experiment
+from tools.apply_pattern_release_to_run import apply_pattern_release_to_run
 from tools.output_layout import DEFAULT_SECOND_PASS_ACCEPT_THRESHOLD, WORKFLOW_VERSION
 
 
@@ -2891,6 +2892,127 @@ class OperationalCommandTests(unittest.TestCase):
         self.assertEqual(rows["kept"]["official_domain"], "kept.example")
         self.assertTrue(output_xlsx_exists)
         self.assertTrue(summary_json_exists)
+
+    def test_apply_pattern_release_to_run_updates_canonical_outputs(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            run_dir = root / "run"
+            agent_b_dir = run_dir / "agent_b"
+            final_csv = run_dir / "official_sites.csv"
+            unresolved_csv = run_dir / "unresolved.csv"
+            agent_b_csv = agent_b_dir / "check.csv"
+            patterns = root / "pattern_release_simulation.json"
+            manifest = run_dir / "manifest.json"
+            run_dir.mkdir(parents=True)
+            agent_b_dir.mkdir(parents=True)
+            final_rows = [
+                {
+                    "provider_id": "release",
+                    "provider_name": "Release Brand",
+                    "provider_detail_url": "https://amazon.example/release",
+                    "listing_logo_url": "",
+                    "official_url": "",
+                    "official_domain": "",
+                    "status": "unresolved",
+                    "decision_source": "pending_review",
+                    "confidence": "69",
+                    "source_status": "needs_review",
+                    "evidence_summary": "candidate",
+                    "candidate_count": "1",
+                    "scored_candidate_count": "1",
+                    "service_apis": "[]",
+                    "provider_locations": "[]",
+                    "notes": "",
+                },
+                {
+                    "provider_id": "kept",
+                    "provider_name": "Kept Brand",
+                    "provider_detail_url": "https://amazon.example/kept",
+                    "listing_logo_url": "",
+                    "official_url": "https://kept.example/",
+                    "official_domain": "kept.example",
+                    "status": "matched",
+                    "decision_source": "auto_matched",
+                    "confidence": "100",
+                    "source_status": "matched",
+                    "evidence_summary": "domain_exact_provider_slug",
+                    "candidate_count": "1",
+                    "scored_candidate_count": "1",
+                    "service_apis": "[]",
+                    "provider_locations": "[]",
+                    "notes": "",
+                },
+            ]
+            _write_test_csv(final_csv, final_rows)
+            _write_test_csv(unresolved_csv, [final_rows[0]])
+            _write_test_csv(
+                agent_b_csv,
+                [
+                    {
+                        "provider_id": "release",
+                        "provider_name": "Release Brand",
+                        "candidate_url": "https://releasebrand.example/",
+                        "candidate_domain": "releasebrand.example",
+                        "agent_b_decision": "unsure",
+                        "confidence": "69",
+                        "evidence_score": "31",
+                        "supporting_facts": "candidate_pages_fetch_ok; schema_org_organization_seen",
+                        "counter_evidence": "",
+                        "reason_for_unsure": "recall_candidate_needs_human_confirmation",
+                        "review_reason": "recall_unresolved_top_candidate",
+                    }
+                ],
+            )
+            patterns.write_text(
+                json.dumps(
+                    {
+                        "summary": {"scope": "recall"},
+                        "selected_actionable_pattern_set": [
+                            {
+                                "pattern": "agent_b_score<60 AND domain_relation:exact_provider_slug AND has:schema_org_organization_seen",
+                                "features": [
+                                    "agent_b_score<60",
+                                    "domain_relation:exact_provider_slug",
+                                    "has:schema_org_organization_seen",
+                                ],
+                                "correct_recovery_rows": 1,
+                                "wrong_release_rows": 0,
+                            }
+                        ],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            manifest.write_text(json.dumps({"summary": {}, "outputs": {}}), encoding="utf-8")
+
+            summary = apply_pattern_release_to_run(
+                run_dir=run_dir,
+                pattern_jsons=[patterns],
+                write_xlsx=True,
+            )
+            with final_csv.open(newline="", encoding="utf-8") as f:
+                rows = {row["provider_id"]: row for row in csv.DictReader(f)}
+            with unresolved_csv.open(newline="", encoding="utf-8") as f:
+                unresolved_rows = list(csv.DictReader(f))
+            review_task = run_dir / "review_task.csv"
+            with review_task.open(newline="", encoding="utf-8") as f:
+                review_rows = list(csv.DictReader(f))
+            manifest_data = json.loads(manifest.read_text(encoding="utf-8"))
+            xlsx_exists = (run_dir / "official_sites.xlsx").exists()
+            summary_exists = (run_dir / "agent_a/pattern_release_applied.json").exists()
+
+        self.assertEqual(summary["released_rows"], 1)
+        self.assertEqual(summary["unresolved_rows"], 0)
+        self.assertEqual(rows["release"]["status"], "calibrated_released")
+        self.assertEqual(rows["release"]["decision_source"], "calibrated_pattern_release")
+        self.assertEqual(rows["release"]["official_domain"], "releasebrand.example")
+        self.assertEqual(rows["release"]["provider_detail_url"], "https://amazon.example/release")
+        self.assertEqual(unresolved_rows, [])
+        self.assertEqual(review_rows[0]["review_reason"], "precision_calibrated_pattern_release")
+        self.assertTrue(xlsx_exists)
+        self.assertTrue(summary_exists)
+        self.assertEqual(manifest_data["summary"]["pattern_release_applied_rows"], 1)
+        self.assertTrue(manifest_data["summary"]["quality_passed"])
 
     def test_build_balance_report_recommends_current_threshold_and_summarizes_batch(self):
         with tempfile.TemporaryDirectory() as tmp:

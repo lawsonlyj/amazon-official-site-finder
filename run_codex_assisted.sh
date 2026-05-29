@@ -16,6 +16,7 @@ Optional:
   --apply-agent-optimizations
   --agent-b-limit N
   --human-review /path/to/filled_review.xlsx
+  --pattern-release-json /path/to/pattern_release_simulation.json
 USAGE
 }
 
@@ -28,6 +29,7 @@ RUN_AGENT_B=0
 APPLY_AGENT_OPTIMIZATIONS=0
 AGENT_B_LIMIT=0
 HUMAN_REVIEW_FILE=""
+PATTERN_RELEASE_JSONS=()
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -66,6 +68,11 @@ while [[ $# -gt 0 ]]; do
       ;;
     --human-review)
       HUMAN_REVIEW_FILE="${2:-}"
+      RUN_AGENT_B=1
+      shift 2
+      ;;
+    --pattern-release-json)
+      PATTERN_RELEASE_JSONS+=("${2:-}")
       RUN_AGENT_B=1
       shift 2
       ;;
@@ -114,5 +121,8 @@ if [[ "$RUN_AGENT_B" == "1" ]]; then
   if [[ -n "$HUMAN_REVIEW_FILE" ]]; then
     WORKFLOW_ARGS+=(--human-review "$HUMAN_REVIEW_FILE")
   fi
+  for pattern_json in "${PATTERN_RELEASE_JSONS[@]}"; do
+    WORKFLOW_ARGS+=(--pattern-release-json "$pattern_json")
+  done
 fi
 ./run_workflow.sh "${WORKFLOW_ARGS[@]}"

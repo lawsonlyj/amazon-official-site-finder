@@ -22,6 +22,7 @@ VALID_STATUSES = {
     "low_confidence",
     "not_found",
     "manual_accepted",
+    "calibrated_released",
     "rejected",
     "unresolved",
     "invalid_manual_decision",

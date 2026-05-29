@@ -174,6 +174,8 @@ def _review_reason(row: dict[str, str], second_pass_row: dict[str, str]) -> str:
         if second_pass_row.get("official_url") or second_pass_row.get("previous_top_candidate_url"):
             return "recall_unresolved_top_candidate"
         return "recall_unresolved_manual_search"
+    if status == "calibrated_released":
+        return "precision_calibrated_pattern_release"
     if status == "manual_accepted" and confidence < 70:
         return "precision_second_pass_accepted_lt70"
     if status == "manual_accepted" and confidence < 85:
@@ -247,6 +249,7 @@ def _sort_key(row: dict[str, str]) -> tuple[int, int, str]:
         "precision_generic_identity_term_risk": 4,
         "precision_slug_extension_identity_risk": 5,
         "precision_ambiguous_name_risk": 6,
+        "precision_calibrated_pattern_release": 6,
         "precision_low_confidence_auto_match": 7,
         "recall_unresolved_top_candidate": 8,
         "recall_unresolved_manual_search": 9,

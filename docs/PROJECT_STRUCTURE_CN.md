@@ -28,6 +28,7 @@ amazon-official-site-finder/
     run_agent_b_verification.py
     run_agent_c_recommendations.py
     apply_agent_optimizations.py
+    apply_pattern_release_to_run.py
     build_review_sheet.py
     configure_env_from_key_files.py
     enrich_result_links.py
@@ -204,6 +205,7 @@ Codex receives filled manual review workbook
 | `tools/mine_evidence_patterns.py` | 证据组合挖掘工具。读取有标签 balance JSON 和 AgentB 证据，找出零错误但仍需更多标签验证的候选规则，以及会释放错误官网的危险组合。 |
 | `tools/simulate_pattern_release.py` | 规则放行模拟工具。读取有标签 balance JSON、AgentB 证据和 pattern JSON，计算每个窄 pattern 如果被 A 自动放行，会恢复多少 over-rejected 正确官网、释放多少错误官网，以及 precision/recall/accuracy 的变化；同时区分纯统计安全和可解释的 actionable safe pattern，并输出 selected actionable pattern set，优先选择“身份锚点 + 佐证锚点”的零错误组合。 |
 | `tools/apply_pattern_release_experiment.py` | 规则放行实验应用器。不会修改默认 workflow，只复制 `official_sites.csv` 并对匹配候选 pattern 的 unresolved 行填入 AgentB candidate，优先使用 selected actionable pattern set，输出实验版 CSV/XLSX，用于再跑有标签评估。 |
+| `tools/apply_pattern_release_to_run.py` | 校准规则正式应用器。读取已验证的 pattern-release JSON 和本次 run 的 `agent_b/check.csv`，只对匹配 selected actionable pattern set 的 unresolved 行写入官网，刷新 `official_sites.csv/xlsx`、`unresolved.csv`、`quality.json`、`review_task.*` 和 manifest，并把释放行保留为 `precision_calibrated_pattern_release` 抽查项。 |
 | `tools/build_calibration_review_sample.py` | 从大批量 review task 和 AgentB 输出里抽取高价值人工标注样本，优先覆盖 timeout、AgentB reject、风险 lane accept、recall unresolved 和 unsure 行；也可通过 `--pattern-json` 优先抽取证据组合候选规则的验证样本，并用 `--max-per-pattern` 避免单个 pattern 过度占用审核量。 |
 | `tools/evaluate_calibration_review_sample.py` | 读取填好的校准样本 CSV/XLSX，按 sample reason、review lane、AgentB decision 和 `pattern_match` 汇总人工标签，并输出保留、收窄、放宽、拒绝候选 pattern 或继续人工复核的建议；同时生成结构化 `pattern_rule_candidates`，供 A 在加回归测试后再决定是否吸收规则。 |
 | `tools/apply_review.py` | 人工复核后，把人工 decision 应用回已有 run。 |

@@ -2,7 +2,7 @@
 set -euo pipefail
 
 if [[ $# -lt 2 ]]; then
-  echo "Usage: ./run_workflow.sh /path/to/input.csv outputs/run_dir [labels.csv] [--run-agent-b] [--apply-agent-optimizations] [--agent-b-limit N] [--human-review file.xlsx]" >&2
+  echo "Usage: ./run_workflow.sh /path/to/input.csv outputs/run_dir [labels.csv] [--run-agent-b] [--apply-agent-optimizations] [--agent-b-limit N] [--human-review file.xlsx] [--pattern-release-json file.json]" >&2
   exit 2
 fi
 
@@ -13,6 +13,7 @@ RUN_AGENT_B=0
 APPLY_AGENT_OPTIMIZATIONS=0
 AGENT_B_LIMIT=0
 HUMAN_REVIEW_FILE=""
+PATTERN_RELEASE_JSONS=()
 shift 2
 
 while [[ $# -gt 0 ]]; do
@@ -30,6 +31,11 @@ while [[ $# -gt 0 ]]; do
       ;;
     --human-review)
       HUMAN_REVIEW_FILE="${2:-}"
+      RUN_AGENT_B=1
+      shift
+      ;;
+    --pattern-release-json)
+      PATTERN_RELEASE_JSONS+=("${2:-}")
       RUN_AGENT_B=1
       shift
       ;;
@@ -107,6 +113,22 @@ if [[ "$RUN_AGENT_B" == "1" ]]; then
   if [[ "$APPLY_AGENT_OPTIMIZATIONS" == "1" ]]; then
     PYTHONPATH=.vendor_eval:. python3 tools/apply_agent_optimizations.py --run-dir "$RUN_DIR" --apply
   fi
+  if [[ "${#PATTERN_RELEASE_JSONS[@]}" -gt 0 ]]; then
+    PATTERN_RELEASE_ARGS=(--run-dir "$RUN_DIR" --write-xlsx)
+    if [[ -n "$LABELS_CSV" ]]; then
+      PATTERN_RELEASE_ARGS+=(--labels "$LABELS_CSV")
+    fi
+    for pattern_json in "${PATTERN_RELEASE_JSONS[@]}"; do
+      PATTERN_RELEASE_ARGS+=(--pattern-json "$pattern_json")
+    done
+    PYTHONPATH=.vendor_eval:. python3 tools/apply_pattern_release_to_run.py "${PATTERN_RELEASE_ARGS[@]}"
+    python3 tools/verify_run_outputs.py \
+      --run-dir "$RUN_DIR" \
+      --final official_sites.csv \
+      --unresolved unresolved.csv \
+      --quality quality.json \
+      --xlsx "$RUN_DIR/official_sites.xlsx"
+  fi
 fi
 
 echo "Done."
@@ -119,4 +141,7 @@ if [[ "$RUN_AGENT_B" == "1" ]]; then
   echo "AgentB verification CSV: $RUN_DIR/agent_b/check.csv"
   echo "AgentB verification XLSX: $RUN_DIR/agent_b/check.xlsx"
   echo "AgentB suggestions: $RUN_DIR/agent_b/suggestions.md"
+fi
+if [[ "${#PATTERN_RELEASE_JSONS[@]}" -gt 0 ]]; then
+  echo "Pattern release summary: $RUN_DIR/agent_a/pattern_release_applied.json"
 fi
