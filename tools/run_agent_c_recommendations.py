@@ -283,6 +283,8 @@ def _normalize_human_review_row(row: dict[str, str]) -> dict:
     candidate_url = _first(row, "current_or_candidate_url", "official_url", "candidate_url", "top_candidate_url")
     manual_url = _first(row, "your_true_official_url", "manual_url", "true_official_url")
     notes = _first(row, "your_notes", "notes", "manual_notes")
+    if decision == "reject" and manual_url:
+        decision = "replace"
     return {
         "provider_id": _first(row, "provider_id"),
         "provider_name": _first(row, "provider_name"),
@@ -333,6 +335,7 @@ def _decision(row: dict[str, str]) -> str:
     raw = _first(row, "manual_decision", "your_decision", "decision").strip().casefold()
     aliases = {
         "accept": "accept",
+        "accpet": "accept",
         "approve": "accept",
         "approved": "accept",
         "接受": "accept",

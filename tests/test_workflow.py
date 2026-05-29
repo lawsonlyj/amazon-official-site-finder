@@ -1656,6 +1656,62 @@ class OperationalCommandTests(unittest.TestCase):
         self.assertTrue(report_exists)
         self.assertTrue(xlsx_exists)
 
+    def test_review_learning_treats_typos_and_reject_with_manual_url_as_replace(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            run_dir = Path(tmp)
+            source_rows = [
+                {
+                    "provider_id": "p-1",
+                    "provider_name": "Typo Accept",
+                    "provider_detail_url": "https://amazon.example/p-1",
+                    "official_url": "https://typo.example",
+                    "official_domain": "typo.example",
+                    "confidence": "62",
+                    "status": "matched",
+                    "evidence_summary": "weak",
+                    "candidate_count": "1",
+                    "scored_candidate_count": "1",
+                    "service_apis": "[]",
+                    "provider_locations": "[]",
+                },
+                {
+                    "provider_id": "p-2",
+                    "provider_name": "Reject With Url",
+                    "provider_detail_url": "https://amazon.example/p-2",
+                    "official_url": "https://wrong.example",
+                    "official_domain": "wrong.example",
+                    "confidence": "62",
+                    "status": "matched",
+                    "evidence_summary": "weak",
+                    "candidate_count": "1",
+                    "scored_candidate_count": "1",
+                    "service_apis": "[]",
+                    "provider_locations": "[]",
+                },
+            ]
+            review_rows = [
+                {"provider_id": "p-1", "provider_name": "Typo Accept", "manual_decision": "accpet", "manual_url": "", "notes": ""},
+                {
+                    "provider_id": "p-2",
+                    "provider_name": "Reject With Url",
+                    "manual_decision": "reject",
+                    "manual_url": "https://right.example",
+                    "notes": "candidate wrong",
+                },
+            ]
+            _write_test_csv(run_dir / "provider_official_websites_enriched.csv", source_rows)
+            _write_test_csv(run_dir / "review.csv", review_rows)
+
+            summary = run_review_learning(run_dir=run_dir, review_path=run_dir / "review.csv", write_xlsx=False)
+            with Path(summary["outputs"]["combined_review"]).open(newline="", encoding="utf-8") as f:
+                combined = {row["provider_id"]: row for row in csv.DictReader(f)}
+            with Path(summary["outputs"]["final"]).open(newline="", encoding="utf-8") as f:
+                final = {row["provider_id"]: row for row in csv.DictReader(f)}
+
+        self.assertEqual(combined["p-1"]["manual_decision"], "accept")
+        self.assertEqual(combined["p-2"]["manual_decision"], "replace")
+        self.assertEqual(final["p-2"]["official_url"], "https://right.example")
+
     def test_plan_unresolved_second_pass_assigns_actionable_tiers(self):
         with tempfile.TemporaryDirectory() as tmp:
             run_dir = Path(tmp)

@@ -22,6 +22,7 @@ from tools.quality_gate import evaluate_quality_gate, write_markdown as write_qu
 
 DECISION_ALIASES = {
     "accept": "accept",
+    "accpet": "accept",
     "approve": "accept",
     "approved": "accept",
     "confirm": "accept",
@@ -255,6 +256,8 @@ def _normalize_manual_review_rows(rows: list[dict[str, str]]) -> tuple[list[dict
     for row in rows:
         decision = _decision(row)
         manual_url = _first(row, "manual_url", "your_true_official_url", "true_official_url")
+        if decision == "reject" and manual_url:
+            decision = "replace"
         if not decision and manual_url:
             decision = "replace"
         if decision == "unsure" or (not decision and not manual_url):
@@ -368,9 +371,9 @@ def _optimization_summary(
         raw = raw_by_key.get(_row_key(row), {})
         base = base_by_key.get(_row_key(row), {})
         decision = row.get("manual_decision", "")
-        current_url = raw.get("official_url") or raw.get("top_candidate_url") or base.get("manual_url") or base.get("official_url")
+        current_url = raw.get("official_url") or raw.get("top_candidate_url") or base.get("manual_url") or base.get("official_url") or ""
         current_domain = domain_from_url(current_url)
-        final_url = row.get("manual_url") or raw.get("official_url") or raw.get("candidate_1_url")
+        final_url = row.get("manual_url") or raw.get("official_url") or raw.get("candidate_1_url") or ""
         final_domain = domain_from_url(final_url)
         confidence = _to_int(raw.get("confidence") or row.get("confidence"))
         if decision in {"accept", "replace"} and final_domain:
