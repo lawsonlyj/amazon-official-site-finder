@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import csv
 import json
 import sys
 from pathlib import Path
@@ -44,7 +45,11 @@ def apply_agent_optimizations(
     existing = set(config.get("excluded_domains", []))
     additions = []
     skipped = []
+    identity_examples = []
     for item in recommendations:
+        if item.get("action") == "write_identity_regression_fixtures" and item.get("safe_artifact"):
+            identity_examples.extend(item.get("examples") or [])
+            continue
         if item.get("action") != "add_to_excluded_domains" or not item.get("safe_to_apply"):
             skipped.append({"type": item.get("type", ""), "reason": "not_safe_config_action"})
             continue
@@ -59,11 +64,18 @@ def apply_agent_optimizations(
     if apply and additions:
         config["excluded_domains"] = list(config.get("excluded_domains", [])) + additions
         config_path.write_text(json.dumps(config, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    fixture_path = run_dir / "agent_identity_constraint_regression_cases.csv"
+    fixtures_written = 0
+    if apply and identity_examples:
+        fixtures_written = _write_identity_fixtures(fixture_path, identity_examples)
     summary = {
         "updated": bool(apply and additions),
+        "artifacts_updated": bool(apply and fixtures_written),
         "apply_requested": apply,
         "added_excluded_domains": additions if apply else [],
         "pending_excluded_domains": additions if not apply else [],
+        "identity_regression_fixture_rows": fixtures_written if apply else 0,
+        "identity_regression_fixture": str(fixture_path) if apply and fixtures_written else "",
         "skipped": skipped,
         "config_path": str(config_path),
         "recommendations_json": str(recommendations_path),
@@ -73,6 +85,36 @@ def apply_agent_optimizations(
     )
     _update_manifest(run_dir / "manifest.json", summary)
     return summary
+
+
+def _write_identity_fixtures(path: Path, examples: list[dict]) -> int:
+    fields = [
+        "provider_id",
+        "provider_name",
+        "candidate_url",
+        "candidate_domain",
+        "agent_b_decision",
+        "evidence_score",
+        "counter_evidence",
+        "reason_for_unsure",
+        "expected_outcome",
+    ]
+    rows = []
+    seen = set()
+    for example in examples:
+        key = (example.get("provider_id", ""), example.get("candidate_url", ""))
+        if key in seen:
+            continue
+        seen.add(key)
+        row = {field: str(example.get(field, "")) for field in fields}
+        row["expected_outcome"] = "needs_identity_review"
+        rows.append(row)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=fields)
+        writer.writeheader()
+        writer.writerows(rows)
+    return len(rows)
 
 
 def _update_manifest(path: Path, summary: dict) -> None:

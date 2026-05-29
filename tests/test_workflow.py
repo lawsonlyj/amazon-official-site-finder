@@ -1363,6 +1363,40 @@ class OperationalCommandTests(unittest.TestCase):
         self.assertIn("bad-directory.example", config["excluded_domains"])
         self.assertNotIn("single-case.example", config["excluded_domains"])
 
+    def test_agent_a_writes_identity_regression_fixtures_without_config_change(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            run_dir = Path(tmp)
+            rows = []
+            for idx in range(3):
+                rows.append(
+                    {
+                        "provider_id": f"p-{idx}",
+                        "provider_name": f"Generic Provider {idx}",
+                        "candidate_url": f"https://generic{idx}.example",
+                        "candidate_domain": f"generic{idx}.example",
+                        "agent_b_decision": "unsure",
+                        "manual_decision": "unsure",
+                        "evidence_score": "31",
+                        "independent_search_queries": "",
+                        "counter_evidence": "identity_gap_location_or_service_context_missing",
+                        "reason_for_unsure": "insufficient_or_conflicting_evidence",
+                    }
+                )
+            _write_test_csv(run_dir / "agent_b_verification_results.csv", rows)
+            config_path = run_dir / "scoring.json"
+            config_path.write_text(json.dumps(load_config("config/scoring.json")), encoding="utf-8")
+
+            recommendations = run_agent_c_recommendations(run_dir=run_dir)
+            applied = apply_agent_optimizations(run_dir=run_dir, config_path=config_path, apply=True)
+            fixture_path = Path(applied["identity_regression_fixture"])
+            fixture_exists = fixture_path.exists()
+
+        self.assertEqual(recommendations["recommendations"][0]["action"], "write_identity_regression_fixtures")
+        self.assertFalse(applied["updated"])
+        self.assertTrue(applied["artifacts_updated"])
+        self.assertEqual(applied["identity_regression_fixture_rows"], 3)
+        self.assertTrue(fixture_exists)
+
     def test_run_review_learning_applies_manual_feedback_and_writes_report(self):
         with tempfile.TemporaryDirectory() as tmp:
             run_dir = Path(tmp)

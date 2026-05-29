@@ -127,15 +127,29 @@ def analyze_recommendations(agent_b_rows: list[dict[str, str]], learning: dict) 
             }
         )
 
-    if len(same_name_conflicts) >= 2:
+    if len(same_name_conflicts) >= 3:
         recommendations.append(
             {
                 "type": "identity_constraint",
                 "title": "Same-name or insufficient identity conflicts",
                 "count": len(same_name_conflicts),
                 "safe_to_apply": False,
-                "action": "add_region_or_service_consistency_tests",
+                "safe_artifact": True,
+                "action": "write_identity_regression_fixtures",
                 "reason": "Repeated uncertainty suggests identity constraints, not automatic URL rules.",
+                "examples": [
+                    {
+                        "provider_id": row.get("provider_id", ""),
+                        "provider_name": row.get("provider_name", ""),
+                        "candidate_url": row.get("candidate_url", ""),
+                        "candidate_domain": row.get("candidate_domain", ""),
+                        "agent_b_decision": row.get("agent_b_decision", ""),
+                        "evidence_score": row.get("evidence_score", ""),
+                        "counter_evidence": row.get("counter_evidence", ""),
+                        "reason_for_unsure": row.get("reason_for_unsure", ""),
+                    }
+                    for row in same_name_conflicts[:50]
+                ],
             }
         )
 
