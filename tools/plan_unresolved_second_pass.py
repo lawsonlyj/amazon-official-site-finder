@@ -10,6 +10,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from finder.text import domain_from_url, normalize_text
+from tools.output_layout import first_existing
 
 
 OUTPUT_FIELDS = [
@@ -58,8 +59,14 @@ def main(argv: list[str] | None = None) -> int:
 
 def build_second_pass_plan(run_dir: str | Path) -> list[dict[str, str]]:
     run_dir = Path(run_dir)
-    providers = _provider_index(run_dir / "providers_normalized.csv")
-    review_rows = _read_rows(run_dir / "provider_review_sheet_enhanced.csv")
+    providers_path = first_existing(run_dir, "details/input/providers.csv", "providers_normalized.csv")
+    review_sheet_path = first_existing(run_dir, "details/first_pass/review_sheet.csv", "provider_review_sheet_enhanced.csv")
+    if not providers_path:
+        raise FileNotFoundError(f"normalized providers CSV not found in {run_dir}")
+    if not review_sheet_path:
+        raise FileNotFoundError(f"review sheet CSV not found in {run_dir}")
+    providers = _provider_index(providers_path)
+    review_rows = _read_rows(review_sheet_path)
     rows = []
     for row in review_rows:
         provider = providers.get(row.get("provider_id", ""), {})

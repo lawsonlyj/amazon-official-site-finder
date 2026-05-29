@@ -26,7 +26,7 @@ When the user later provides a filled manual review workbook, they should only n
 ```text
 Use amazon-official-site-finder.
 Run directory: outputs/my_run
-Filled review file: /path/to/manual_official_site_review_task.xlsx
+Filled review file: /path/to/review_task.xlsx
 ```
 
 Then Codex should apply the feedback, run safe workflow optimization from the learning report, verify the reviewed outputs, and report the final reviewed files. Do not ask the user to run `run_review_cycle.sh` themselves.
@@ -70,7 +70,7 @@ Run this from the repo root. Substitute the paths provided by the user.
 
 This command creates/updates `.env` and then runs the full workflow. The configure step prints only a boolean summary and must not print secrets.
 If the user did not provide an output directory, omit `--run-dir`; the script will create `outputs/codex_run_YYYYMMDD_HHMMSS`.
-Use `--run-agent-b` when the user asks for the `agent-loop-v4-logo` optimization loop or candidate-first verification. In v4, B means verification plus recommendations, the scorer uses high-similarity Amazon listing logo matches as positive identity evidence, and `--human-review /path/to/filled_review.xlsx` lets B use filled human review notes as regression evidence. Add `--apply-agent-optimizations` when A should apply only safe B recommendations and write regression artifacts. This does not change the legacy final CSV names.
+Use `--run-agent-b` when the user asks for the AgentB optimization loop or candidate-first verification. B checks only high-risk rows by default, writes verification evidence plus suggestions, and the scorer uses high-similarity Amazon listing logo matches as positive identity evidence. `--human-review /path/to/filled_review.xlsx` lets B use filled human review notes as regression evidence. Add `--apply-agent-optimizations` when A should apply only safe B recommendations and write regression artifacts. Legacy public filenames are still generated.
 
 If you need to run the two steps separately:
 
@@ -94,21 +94,19 @@ This runs preflight, first pass, second pass, simplified manual review task gene
 ## Expected Outputs
 
 ```text
-outputs/my_run/provider_final_official_websites_second_pass.csv
-outputs/my_run/provider_official_websites_second_pass_with_clickable_links.xlsx
-outputs/my_run/provider_unresolved_second_pass.csv
-outputs/my_run/unresolved_second_pass_results.csv
-outputs/my_run/unresolved_second_pass_evidence.jsonl
-outputs/my_run/quality_gate_provider_second_pass_final.json
-outputs/my_run/manual_official_site_review_task.csv
-outputs/my_run/manual_official_site_review_task.xlsx
-outputs/my_run/agent_b_verification_results.csv
-outputs/my_run/agent_b_verification_results.xlsx
-outputs/my_run/agent_c_optimization_recommendations.md
+outputs/my_run/official_sites.csv
+outputs/my_run/official_sites.xlsx
+outputs/my_run/unresolved.csv
+outputs/my_run/quality.json
+outputs/my_run/review_task.csv
+outputs/my_run/review_task.xlsx
+outputs/my_run/agent_b/check.csv
+outputs/my_run/agent_b/check.xlsx
+outputs/my_run/agent_b/suggestions.md
 outputs/my_run/manifest.json
 ```
 
-Report these files with absolute paths.
+Report these files with absolute paths. Legacy public filenames are still generated for compatibility, including `provider_final_official_websites_second_pass.csv`, `provider_official_websites_second_pass_with_clickable_links.xlsx`, and `manual_official_site_review_task.xlsx`.
 
 ## Verification
 
@@ -117,10 +115,10 @@ Report these files with absolute paths.
 ```bash
 python3 tools/verify_run_outputs.py \
   --run-dir "outputs/my_run" \
-  --final provider_final_official_websites_second_pass.csv \
-  --unresolved provider_unresolved_second_pass.csv \
-  --quality quality_gate_provider_second_pass_final.json \
-  --xlsx "outputs/my_run/provider_official_websites_second_pass_with_clickable_links.xlsx"
+  --final official_sites.csv \
+  --unresolved unresolved.csv \
+  --quality quality.json \
+  --xlsx "outputs/my_run/official_sites.xlsx"
 ```
 
 Also run unit tests after code or scoring changes:
@@ -145,7 +143,7 @@ Report:
 The workflow now creates a simplified worker-facing review workbook:
 
 ```text
-outputs/my_run/manual_official_site_review_task.xlsx
+outputs/my_run/review_task.xlsx
 ```
 
 Tell the user to fill only:
@@ -167,27 +165,27 @@ When the user provides a filled review file, Codex should run this from the repo
   --update-config
 ```
 
-This calls `tools/run_review_learning.py`, which merges the filled manual decisions with existing second-pass decisions, writes reviewed final outputs, creates `manual_review_labels.csv`, reruns the quality gate, writes `manual_review_learning_report.md`, and applies only safe repeated excluded-domain config additions.
-It also writes AgentC recommendations and, with `--update-config`, applies only safe AgentC excluded-domain recommendations plus human/identity/reachability regression artifacts.
+This calls `tools/run_review_learning.py`, which merges the filled manual decisions with existing second-pass decisions, writes reviewed final outputs, creates `reviewed/labels.csv`, reruns the quality gate, writes `reviewed/learning.md`, and applies only safe repeated excluded-domain config additions.
+It also writes AgentB suggestions and, with `--update-config`, applies only safe AgentB excluded-domain recommendations plus human/identity/reachability regression artifacts.
 
 Expected reviewed outputs:
 
 ```text
-outputs/my_run/provider_final_official_websites_reviewed.csv
-outputs/my_run/provider_official_websites_reviewed_with_clickable_links.xlsx
-outputs/my_run/provider_unresolved_reviewed.csv
-outputs/my_run/manual_review_learning_report.md
-outputs/my_run/manual_review_labels.csv
-outputs/my_run/agent_c_optimization_recommendations.md
-outputs/my_run/agent_a_applied_optimizations_summary.json
+outputs/my_run/reviewed/official_sites.csv
+outputs/my_run/reviewed/official_sites.xlsx
+outputs/my_run/reviewed/unresolved.csv
+outputs/my_run/reviewed/learning.md
+outputs/my_run/reviewed/labels.csv
+outputs/my_run/agent_b/suggestions.md
+outputs/my_run/agent_a/applied.json
 ```
 
-After running review learning, inspect `manual_review_learning_report.md` and `manual_review_learning_summary.json`. Only make workflow/config changes when the report shows repeated safe patterns, such as repeated rejected directory/platform domains. Then run tests and rerun the relevant workflow step.
+After running review learning, inspect `reviewed/learning.md` and `reviewed/learning.json`. Only make workflow/config changes when the report shows repeated safe patterns, such as repeated rejected directory/platform domains. Then run tests and rerun the relevant workflow step.
 
 Codex follow-up checklist after a filled review file:
 
 1. Run `./run_review_cycle.sh "$RUN_DIR" "$FILLED_REVIEW" --update-config`.
-2. Read `manual_review_learning_summary.json` and `manual_review_learning_report.md`.
+2. Read `reviewed/learning.json` and `reviewed/learning.md`.
 3. If `config_update.updated=true`, report the added excluded domains and run `PYTHONPATH=.vendor_eval:. python3 -m unittest discover -s tests`.
 4. Verify reviewed outputs with `tools/verify_run_outputs.py` if the shell script did not complete verification.
 5. Final response must list the reviewed final CSV, reviewed clickable XLSX, reviewed unresolved CSV, learning report, manual labels, quality status, and any config optimization applied.
@@ -196,7 +194,7 @@ Codex follow-up checklist after a filled review file:
 
 For precision, prioritize rows whose `status=manual_accepted` and `confidence < 70`.
 
-For recall, inspect `provider_unresolved_second_pass.csv` and `unresolved_second_pass_results.csv`; focus on unresolved rows with a non-empty candidate URL and confidence near 50-69.
+For recall, inspect `unresolved.csv` and `details/second_pass/results.csv`; focus on unresolved rows with a non-empty candidate URL and confidence near 50-74. Legacy files `provider_unresolved_second_pass.csv` and `unresolved_second_pass_results.csv` are also generated.
 
 Accepted official URLs must not be Amazon/Seller Central, social/video platforms, directories, parked/domain-sale pages, login/app/staging/suspended pages, or marketplace profiles.
 

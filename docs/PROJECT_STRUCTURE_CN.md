@@ -108,7 +108,7 @@ Codex 会调用：
 完整流程跑完后，会自动生成一个简化复核表：
 
 ```text
-outputs/my_run/manual_official_site_review_task.xlsx
+outputs/my_run/review_task.xlsx
 ```
 
 工作人员只填三列：
@@ -124,7 +124,7 @@ notes：可选，写判断依据
 ```text
 Use amazon-official-site-finder skill.
 Run directory: outputs/my_run
-Filled review file: outputs/my_run/manual_official_site_review_task.xlsx
+Filled review file: outputs/my_run/review_task.xlsx
 Please apply the review feedback, optimize the workflow where safe, verify everything, and report the final output files.
 ```
 
@@ -148,7 +148,7 @@ run_codex_assisted.sh
            -> tools/plan_unresolved_second_pass.py
            -> tools/build_linked_workbook.py
      -> tools/build_manual_review_task.py
-     -> 可选 B：tools/run_agent_b_verification.py + tools/run_agent_c_recommendations.py
+     -> 可选 B：tools/run_agent_b_verification.py + tools/run_agent_b_recommendations.py
         -> 可选读取 filled human-review XLSX，生成 notes 分类和回归样例建议
      -> 可选 A 安全应用：tools/apply_agent_optimizations.py --apply
      -> tools/verify_run_outputs.py
@@ -162,12 +162,12 @@ Codex receives filled manual review workbook
   -> tools/run_review_learning.py
      -> 合并 second-pass 决策和人工填写结果
      -> 重新生成 reviewed final/unresolved
-     -> 生成 manual_review_labels.csv
+     -> 生成 reviewed/labels.csv
      -> 重新跑 quality gate
-     -> 生成 manual_review_learning_report.md
+     -> 生成 reviewed/learning.md
      -> 对重复出现且安全的排除域名更新 config/scoring.json
      -> tools/build_linked_workbook.py
-  -> tools/run_agent_c_recommendations.py
+  -> tools/run_agent_b_recommendations.py
      -> 汇总 AgentB、人工复核 XLSX 和学习报告里的重复模式
   -> tools/apply_agent_optimizations.py --apply
      -> 只应用安全、可解释的 excluded_domains 更新，并写出 human/identity/reachability 回归样例
@@ -187,11 +187,13 @@ Codex receives filled manual review workbook
 | `tools/run_pipeline.py` | 主调度器。负责标准化输入、搜索候选、评分、生成初版结果、质量门禁和 second-pass。 |
 | `finder/` | 核心逻辑包。包括输入清洗、搜索 query 构建、API 搜索、网页抓取、官网评分。 |
 | `finder/logo.py` | 从候选官网提取 logo/favicon/og:image，并与 Amazon listing logo 做感知哈希相似度比较；只作为正向身份加分证据。 |
-| `tools/run_unresolved_second_pass.py` | 对第一轮没解决的商家做二轮补漏，用 Brave/Exa 找更可能的官网。 |
+| `tools/run_unresolved_second_pass.py` | 对第一轮没解决的商家做二轮补漏，用 Brave/Exa 找更可能的官网；默认接受阈值为 `75`，与 first pass 对齐，同时保留强证据和风险 URL 约束。 |
 | `tools/build_manual_review_task.py` | 生成简化人工复核 CSV/XLSX，只保留工作人员需要判断和填写的列。 |
-| `tools/run_agent_b_verification.py` | B 的候选优先复核部分。先验证当前候选官网，再做少量独立搜索，输出 accept/replace/reject/unsure 和结构化证据。 |
+| `tools/run_agent_b_verification.py` | B 的高风险候选优先复核部分。只复核低置信、二轮新增、平台页、logo-only、同名/通用名等风险行，输出 accept/replace/reject/unsure 和结构化证据。 |
+| `tools/run_agent_b_recommendations.py` | B 的建议部分。读取 B 复核结果和人工复核学习报告，输出可执行或需人工评估的优化建议。 |
 | `tools/run_review_learning.py` | 读取填好的复核表，合并人工反馈，输出 reviewed 结果、人工标签和优化建议。 |
-| `tools/run_agent_c_recommendations.py` | B 的建议部分。读取复核结果和人工复核学习报告，输出可执行或需人工评估的优化建议。 |
+| `tools/run_agent_b_recommendations.py` | B 的建议部分。读取复核结果和人工复核学习报告，输出可执行或需人工评估的优化建议。 |
+| `tools/run_agent_c_recommendations.py` | 旧名称兼容入口，内部仍生成 AgentB 建议。 |
 | `tools/apply_agent_optimizations.py` | A 的安全应用器，只自动写入可解释、可回滚的 excluded_domains 配置。 |
 | `tools/build_linked_workbook.py` | 生成链接可点击的 XLSX。 |
 | `tools/verify_run_outputs.py` | 检查最终 CSV、unresolved CSV、质量 JSON、XLSX 链接公式是否正常。 |
@@ -204,25 +206,29 @@ Codex receives filled manual review workbook
 运行成功后，主要看这几个文件：
 
 ```text
-outputs/my_run/provider_final_official_websites_second_pass.csv
-outputs/my_run/provider_official_websites_second_pass_with_clickable_links.xlsx
-outputs/my_run/provider_unresolved_second_pass.csv
-outputs/my_run/quality_gate_provider_second_pass_final.json
-outputs/my_run/manual_official_site_review_task.xlsx
-outputs/my_run/manual_official_site_review_task.csv
-outputs/my_run/agent_b_verification_results.csv
-outputs/my_run/agent_b_verification_results.xlsx
+outputs/my_run/official_sites.csv
+outputs/my_run/official_sites.xlsx
+outputs/my_run/unresolved.csv
+outputs/my_run/quality.json
+outputs/my_run/review_task.xlsx
+outputs/my_run/review_task.csv
+outputs/my_run/agent_b/check.csv
+outputs/my_run/agent_b/check.xlsx
+outputs/my_run/agent_b/suggestions.md
 ```
+
+`details/input/`、`details/first_pass/`、`details/second_pass/` 保存中间证据和调试文件。旧版公开文件名仍会生成兼容副本，例如 `provider_final_official_websites_second_pass.csv` 和 `manual_official_site_review_task.xlsx`。
 
 人工复核填完并交给 Codex 后，最终主要看：
 
 ```text
-outputs/my_run/provider_final_official_websites_reviewed.csv
-outputs/my_run/provider_official_websites_reviewed_with_clickable_links.xlsx
-outputs/my_run/provider_unresolved_reviewed.csv
-outputs/my_run/manual_review_learning_report.md
-outputs/my_run/manual_review_labels.csv
-outputs/my_run/agent_c_optimization_recommendations.md
+outputs/my_run/reviewed/official_sites.csv
+outputs/my_run/reviewed/official_sites.xlsx
+outputs/my_run/reviewed/unresolved.csv
+outputs/my_run/reviewed/learning.md
+outputs/my_run/reviewed/labels.csv
+outputs/my_run/agent_b/suggestions.md
+outputs/my_run/agent_a/applied.json
 ```
 
 ## 本地生成但不提交的目录

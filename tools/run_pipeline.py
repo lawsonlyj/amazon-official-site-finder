@@ -20,6 +20,12 @@ from tools.build_manual_review_task import build_manual_review_task
 from tools.build_review_sheet import build_review_sheet, write_review_sheet
 from tools.enrich_result_links import enrich_result_links
 from tools.evaluate_labeled_results import read_rows as read_csv_rows
+from tools.output_layout import (
+    DEFAULT_SECOND_PASS_ACCEPT_THRESHOLD,
+    WORKFLOW_VERSION,
+    pipeline_paths as canonical_pipeline_paths,
+    publish_first_pass_aliases,
+)
 from tools.quality_gate import evaluate_quality_gate, write_markdown as write_quality_markdown
 from tools.run_unresolved_second_pass import run_unresolved_second_pass
 
@@ -46,7 +52,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--run-second-pass", action="store_true", help="Run second-pass discovery for unresolved rows.")
     parser.add_argument("--second-pass-per-query", type=int, default=3)
     parser.add_argument("--second-pass-max-search-queries", type=int, default=6)
-    parser.add_argument("--second-pass-accept-threshold", type=int, default=70)
+    parser.add_argument("--second-pass-accept-threshold", type=int, default=DEFAULT_SECOND_PASS_ACCEPT_THRESHOLD)
     parser.add_argument("--second-pass-limit", type=int, default=0)
     parser.add_argument("--second-pass-write-xlsx", action="store_true")
     parser.add_argument("--min-domain-accuracy", type=float, default=0.9)
@@ -109,7 +115,7 @@ def run_pipeline(
     run_second_pass: bool = False,
     second_pass_per_query: int = 3,
     second_pass_max_search_queries: int = 6,
-    second_pass_accept_threshold: int = 70,
+    second_pass_accept_threshold: int = DEFAULT_SECOND_PASS_ACCEPT_THRESHOLD,
     second_pass_limit: int | None = None,
     second_pass_write_xlsx: bool = False,
     min_domain_accuracy: float = 0.9,
@@ -225,6 +231,7 @@ def run_pipeline(
     )
     write_quality_markdown(quality, paths["quality_md"])
     paths["quality_json"].write_text(json.dumps(quality, ensure_ascii=False, indent=2), encoding="utf-8")
+    first_pass_aliases = publish_first_pass_aliases(run_dir, paths)
     manifest["summary"].update(
         {
             "status": "complete",
@@ -238,6 +245,7 @@ def run_pipeline(
         }
     )
     manifest["outputs"] = {name: str(path) for name, path in paths.items()}
+    manifest.setdefault("legacy_aliases", {})["first_pass"] = first_pass_aliases
     manifest["enrich"] = enrich_summary
     manifest["audit"] = audit
     manifest["finalize"] = final_summary
@@ -278,25 +286,13 @@ def run_pipeline(
             "manual_review_task_xlsx": manual_review_task["output_xlsx"],
         }
     )
+    manifest.setdefault("legacy_aliases", {})["review_task"] = manual_review_task.get("legacy_aliases", {})
     write_manifest(paths["manifest"], manifest)
     return manifest
 
 
 def pipeline_paths(run_dir: str | Path) -> dict[str, Path]:
-    run_dir = Path(run_dir)
-    return {
-        "manifest": run_dir / "manifest.json",
-        "normalized": run_dir / "providers_normalized.csv",
-        "results": run_dir / "provider_official_websites.csv",
-        "results_enriched": run_dir / "provider_official_websites_enriched.csv",
-        "evidence": run_dir / "provider_official_websites_evidence.jsonl",
-        "review_queue": run_dir / "provider_review_queue.csv",
-        "review_sheet": run_dir / "provider_review_sheet_enhanced.csv",
-        "final": run_dir / "provider_final_official_websites.csv",
-        "unresolved": run_dir / "provider_unresolved.csv",
-        "quality_md": run_dir / "quality_gate_provider_final.md",
-        "quality_json": run_dir / "quality_gate_provider_final.json",
-    }
+    return canonical_pipeline_paths(run_dir)
 
 
 def build_manifest(
@@ -330,6 +326,7 @@ def build_manifest(
 ) -> dict[str, Any]:
     batches = math.ceil(total_to_run / batch_size) if total_to_run else 0
     return {
+        "workflow_version": WORKFLOW_VERSION,
         "created_at": datetime.now(timezone.utc).isoformat(),
         "source_csv": str(source_csv),
         "run_dir": str(run_dir),

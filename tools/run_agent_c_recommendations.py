@@ -12,10 +12,15 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from finder.text import domain_from_url
+from tools.output_layout import (
+    agent_b_suggestion_paths,
+    first_existing,
+    publish_agent_b_suggestion_aliases,
+)
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="Generate AgentC optimization recommendations from AgentB and review learning.")
+    parser = argparse.ArgumentParser(description="Generate AgentB optimization suggestions from AgentB checks and review learning.")
     parser.add_argument("--run-dir", required=True)
     parser.add_argument("--agent-b-csv")
     parser.add_argument("--learning-summary")
@@ -46,10 +51,16 @@ def run_agent_c_recommendations(
     output_md: str | Path | None = None,
 ) -> dict:
     run_dir = Path(run_dir)
-    agent_b_path = Path(agent_b_csv) if agent_b_csv else run_dir / "agent_b_verification_results.csv"
-    learning_path = Path(learning_summary) if learning_summary else run_dir / "manual_review_learning_summary.json"
-    output_json_path = Path(output_json) if output_json else run_dir / "agent_c_optimization_recommendations.json"
-    output_md_path = Path(output_md) if output_md else run_dir / "agent_c_optimization_recommendations.md"
+    agent_b_path = Path(agent_b_csv) if agent_b_csv else (
+        first_existing(run_dir, "agent_b/check.csv", "agent_b_verification_results.csv") or run_dir / "agent_b/check.csv"
+    )
+    learning_path = Path(learning_summary) if learning_summary else (
+        first_existing(run_dir, "reviewed/learning.json", "manual_review_learning_summary.json")
+        or run_dir / "reviewed/learning.json"
+    )
+    canonical = agent_b_suggestion_paths(run_dir)
+    output_json_path = Path(output_json) if output_json else canonical["json"]
+    output_md_path = Path(output_md) if output_md else canonical["md"]
 
     agent_b_rows = _read_rows(agent_b_path)
     learning = _read_json(learning_path)
@@ -70,8 +81,13 @@ def run_agent_c_recommendations(
         },
         "outputs": {"json": str(output_json_path), "md": str(output_md_path)},
     }
+    output_json_path.parent.mkdir(parents=True, exist_ok=True)
+    output_md_path.parent.mkdir(parents=True, exist_ok=True)
     output_json_path.write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
     _write_markdown(output_md_path, summary)
+    aliases = publish_agent_b_suggestion_aliases(run_dir, {"json": output_json_path, "md": output_md_path})
+    summary["legacy_aliases"] = aliases
+    output_json_path.write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
     _update_manifest(run_dir / "manifest.json", summary)
     return summary
 
@@ -361,7 +377,7 @@ def _first(row: dict[str, str], *keys: str) -> str:
 
 def _write_markdown(path: Path, summary: dict) -> None:
     lines = [
-        "# AgentC Optimization Recommendations",
+        "# AgentB Optimization Suggestions",
         "",
         "## Overall",
         "",
@@ -510,8 +526,10 @@ def _update_manifest(path: Path, summary: dict) -> None:
     if not path.exists():
         return
     manifest = json.loads(path.read_text(encoding="utf-8"))
+    manifest["agent_b_suggestions"] = summary
     manifest["agent_c_recommendations"] = summary
-    manifest.setdefault("outputs", {}).update({f"agent_c_{key}": value for key, value in summary["outputs"].items()})
+    manifest.setdefault("outputs", {}).update({f"agent_b_suggestions_{key}": value for key, value in summary["outputs"].items()})
+    manifest.setdefault("legacy_aliases", {})["agent_b_suggestions"] = summary.get("legacy_aliases", {})
     path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
 
 

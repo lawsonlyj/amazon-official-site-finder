@@ -19,6 +19,12 @@ from finder.scoring import _candidate_roots, is_excluded_domain, load_config, sc
 from finder.search_sources import SearchCandidate, collect_candidates_for_queries
 from finder.text import domain_from_url, normalize_text, tokens
 from tools.build_linked_workbook import build_workbook
+from tools.output_layout import (
+    WORKFLOW_VERSION,
+    agent_b_paths,
+    first_existing,
+    publish_agent_b_aliases,
+)
 
 
 AGENT_B_FIELDS = [
@@ -43,8 +49,6 @@ AGENT_B_FIELDS = [
     "source_status",
     "source_confidence",
 ]
-
-WORKFLOW_VERSION = "agent-loop-v4-logo"
 
 SUPPORTING_PATHS = ["/", "/about", "/contact", "/services", "/privacy", "/terms", "/about-us", "/contact-us"]
 
@@ -96,9 +100,10 @@ def run_agent_b_verification(
     if limit:
         rows = rows[:limit]
 
-    output_csv_path = Path(output_csv) if output_csv else run_dir / "agent_b_verification_results.csv"
-    output_jsonl_path = Path(output_jsonl) if output_jsonl else run_dir / "agent_b_verification_results.jsonl"
-    output_xlsx_path = Path(output_xlsx) if output_xlsx else run_dir / "agent_b_verification_results.xlsx"
+    canonical = agent_b_paths(run_dir)
+    output_csv_path = Path(output_csv) if output_csv else canonical["csv"]
+    output_jsonl_path = Path(output_jsonl) if output_jsonl else canonical["jsonl"]
+    output_xlsx_path = Path(output_xlsx) if output_xlsx else canonical["xlsx"]
 
     result_rows = []
     json_rows = []
@@ -129,9 +134,22 @@ def run_agent_b_verification(
         },
         "xlsx": xlsx_summary,
     }
-    (run_dir / "agent_b_verification_summary.json").write_text(
+    summary_path = canonical["summary"] if not output_csv else run_dir / "agent_b_verification_summary.json"
+    summary_path.parent.mkdir(parents=True, exist_ok=True)
+    summary_path.write_text(
         json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8"
     )
+    aliases = publish_agent_b_aliases(
+        run_dir,
+        {
+            "csv": output_csv_path,
+            "jsonl": output_jsonl_path,
+            "xlsx": output_xlsx_path,
+            "summary": summary_path,
+        },
+    )
+    summary["legacy_aliases"] = aliases
+    summary_path.write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
     _update_manifest(run_dir / "manifest.json", summary)
     return summary
 
@@ -183,10 +201,21 @@ def verify_row(row: dict[str, str], *, config: dict, per_query: int = 2) -> dict
 
 
 def _verification_input_rows(run_dir: Path, *, include_all_final: bool) -> list[dict[str, str]]:
-    final_rows = _read_rows(_first_existing([run_dir / "provider_final_official_websites_second_pass.csv", run_dir / "provider_final_official_websites.csv"]))
+    final_path = first_existing(
+        run_dir,
+        "official_sites.csv",
+        "provider_final_official_websites_second_pass.csv",
+        "details/first_pass/final.csv",
+        "provider_final_official_websites.csv",
+    )
+    final_rows = _read_rows(final_path)
     final_by_key = {_row_key(row): row for row in final_rows if _row_key(row)}
-    manual_task = run_dir / "manual_official_site_review_task.csv"
-    if manual_task.exists() and not include_all_final:
+    second_pass = _index_rows(
+        first_existing(run_dir, "details/second_pass/results.csv", "unresolved_second_pass_results.csv")
+        or run_dir / "details/second_pass/results.csv"
+    )
+    manual_task = first_existing(run_dir, "review_task.csv", "manual_official_site_review_task.csv")
+    if manual_task and manual_task.exists() and not include_all_final:
         task_rows = _read_rows(manual_task)
         out = []
         for task_row in task_rows:
@@ -194,15 +223,42 @@ def _verification_input_rows(run_dir: Path, *, include_all_final: bool) -> list[
             merged.update({key: value for key, value in task_row.items() if value})
             out.append(merged)
         return out
-    second_pass = _index_rows(run_dir / "unresolved_second_pass_results.csv")
     out = []
     for row in final_rows:
         merged = dict(row)
         second = second_pass.get(_row_key(row), {})
         if second.get("previous_top_candidate_url") and not merged.get("top_candidate_url"):
             merged["top_candidate_url"] = second["previous_top_candidate_url"]
-        out.append(merged)
+        if include_all_final or _is_high_risk_for_agent_b(merged, second):
+            out.append(merged)
     return out
+
+
+def _is_high_risk_for_agent_b(row: dict[str, str], second_pass_row: dict[str, str]) -> bool:
+    status = row.get("status", "")
+    confidence = _to_int(row.get("confidence"))
+    evidence = (row.get("evidence_summary") or second_pass_row.get("evidence_summary") or "").casefold()
+    candidate_url = _candidate_url(row) or second_pass_row.get("official_url", "") or second_pass_row.get("previous_top_candidate_url", "")
+    if not row.get("official_url"):
+        return True
+    if status == "manual_accepted" or second_pass_row.get("accepted_for_final") == "true":
+        return True
+    if status != "matched":
+        return True
+    if confidence < 85:
+        return True
+    if _looks_non_independent(candidate_url):
+        return True
+    if _has_generic_or_ambiguous_name(row.get("provider_name", "")):
+        return True
+    has_logo = "listing_logo_visual_match" in evidence or "listing_logo_visual_near_match" in evidence
+    has_name = "page_contains_exact_provider_name" in evidence or "page_contains_provider_name_tokens" in evidence
+    has_service = "page_contains_amazon_service_keywords" in evidence or "page_mentions_amazon_spn" in evidence
+    if has_logo and not (has_name or has_service):
+        return True
+    if "provider_name_not_found" in evidence:
+        return True
+    return False
 
 
 def _verify_url(url: str, provider: dict[str, str], config: dict) -> dict:
@@ -400,6 +456,42 @@ def _looks_non_independent(url: str) -> bool:
     return any(marker in path for marker in ["/profile", "/company/", "/login", "/signin", "/sign-in"])
 
 
+def _has_generic_or_ambiguous_name(name: str) -> bool:
+    provider_tokens = tokens(name)
+    if not provider_tokens:
+        return False
+    generic_tokens = {
+        "amazon",
+        "account",
+        "agency",
+        "consulting",
+        "consultancy",
+        "digital",
+        "ecom",
+        "ecommerce",
+        "e-commerce",
+        "global",
+        "growth",
+        "management",
+        "marketplace",
+        "media",
+        "seller",
+        "service",
+        "services",
+        "solution",
+        "solutions",
+    }
+    meaningful = [token for token in provider_tokens if token not in generic_tokens]
+    return len(meaningful) <= 1 or len("".join(provider_tokens)) <= 4
+
+
+def _to_int(value: object) -> int:
+    try:
+        return int(float(value or 0))
+    except (TypeError, ValueError):
+        return 0
+
+
 def _has_identity_gap(provider: dict[str, str], combined_text: str, supporting_facts: list[str]) -> bool:
     if not combined_text:
         return True
@@ -509,6 +601,7 @@ def _update_manifest(path: Path, summary: dict) -> None:
     manifest = json.loads(path.read_text(encoding="utf-8"))
     manifest["agent_b_verification"] = summary
     manifest.setdefault("outputs", {}).update({f"agent_b_{key}": value for key, value in summary["outputs"].items()})
+    manifest.setdefault("legacy_aliases", {})["agent_b"] = summary.get("legacy_aliases", {})
     path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
 
 

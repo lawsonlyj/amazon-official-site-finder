@@ -17,9 +17,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--expected-rows", type=int, default=0)
     parser.add_argument("--expected-unresolved", type=int)
     parser.add_argument("--xlsx", help="Optional clickable XLSX workbook to inspect.")
-    parser.add_argument("--final", default="provider_final_official_websites.csv")
-    parser.add_argument("--unresolved", default="provider_unresolved.csv")
-    parser.add_argument("--quality", default="quality_gate_provider_final.json")
+    parser.add_argument("--final", default="official_sites.csv")
+    parser.add_argument("--unresolved", default="unresolved.csv")
+    parser.add_argument("--quality", default="quality.json")
     args = parser.parse_args(argv)
 
     summary = verify_run_outputs(
@@ -41,9 +41,9 @@ def verify_run_outputs(
     expected_rows: int | None = None,
     expected_unresolved: int | None = None,
     xlsx: str | Path | None = None,
-    final_csv: str | Path = "provider_final_official_websites.csv",
-    unresolved_csv: str | Path = "provider_unresolved.csv",
-    quality_json: str | Path = "quality_gate_provider_final.json",
+    final_csv: str | Path = "official_sites.csv",
+    unresolved_csv: str | Path = "unresolved.csv",
+    quality_json: str | Path = "quality.json",
 ) -> dict:
     run_dir = Path(run_dir)
     failures: list[str] = []

@@ -9,10 +9,11 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from finder.scoring import load_config
+from tools.output_layout import agent_a_paths, first_existing, publish_agent_a_aliases
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="Apply only safe AgentC optimization recommendations.")
+    parser = argparse.ArgumentParser(description="Apply only safe AgentB optimization suggestions.")
     parser.add_argument("--run-dir", required=True)
     parser.add_argument("--recommendations-json")
     parser.add_argument("--config", default="config/scoring.json")
@@ -37,7 +38,10 @@ def apply_agent_optimizations(
     apply: bool = False,
 ) -> dict:
     run_dir = Path(run_dir)
-    recommendations_path = Path(recommendations_json) if recommendations_json else run_dir / "agent_c_optimization_recommendations.json"
+    recommendations_path = Path(recommendations_json) if recommendations_json else (
+        first_existing(run_dir, "agent_b/suggestions.json", "agent_c_optimization_recommendations.json")
+        or run_dir / "agent_b/suggestions.json"
+    )
     config_path = Path(config_path)
     data = json.loads(recommendations_path.read_text(encoding="utf-8")) if recommendations_path.exists() else {}
     recommendations = data.get("recommendations", [])
@@ -72,15 +76,16 @@ def apply_agent_optimizations(
     if apply and additions:
         config["excluded_domains"] = list(config.get("excluded_domains", [])) + additions
         config_path.write_text(json.dumps(config, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-    fixture_path = run_dir / "agent_identity_constraint_regression_cases.csv"
+    canonical = agent_a_paths(run_dir)
+    fixture_path = canonical["identity_cases"]
     fixtures_written = 0
     if apply and identity_examples:
         fixtures_written = _write_identity_fixtures(fixture_path, identity_examples)
-    human_fixture_path = run_dir / "agent_human_review_regression_cases.csv"
+    human_fixture_path = canonical["human_cases"]
     human_fixtures_written = 0
     if apply and human_review_examples:
         human_fixtures_written = _write_human_review_fixtures(human_fixture_path, human_review_examples)
-    reachability_fixture_path = run_dir / "agent_url_reachability_regression_cases.csv"
+    reachability_fixture_path = canonical["reachability_cases"]
     reachability_fixtures_written = 0
     if apply and url_reachability_examples:
         reachability_fixtures_written = _write_human_review_fixtures(reachability_fixture_path, url_reachability_examples)
@@ -99,10 +104,18 @@ def apply_agent_optimizations(
         "skipped": skipped,
         "config_path": str(config_path),
         "recommendations_json": str(recommendations_path),
+        "outputs": {
+            "applied": str(canonical["applied"]),
+            "identity_cases": str(fixture_path),
+            "human_cases": str(human_fixture_path),
+            "reachability_cases": str(reachability_fixture_path),
+        },
     }
-    (run_dir / "agent_a_applied_optimizations_summary.json").write_text(
-        json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8"
-    )
+    canonical["applied"].parent.mkdir(parents=True, exist_ok=True)
+    canonical["applied"].write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
+    aliases = publish_agent_a_aliases(run_dir, canonical)
+    summary["legacy_aliases"] = aliases
+    canonical["applied"].write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
     _update_manifest(run_dir / "manifest.json", summary)
     return summary
 
@@ -178,9 +191,10 @@ def _update_manifest(path: Path, summary: dict) -> None:
         return
     manifest = json.loads(path.read_text(encoding="utf-8"))
     manifest["agent_a_applied_optimizations"] = summary
-    manifest.setdefault("outputs", {})["agent_a_applied_optimizations_summary"] = str(
-        path.parent / "agent_a_applied_optimizations_summary.json"
+    manifest.setdefault("outputs", {})["agent_a_applied_optimizations_summary"] = summary.get("outputs", {}).get(
+        "applied", str(path.parent / "agent_a/applied.json")
     )
+    manifest.setdefault("legacy_aliases", {})["agent_a"] = summary.get("legacy_aliases", {})
     path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
 
 

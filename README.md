@@ -23,7 +23,7 @@ Use the Codex-assisted script when API keys are stored in local key files:
   --run-agent-b
 ```
 
-`--run-agent-b` is optional. It adds the `agent-loop-v4-logo` B step after the standard second-pass outputs are verified: candidate-first verification plus optimization recommendations. The scorer also compares Amazon listing logos with candidate homepage logo/favicon/og:image assets as positive identity evidence when images are highly similar. Add `--human-review /path/to/filled_review.xlsx` to let B turn filled human-review notes into regression fixtures and safer rule recommendations. Add `--apply-agent-optimizations` only when A should apply safe B recommendations such as repeated excluded-domain additions and write regression artifacts.
+`--run-agent-b` is optional. It adds the AgentB step after AgentA's main workflow: high-risk candidate verification plus optimization suggestions. AgentB now checks only rows that are likely to need attention, such as low-confidence accepts, second-pass/manual accepts, unresolved rows with candidates, platform/profile URLs, generic names, logo-only evidence, and weak identity/service matches. Add `--human-review /path/to/filled_review.xlsx` to let B turn filled human-review notes into regression fixtures and safer rule recommendations. Add `--apply-agent-optimizations` only when A should apply safe B recommendations such as repeated excluded-domain additions and write regression artifacts.
 
 If using Codex, ask:
 
@@ -39,7 +39,7 @@ Please configure, run, verify, and report the final output files. Do not print A
 After the run, review the simplified task workbook:
 
 ```text
-outputs/my_run/manual_official_site_review_task.xlsx
+outputs/my_run/review_task.xlsx
 ```
 
 Fill only `manual_decision`, `manual_url`, and `notes`. After that, hand the filled workbook back to Codex. The worker does not need to run another shell command.
@@ -49,7 +49,7 @@ In Codex, say:
 ```text
 Use amazon-official-site-finder skill.
 Run directory: outputs/my_run
-Filled review file: outputs/my_run/manual_official_site_review_task.xlsx
+Filled review file: outputs/my_run/review_task.xlsx
 Please apply the review feedback, optimize the workflow where the learning report shows safe repeated patterns, verify everything, and report the final output files.
 ```
 
@@ -76,7 +76,7 @@ That command runs the workflow in this order:
    Core library used by the pipeline. It normalizes Amazon rows, builds search queries, calls search sources, fetches pages, scores candidates, and finalizes rows.
 
 5. `tools/run_unresolved_second_pass.py`
-   Runs the Brave/Exa second-pass on unresolved providers and accepts only candidates meeting the configured threshold and identity checks.
+   Runs the Brave/Exa second-pass on unresolved providers. Its default accept threshold is `75`, aligned with first-pass `auto_match_threshold=75`, and it still requires identity evidence and URL risk checks.
 
 6. `tools/build_manual_review_task.py`
    Builds the simplified manual review CSV/XLSX. This is the worker-facing task file for checking uncertain official websites and unresolved top candidates.
@@ -88,41 +88,42 @@ That command runs the workflow in this order:
    Verifies the final CSV, unresolved CSV, quality JSON, and XLSX hyperlink formulas.
 
 9. Optional B loop
-   `tools/run_agent_b_verification.py` re-checks the existing official/top-candidate URL first, inspects company pages and lightweight independent search corroboration, and writes structured `accept`/`replace`/`reject`/`unsure` evidence while preserving `manual_decision`, `manual_url`, and `notes`. `tools/run_agent_c_recommendations.py` is now the recommendation half of B, and `tools/apply_agent_optimizations.py` is A's safe apply step.
+   `tools/run_agent_b_verification.py` re-checks high-risk official/top-candidate URLs first, inspects company pages and lightweight independent search corroboration, and writes structured `accept`/`replace`/`reject`/`unsure` evidence while preserving `manual_decision`, `manual_url`, and `notes`. `tools/run_agent_b_recommendations.py` writes B suggestions, and `tools/apply_agent_optimizations.py` is A's safe apply step. The legacy `tools/run_agent_c_recommendations.py` wrapper still works.
 
 For Codex-assisted usage, `run_codex_assisted.sh` runs first. It calls `tools/configure_env_from_key_files.py` to create `.env` from local key files without printing secrets, then hands off to `run_workflow.sh`.
 
 After manual review, the user gives the filled workbook to Codex. Codex calls `run_review_cycle.sh` internally, which runs `tools/run_review_learning.py`, merges the filled review with the second-pass decisions, writes reviewed final outputs, creates manual labels, runs the quality gate again, and writes a learning report. In Codex mode, Codex also enables safe config optimization for repeated rejected directory/platform patterns and reports whether anything changed.
 
-The review cycle also runs `tools/run_agent_c_recommendations.py`. AgentC reads AgentB verification, filled human-review notes, and manual-review learning reports, then writes recommendation files. When `--update-config` is enabled, `tools/apply_agent_optimizations.py` applies only safe, explainable excluded-domain additions and writes human/identity/reachability regression fixtures; query, threshold, and identity-constraint logic changes remain recommendations until a maintainer implements them with tests.
+The review cycle also runs `tools/run_agent_b_recommendations.py`. B reads AgentB verification, filled human-review notes, and manual-review learning reports, then writes suggestion files. When `--update-config` is enabled, `tools/apply_agent_optimizations.py` applies only safe, explainable excluded-domain additions and writes human/identity/reachability regression fixtures; query, threshold, and identity-constraint logic changes remain recommendations until a maintainer implements them with tests.
 
 ## Main Outputs
 
 After a successful run, the most important files are:
 
 ```text
-outputs/my_run/provider_final_official_websites_second_pass.csv
-outputs/my_run/provider_official_websites_second_pass_with_clickable_links.xlsx
-outputs/my_run/provider_unresolved_second_pass.csv
-outputs/my_run/quality_gate_provider_second_pass_final.json
-outputs/my_run/manual_official_site_review_task.xlsx
-outputs/my_run/manual_official_site_review_task.csv
-outputs/my_run/agent_b_verification_results.csv
-outputs/my_run/agent_b_verification_results.xlsx
-outputs/my_run/agent_c_optimization_recommendations.md
+outputs/my_run/official_sites.csv
+outputs/my_run/official_sites.xlsx
+outputs/my_run/unresolved.csv
+outputs/my_run/quality.json
+outputs/my_run/review_task.xlsx
+outputs/my_run/review_task.csv
+outputs/my_run/agent_b/check.csv
+outputs/my_run/agent_b/check.xlsx
+outputs/my_run/agent_b/suggestions.md
 ```
 
-Use the XLSX for manual browsing and the CSV for downstream processing.
+Use the XLSX for manual browsing and the CSV for downstream processing. Legacy names such as `provider_final_official_websites_second_pass.csv`, `provider_official_websites_second_pass_with_clickable_links.xlsx`, and `manual_official_site_review_task.xlsx` are still generated for compatibility.
 
 After applying manual review, the important reviewed files are:
 
 ```text
-outputs/my_run/provider_final_official_websites_reviewed.csv
-outputs/my_run/provider_official_websites_reviewed_with_clickable_links.xlsx
-outputs/my_run/provider_unresolved_reviewed.csv
-outputs/my_run/manual_review_learning_report.md
-outputs/my_run/manual_review_labels.csv
-outputs/my_run/agent_c_optimization_recommendations.md
+outputs/my_run/reviewed/official_sites.csv
+outputs/my_run/reviewed/official_sites.xlsx
+outputs/my_run/reviewed/unresolved.csv
+outputs/my_run/reviewed/learning.md
+outputs/my_run/reviewed/labels.csv
+outputs/my_run/agent_b/suggestions.md
+outputs/my_run/agent_a/applied.json
 ```
 
 ## Project Directory
@@ -171,7 +172,7 @@ make second-pass RUN_DIR=outputs/my_run
 make review-task RUN_DIR=outputs/my_run
 make agent-b RUN_DIR=outputs/my_run
 make review-learning RUN_DIR=outputs/my_run REVIEW=/path/to/filled_review.xlsx
-make agent-c RUN_DIR=outputs/my_run
+make agent-b-suggestions RUN_DIR=outputs/my_run
 make apply-agent-optimizations RUN_DIR=outputs/my_run
 make verify RUN_DIR=outputs/my_run
 ```

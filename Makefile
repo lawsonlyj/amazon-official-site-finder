@@ -4,7 +4,7 @@ LABELS ?= tests/fixtures/golden_expected_websites.csv
 REVIEW ?=
 PYTHONPATH_VALUE ?= .vendor_eval:.
 
-.PHONY: help test install-optional pipeline second-pass review-task agent-b review-learning agent-c apply-agent-optimizations verify
+.PHONY: help test install-optional pipeline second-pass review-task agent-b review-learning agent-b-suggestions agent-c apply-agent-optimizations verify
 
 help:
 	@echo "Targets:"
@@ -15,8 +15,8 @@ help:
 	@echo "  review-task       Rebuild simplified manual review CSV/XLSX for RUN_DIR"
 	@echo "  agent-b           Run candidate-first verification for RUN_DIR"
 	@echo "  review-learning   Apply filled REVIEW=/path/to/review.xlsx and write learning report"
-	@echo "  agent-c           Generate optimization recommendations for RUN_DIR"
-	@echo "  apply-agent-optimizations Apply safe AgentC config recommendations"
+	@echo "  agent-b-suggestions Generate AgentB optimization suggestions for RUN_DIR"
+	@echo "  apply-agent-optimizations Apply safe AgentB config suggestions"
 	@echo "  verify            Verify final handoff outputs for RUN_DIR"
 	@echo ""
 	@echo "Example:"
@@ -43,7 +43,7 @@ pipeline:
 	  --run-second-pass \
 	  --second-pass-per-query 3 \
 	  --second-pass-max-search-queries 6 \
-	  --second-pass-accept-threshold 70 \
+	  --second-pass-accept-threshold 75 \
 	  --second-pass-write-xlsx \
 	  --min-domain-accuracy 0.8 \
 	  --min-auto-precision 0.95 \
@@ -56,7 +56,7 @@ second-pass:
 	  --labels "$(LABELS)" \
 	  --per-query 3 \
 	  --max-search-queries 6 \
-	  --accept-threshold 70 \
+	  --accept-threshold 75 \
 	  --write-xlsx
 
 review-task:
@@ -78,9 +78,11 @@ review-learning:
 	  --write-xlsx \
 	  --update-config
 
-agent-c:
-	PYTHONPATH=$(PYTHONPATH_VALUE) python3 tools/run_agent_c_recommendations.py \
+agent-b-suggestions:
+	PYTHONPATH=$(PYTHONPATH_VALUE) python3 tools/run_agent_b_recommendations.py \
 	  --run-dir "$(RUN_DIR)"
+
+agent-c: agent-b-suggestions
 
 apply-agent-optimizations:
 	PYTHONPATH=$(PYTHONPATH_VALUE) python3 tools/apply_agent_optimizations.py \
@@ -90,7 +92,7 @@ apply-agent-optimizations:
 verify:
 	python3 tools/verify_run_outputs.py \
 	  --run-dir "$(RUN_DIR)" \
-	  --final provider_final_official_websites_second_pass.csv \
-	  --unresolved provider_unresolved_second_pass.csv \
-	  --quality quality_gate_provider_second_pass_final.json \
-	  --xlsx "$(RUN_DIR)/provider_official_websites_second_pass_with_clickable_links.xlsx"
+	  --final official_sites.csv \
+	  --unresolved unresolved.csv \
+	  --quality quality.json \
+	  --xlsx "$(RUN_DIR)/official_sites.xlsx"

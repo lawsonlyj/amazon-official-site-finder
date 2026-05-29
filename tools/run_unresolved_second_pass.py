@@ -19,6 +19,12 @@ from finder.search_sources import SearchCandidate, collect_candidates_for_querie
 from finder.text import domain_from_url, slug, tokens, url_like_candidates
 from tools.build_linked_workbook import build_workbook
 from tools.evaluate_labeled_results import read_rows as read_csv_rows
+from tools.output_layout import (
+    DEFAULT_SECOND_PASS_ACCEPT_THRESHOLD,
+    first_existing,
+    publish_second_pass_aliases,
+    second_pass_paths as canonical_second_pass_paths,
+)
 from tools.plan_unresolved_second_pass import build_second_pass_plan, summarize_plan
 from tools.quality_gate import evaluate_quality_gate, write_markdown as write_quality_markdown
 
@@ -69,7 +75,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--max-search-queries", type=int, default=6)
     parser.add_argument("--limit", type=int, default=0)
     parser.add_argument("--resume", action="store_true")
-    parser.add_argument("--accept-threshold", type=int, default=70)
+    parser.add_argument("--accept-threshold", type=int, default=DEFAULT_SECOND_PASS_ACCEPT_THRESHOLD)
     parser.add_argument("--write-xlsx", action="store_true")
     parser.add_argument("--min-domain-accuracy", type=float, default=0.8)
     parser.add_argument("--min-auto-precision", type=float, default=0.95)
@@ -106,7 +112,7 @@ def run_unresolved_second_pass(
     max_search_queries: int = 6,
     limit: int | None = None,
     resume: bool = False,
-    accept_threshold: int = 70,
+    accept_threshold: int = DEFAULT_SECOND_PASS_ACCEPT_THRESHOLD,
     write_xlsx: bool = False,
     min_domain_accuracy: float = 0.8,
     min_auto_precision: float = 0.95,
@@ -116,7 +122,10 @@ def run_unresolved_second_pass(
     run_dir = Path(run_dir)
     paths = second_pass_paths(run_dir)
     config = _second_pass_config(load_config(config_path), accept_threshold)
-    providers = {provider["provider_id"]: provider for provider in read_normalized_csv(run_dir / "providers_normalized.csv")}
+    providers_path = first_existing(run_dir, "details/input/providers.csv", "providers_normalized.csv")
+    if not providers_path:
+        raise FileNotFoundError(f"normalized providers CSV not found in {run_dir}")
+    providers = {provider["provider_id"]: provider for provider in read_normalized_csv(providers_path)}
     plan_rows = build_second_pass_plan(run_dir)
     if limit:
         plan_rows = plan_rows[:limit]
@@ -175,7 +184,8 @@ def run_unresolved_second_pass(
     _write_rows(paths["review_decisions"], review_rows, REVIEW_FIELDS)
 
     final_summary = finalize_results(
-        run_dir / "provider_official_websites_enriched.csv",
+        first_existing(run_dir, "details/first_pass/enriched.csv", "provider_official_websites_enriched.csv")
+        or run_dir / "details/first_pass/enriched.csv",
         paths["final"],
         review_csv=paths["review_decisions"],
         unresolved_csv=paths["unresolved"],
@@ -209,6 +219,7 @@ def run_unresolved_second_pass(
         "processed_rows": len(result_rows),
         "newly_processed_rows": len(run_rows),
         "accepted_rows": len(review_rows),
+        "accept_threshold": accept_threshold,
         "second_pass_status_counts": dict(Counter(row.get("status", "") for row in result_rows)),
         "finalize": final_summary,
         "quality_overall": quality["overall"],
@@ -216,24 +227,15 @@ def run_unresolved_second_pass(
         "xlsx": xlsx,
     }
     paths["summary"].write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
+    aliases = publish_second_pass_aliases(run_dir, paths)
+    summary["legacy_aliases"] = aliases
+    paths["summary"].write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
     _update_manifest(run_dir / "manifest.json", summary)
     return summary
 
 
 def second_pass_paths(run_dir: str | Path) -> dict[str, Path]:
-    run_dir = Path(run_dir)
-    return {
-        "plan": run_dir / "unresolved_second_pass_plan.csv",
-        "results": run_dir / "unresolved_second_pass_results.csv",
-        "evidence": run_dir / "unresolved_second_pass_evidence.jsonl",
-        "review_decisions": run_dir / "unresolved_second_pass_review_decisions.csv",
-        "final": run_dir / "provider_final_official_websites_second_pass.csv",
-        "unresolved": run_dir / "provider_unresolved_second_pass.csv",
-        "quality_md": run_dir / "quality_gate_provider_second_pass_final.md",
-        "quality_json": run_dir / "quality_gate_provider_second_pass_final.json",
-        "summary": run_dir / "unresolved_second_pass_summary.json",
-        "xlsx": run_dir / "provider_official_websites_second_pass_with_clickable_links.xlsx",
-    }
+    return canonical_second_pass_paths(run_dir)
 
 
 def _run_one(
@@ -748,6 +750,7 @@ def _update_manifest(path: Path, summary: dict) -> None:
             "second_pass_xlsx": summary["outputs"]["xlsx"],
         }
     )
+    manifest.setdefault("legacy_aliases", {})["second_pass"] = summary.get("legacy_aliases", {})
     path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
 
 

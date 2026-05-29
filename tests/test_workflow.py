@@ -39,6 +39,7 @@ from tools.configure_env_from_key_files import extract_key_from_file, main as co
 from tools.run_agent_b_verification import run_agent_b_verification
 from tools.run_agent_c_recommendations import run_agent_c_recommendations
 from tools.apply_agent_optimizations import apply_agent_optimizations
+from tools.output_layout import DEFAULT_SECOND_PASS_ACCEPT_THRESHOLD, WORKFLOW_VERSION
 
 
 def _write_test_csv(path: Path, rows: list[dict[str, str]]) -> None:
@@ -1201,15 +1202,17 @@ class OperationalCommandTests(unittest.TestCase):
             _write_test_csv(run_dir / "unresolved_second_pass_results.csv", second_pass_rows)
 
             summary = build_manual_review_task(run_dir=run_dir, write_xlsx=True)
-            with (run_dir / "manual_official_site_review_task.csv").open(newline="", encoding="utf-8") as f:
+            with (run_dir / "review_task.csv").open(newline="", encoding="utf-8") as f:
                 task_rows = list(csv.DictReader(f))
-            task_xlsx_exists = (run_dir / "manual_official_site_review_task.xlsx").exists()
+            task_xlsx_exists = (run_dir / "review_task.xlsx").exists()
+            legacy_task_exists = (run_dir / "manual_official_site_review_task.xlsx").exists()
 
         self.assertEqual(summary["review_rows"], 2)
         self.assertEqual([row["provider_id"] for row in task_rows], ["p-1", "p-3"])
         self.assertEqual(task_rows[0]["review_reason"], "precision_second_pass_accepted_lt70")
         self.assertEqual(task_rows[1]["top_candidate_url"], "https://candidate.example")
         self.assertTrue(task_xlsx_exists)
+        self.assertTrue(legacy_task_exists)
 
     def test_agent_b_verification_outputs_decisions_and_clickable_workbook(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -1294,9 +1297,10 @@ class OperationalCommandTests(unittest.TestCase):
                 else [],
             ):
                 summary = run_agent_b_verification(run_dir=run_dir, write_xlsx=True)
-            with (run_dir / "agent_b_verification_results.csv").open(newline="", encoding="utf-8") as f:
+            with (run_dir / "agent_b/check.csv").open(newline="", encoding="utf-8") as f:
                 rows = {row["provider_id"]: row for row in csv.DictReader(f)}
-            xlsx_exists = (run_dir / "agent_b_verification_results.xlsx").exists()
+            xlsx_exists = (run_dir / "agent_b/check.xlsx").exists()
+            legacy_xlsx_exists = (run_dir / "agent_b_verification_results.xlsx").exists()
 
         self.assertEqual(summary["decision_counts"]["accept"], 1)
         self.assertEqual(rows["p-1"]["manual_decision"], "accept")
@@ -1306,7 +1310,60 @@ class OperationalCommandTests(unittest.TestCase):
         self.assertEqual(rows["p-4"]["agent_b_decision"], "unsure")
         self.assertTrue(xlsx_exists)
         self.assertIn("https://amazon.example/p-1", rows["p-1"]["provider_detail_url"])
-        self.assertEqual(summary["workflow_version"], "agent-loop-v4-logo")
+        self.assertEqual(summary["workflow_version"], WORKFLOW_VERSION)
+        self.assertTrue(legacy_xlsx_exists)
+
+    def test_agent_b_defaults_to_high_risk_rows_without_manual_task(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            run_dir = Path(tmp)
+            final_rows = [
+                {
+                    "provider_id": "safe",
+                    "provider_name": "Trusted Distinct Corporation",
+                    "provider_detail_url": "https://amazon.example/safe",
+                    "official_url": "https://trusted.example",
+                    "status": "matched",
+                    "confidence": "96",
+                    "evidence_summary": "page_contains_exact_provider_name; page_contains_amazon_service_keywords",
+                },
+                {
+                    "provider_id": "second",
+                    "provider_name": "Second Pass Agency",
+                    "provider_detail_url": "https://amazon.example/second",
+                    "official_url": "https://second.example",
+                    "status": "manual_accepted",
+                    "confidence": "88",
+                    "evidence_summary": "page_contains_exact_provider_name",
+                },
+                {
+                    "provider_id": "low",
+                    "provider_name": "Low Confidence Agency",
+                    "provider_detail_url": "https://amazon.example/low",
+                    "official_url": "https://low.example",
+                    "status": "matched",
+                    "confidence": "74",
+                    "evidence_summary": "page_contains_exact_provider_name",
+                },
+                {
+                    "provider_id": "logo",
+                    "provider_name": "Logo Only Brand",
+                    "provider_detail_url": "https://amazon.example/logo",
+                    "official_url": "https://logo.example",
+                    "status": "matched",
+                    "confidence": "94",
+                    "evidence_summary": "listing_logo_visual_match",
+                },
+            ]
+            _write_test_csv(run_dir / "official_sites.csv", final_rows)
+            with patch("tools.run_agent_b_verification.fetch_text", return_value={"ok": False, "text": ""}), patch(
+                "tools.run_agent_b_verification.collect_candidates_for_queries", return_value=[]
+            ):
+                summary = run_agent_b_verification(run_dir=run_dir, write_xlsx=False)
+            with (run_dir / "agent_b/check.csv").open(newline="", encoding="utf-8") as f:
+                checked_ids = [row["provider_id"] for row in csv.DictReader(f)]
+
+        self.assertEqual(summary["input_rows"], 3)
+        self.assertEqual(checked_ids, ["second", "low", "logo"])
 
     def test_agent_c_recommends_and_agent_a_applies_only_safe_rules(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -1357,12 +1414,16 @@ class OperationalCommandTests(unittest.TestCase):
             dry_run = apply_agent_optimizations(run_dir=run_dir, config_path=config_path, apply=False)
             applied = apply_agent_optimizations(run_dir=run_dir, config_path=config_path, apply=True)
             config = json.loads(config_path.read_text(encoding="utf-8"))
+            suggestions_exists = (run_dir / "agent_b/suggestions.json").exists()
+            legacy_suggestions_exists = (run_dir / "agent_c_optimization_recommendations.json").exists()
 
         self.assertEqual(recommendations["overall"]["safe_config_action_count"], 1)
         self.assertEqual(dry_run["pending_excluded_domains"], ["bad-directory.example"])
         self.assertTrue(applied["updated"])
         self.assertIn("bad-directory.example", config["excluded_domains"])
         self.assertNotIn("single-case.example", config["excluded_domains"])
+        self.assertTrue(suggestions_exists)
+        self.assertTrue(legacy_suggestions_exists)
 
     def test_agent_a_writes_identity_regression_fixtures_without_config_change(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -1397,6 +1458,7 @@ class OperationalCommandTests(unittest.TestCase):
         self.assertTrue(applied["artifacts_updated"])
         self.assertEqual(applied["identity_regression_fixture_rows"], 3)
         self.assertTrue(fixture_exists)
+        self.assertEqual(fixture_path.name, "identity_cases.csv")
 
     def test_human_review_recommendations_write_fixtures_and_platform_rule(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -1645,16 +1707,18 @@ class OperationalCommandTests(unittest.TestCase):
                 labels_csv=run_dir / "labels.csv",
                 write_xlsx=True,
             )
-            with (run_dir / "provider_final_official_websites_reviewed.csv").open(newline="", encoding="utf-8") as f:
+            with (run_dir / "reviewed/official_sites.csv").open(newline="", encoding="utf-8") as f:
                 reviewed = {row["provider_id"]: row for row in csv.DictReader(f)}
-            report_exists = (run_dir / "manual_review_learning_report.md").exists()
-            xlsx_exists = (run_dir / "provider_official_websites_reviewed_with_clickable_links.xlsx").exists()
+            report_exists = (run_dir / "reviewed/learning.md").exists()
+            xlsx_exists = (run_dir / "reviewed/official_sites.xlsx").exists()
+            legacy_xlsx_exists = (run_dir / "provider_official_websites_reviewed_with_clickable_links.xlsx").exists()
 
         self.assertEqual(reviewed["p-2"]["official_domain"], "two-true.example")
         self.assertEqual(reviewed["p-3"]["status"], "rejected")
         self.assertEqual(summary["overall"]["applied_manual_rows"], 2)
         self.assertTrue(report_exists)
         self.assertTrue(xlsx_exists)
+        self.assertTrue(legacy_xlsx_exists)
 
     def test_review_learning_treats_typos_and_reject_with_manual_url_as_replace(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -1790,11 +1854,11 @@ class OperationalCommandTests(unittest.TestCase):
                     "status": "unresolved",
                 },
             ]
-            with (run_dir / "provider_final_official_websites.csv").open("w", newline="", encoding="utf-8") as f:
+            with (run_dir / "official_sites.csv").open("w", newline="", encoding="utf-8") as f:
                 writer = csv.DictWriter(f, fieldnames=final_rows[0].keys())
                 writer.writeheader()
                 writer.writerows(final_rows)
-            with (run_dir / "provider_unresolved.csv").open("w", newline="", encoding="utf-8") as f:
+            with (run_dir / "unresolved.csv").open("w", newline="", encoding="utf-8") as f:
                 writer = csv.DictWriter(f, fieldnames=final_rows[0].keys())
                 writer.writeheader()
                 writer.writerow(final_rows[1])
@@ -1807,7 +1871,7 @@ class OperationalCommandTests(unittest.TestCase):
                     "malformed_official_url_rows": 0,
                 }
             }
-            (run_dir / "quality_gate_provider_final.json").write_text(json.dumps(quality), encoding="utf-8")
+            (run_dir / "quality.json").write_text(json.dumps(quality), encoding="utf-8")
 
             summary = verify_run_outputs(run_dir, expected_rows=2, expected_unresolved=1)
 
@@ -1882,30 +1946,33 @@ class OperationalCommandTests(unittest.TestCase):
 
             with patch("finder.scoring.fetch_text", side_effect=fake_fetch):
                 summary = run_unresolved_second_pass(run_dir=run_dir, accept_threshold=75)
-            with (run_dir / "provider_final_official_websites_second_pass.csv").open(newline="", encoding="utf-8") as f:
+            with (run_dir / "official_sites.csv").open(newline="", encoding="utf-8") as f:
                 final_rows = list(csv.DictReader(f))
+            legacy_final_exists = (run_dir / "provider_final_official_websites_second_pass.csv").exists()
 
         self.assertEqual(summary["accepted_rows"], 1)
         self.assertEqual(summary["finalize"]["official_url_rows"], 1)
         self.assertEqual(final_rows[0]["status"], "manual_accepted")
+        self.assertTrue(legacy_final_exists)
 
-    def test_second_pass_acceptance_threshold_is_70(self):
+    def test_second_pass_acceptance_threshold_is_75(self):
         config = load_config()
-        matched_70 = {
+        matched_75 = {
             "official_url": "https://example.com",
             "status": "matched",
-            "confidence": "70",
+            "confidence": "75",
             "evidence_summary": "page_contains_exact_provider_name",
         }
-        matched_69 = {
+        matched_74 = {
             "official_url": "https://example.com",
             "status": "matched",
-            "confidence": "69",
+            "confidence": "74",
             "evidence_summary": "page_contains_exact_provider_name",
         }
 
-        self.assertTrue(_accepted(matched_70, config, 70))
-        self.assertFalse(_accepted(matched_69, config, 70))
+        self.assertEqual(DEFAULT_SECOND_PASS_ACCEPT_THRESHOLD, 75)
+        self.assertTrue(_accepted(matched_75, config, DEFAULT_SECOND_PASS_ACCEPT_THRESHOLD))
+        self.assertFalse(_accepted(matched_74, config, DEFAULT_SECOND_PASS_ACCEPT_THRESHOLD))
 
     def test_second_pass_accepts_lower_score_only_with_verified_identity(self):
         config = load_config()

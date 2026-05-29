@@ -17,6 +17,7 @@ from finder.scoring import load_config
 from finder.text import domain_from_url
 from tools.build_linked_workbook import build_workbook
 from tools.evaluate_labeled_results import read_rows as read_csv_rows
+from tools.output_layout import first_existing, publish_reviewed_aliases, reviewed_paths as canonical_reviewed_paths
 from tools.quality_gate import evaluate_quality_gate, write_markdown as write_quality_markdown
 
 
@@ -177,23 +178,15 @@ def run_review_learning(
     }
     paths["summary"].write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
     _write_report(paths["report_md"], summary)
+    aliases = publish_reviewed_aliases(run_dir, paths)
+    summary["legacy_aliases"] = aliases
+    paths["summary"].write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
     _update_manifest(run_dir / "manifest.json", summary)
     return summary
 
 
 def review_learning_paths(run_dir: str | Path) -> dict[str, Path]:
-    run_dir = Path(run_dir)
-    return {
-        "combined_review": run_dir / "manual_review_combined_decisions.csv",
-        "manual_labels": run_dir / "manual_review_labels.csv",
-        "final": run_dir / "provider_final_official_websites_reviewed.csv",
-        "unresolved": run_dir / "provider_unresolved_reviewed.csv",
-        "quality_md": run_dir / "quality_gate_provider_reviewed.md",
-        "quality_json": run_dir / "quality_gate_provider_reviewed.json",
-        "summary": run_dir / "manual_review_learning_summary.json",
-        "report_md": run_dir / "manual_review_learning_report.md",
-        "xlsx": run_dir / "provider_official_websites_reviewed_with_clickable_links.xlsx",
-    }
+    return canonical_reviewed_paths(run_dir)
 
 
 def _read_table(path: str | Path) -> list[dict[str, str]]:
@@ -304,10 +297,10 @@ def _formula_to_url(value: str) -> str:
 
 def _base_review_rows(run_dir: Path) -> list[dict[str, str]]:
     for path in [
-        run_dir / "unresolved_second_pass_review_decisions.csv",
-        run_dir / "provider_review_queue.csv",
+        first_existing(run_dir, "details/second_pass/decisions.csv", "unresolved_second_pass_review_decisions.csv"),
+        first_existing(run_dir, "details/first_pass/review_queue.csv", "provider_review_queue.csv"),
     ]:
-        if path.exists():
+        if path and path.exists():
             return _read_csv_rows(path)
     return []
 
@@ -496,6 +489,7 @@ def _write_report(path: Path, summary: dict[str, Any]) -> None:
 def _source_results_path(run_dir: Path, manifest: dict[str, Any]) -> Path:
     outputs = manifest.get("outputs", {})
     for value in [
+        run_dir / "details/first_pass/enriched.csv",
         outputs.get("results_enriched"),
         run_dir / "provider_official_websites_enriched.csv",
         outputs.get("results"),
@@ -526,6 +520,7 @@ def _update_manifest(path: Path, summary: dict[str, Any]) -> None:
         }
     )
     manifest.setdefault("outputs", {}).update({f"review_{name}": value for name, value in summary["outputs"].items()})
+    manifest.setdefault("legacy_aliases", {})["reviewed"] = summary.get("legacy_aliases", {})
     path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
 
 

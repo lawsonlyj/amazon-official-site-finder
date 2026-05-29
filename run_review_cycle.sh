@@ -48,23 +48,23 @@ fi
 
 PYTHONPATH=.vendor_eval:. python3 tools/run_review_learning.py "${ARGS[@]}"
 
-PYTHONPATH=.vendor_eval:. python3 tools/run_agent_c_recommendations.py --run-dir "$RUN_DIR" --human-review "$REVIEW_FILE"
+PYTHONPATH=.vendor_eval:. python3 tools/run_agent_b_recommendations.py --run-dir "$RUN_DIR" --human-review "$REVIEW_FILE"
 if [[ "$UPDATE_CONFIG" == "1" ]]; then
   PYTHONPATH=.vendor_eval:. python3 tools/apply_agent_optimizations.py --run-dir "$RUN_DIR" --apply
 fi
 
 python3 tools/verify_run_outputs.py \
   --run-dir "$RUN_DIR" \
-  --final provider_final_official_websites_reviewed.csv \
-  --unresolved provider_unresolved_reviewed.csv \
-  --quality quality_gate_provider_reviewed.json \
-  --xlsx "$RUN_DIR/provider_official_websites_reviewed_with_clickable_links.xlsx"
+  --final reviewed/official_sites.csv \
+  --unresolved reviewed/unresolved.csv \
+  --quality reviewed/quality.json \
+  --xlsx "$RUN_DIR/reviewed/official_sites.xlsx"
 
 echo "Done."
-echo "Reviewed final CSV: $RUN_DIR/provider_final_official_websites_reviewed.csv"
-echo "Reviewed clickable XLSX: $RUN_DIR/provider_official_websites_reviewed_with_clickable_links.xlsx"
-echo "Learning report: $RUN_DIR/manual_review_learning_report.md"
-echo "AgentC recommendations: $RUN_DIR/agent_c_optimization_recommendations.md"
+echo "Reviewed final CSV: $RUN_DIR/reviewed/official_sites.csv"
+echo "Reviewed clickable XLSX: $RUN_DIR/reviewed/official_sites.xlsx"
+echo "Learning report: $RUN_DIR/reviewed/learning.md"
+echo "AgentB suggestions: $RUN_DIR/agent_b/suggestions.md"
 if [[ "$UPDATE_CONFIG" == "1" ]]; then
   echo "Config optimization: enabled for safe repeated patterns."
 fi

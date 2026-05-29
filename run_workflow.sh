@@ -79,7 +79,7 @@ PYTHONPATH=.vendor_eval:. python3 tools/run_pipeline.py \
   --run-second-pass \
   --second-pass-per-query 3 \
   --second-pass-max-search-queries 6 \
-  --second-pass-accept-threshold 70 \
+  --second-pass-accept-threshold 75 \
   --second-pass-write-xlsx \
   --min-domain-accuracy 0.8 \
   --min-auto-precision 0.95 \
@@ -88,10 +88,10 @@ PYTHONPATH=.vendor_eval:. python3 tools/run_pipeline.py \
 
 python3 tools/verify_run_outputs.py \
   --run-dir "$RUN_DIR" \
-  --final provider_final_official_websites_second_pass.csv \
-  --unresolved provider_unresolved_second_pass.csv \
-  --quality quality_gate_provider_second_pass_final.json \
-  --xlsx "$RUN_DIR/provider_official_websites_second_pass_with_clickable_links.xlsx"
+  --final official_sites.csv \
+  --unresolved unresolved.csv \
+  --quality quality.json \
+  --xlsx "$RUN_DIR/official_sites.xlsx"
 
 if [[ "$RUN_AGENT_B" == "1" ]]; then
   AGENT_B_ARGS=(--run-dir "$RUN_DIR" --write-xlsx)
@@ -103,19 +103,20 @@ if [[ "$RUN_AGENT_B" == "1" ]]; then
   if [[ -n "$HUMAN_REVIEW_FILE" ]]; then
     AGENT_C_ARGS+=(--human-review "$HUMAN_REVIEW_FILE")
   fi
-  PYTHONPATH=.vendor_eval:. python3 tools/run_agent_c_recommendations.py "${AGENT_C_ARGS[@]}"
+  PYTHONPATH=.vendor_eval:. python3 tools/run_agent_b_recommendations.py "${AGENT_C_ARGS[@]}"
   if [[ "$APPLY_AGENT_OPTIMIZATIONS" == "1" ]]; then
     PYTHONPATH=.vendor_eval:. python3 tools/apply_agent_optimizations.py --run-dir "$RUN_DIR" --apply
   fi
 fi
 
 echo "Done."
-echo "Final CSV: $RUN_DIR/provider_final_official_websites_second_pass.csv"
-echo "Clickable XLSX: $RUN_DIR/provider_official_websites_second_pass_with_clickable_links.xlsx"
-echo "Manual review CSV: $RUN_DIR/manual_official_site_review_task.csv"
-echo "Manual review XLSX: $RUN_DIR/manual_official_site_review_task.xlsx"
+echo "Final CSV: $RUN_DIR/official_sites.csv"
+echo "Clickable XLSX: $RUN_DIR/official_sites.xlsx"
+echo "Unresolved CSV: $RUN_DIR/unresolved.csv"
+echo "Manual review CSV: $RUN_DIR/review_task.csv"
+echo "Manual review XLSX: $RUN_DIR/review_task.xlsx"
 if [[ "$RUN_AGENT_B" == "1" ]]; then
-  echo "AgentB verification CSV: $RUN_DIR/agent_b_verification_results.csv"
-  echo "AgentB verification XLSX: $RUN_DIR/agent_b_verification_results.xlsx"
-  echo "AgentB recommendations: $RUN_DIR/agent_c_optimization_recommendations.md"
+  echo "AgentB verification CSV: $RUN_DIR/agent_b/check.csv"
+  echo "AgentB verification XLSX: $RUN_DIR/agent_b/check.xlsx"
+  echo "AgentB suggestions: $RUN_DIR/agent_b/suggestions.md"
 fi

@@ -10,6 +10,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from finder.text import domain_from_url
 from tools.build_linked_workbook import build_workbook
+from tools.output_layout import first_existing, publish_review_task_aliases, review_task_paths
 
 
 TASK_FIELDS = [
@@ -67,18 +68,25 @@ def build_manual_review_task(
     include_matched_confidence_below: int = 85,
 ) -> dict:
     run_dir = Path(run_dir)
-    final_path = _first_existing(
-        [
-            run_dir / "provider_final_official_websites_second_pass.csv",
-            run_dir / "provider_final_official_websites.csv",
-        ]
+    final_path = first_existing(
+        run_dir,
+        "official_sites.csv",
+        "provider_final_official_websites_second_pass.csv",
+        "details/first_pass/final.csv",
+        "provider_final_official_websites.csv",
     )
     if not final_path:
         raise FileNotFoundError(f"final result CSV not found in {run_dir}")
 
     final_rows = _read_rows(final_path)
-    second_pass_rows = _index_rows(run_dir / "unresolved_second_pass_results.csv")
-    review_rows = _index_rows(run_dir / "provider_review_sheet_enhanced.csv")
+    second_pass_rows = _index_rows(
+        first_existing(run_dir, "details/second_pass/results.csv", "unresolved_second_pass_results.csv")
+        or run_dir / "details/second_pass/results.csv"
+    )
+    review_rows = _index_rows(
+        first_existing(run_dir, "details/first_pass/review_sheet.csv", "provider_review_sheet_enhanced.csv")
+        or run_dir / "details/first_pass/review_sheet.csv"
+    )
     task_rows = [
         _task_row(row, second_pass_rows.get(_row_key(row), {}), review_rows.get(_row_key(row), {}))
         for row in final_rows
@@ -86,18 +94,21 @@ def build_manual_review_task(
     ]
     task_rows = sorted(task_rows, key=_sort_key)
 
-    output_csv_path = Path(output_csv) if output_csv else run_dir / "manual_official_site_review_task.csv"
+    canonical = review_task_paths(run_dir)
+    output_csv_path = Path(output_csv) if output_csv else canonical["csv"]
     _write_rows(output_csv_path, task_rows, TASK_FIELDS)
     xlsx_summary = {}
-    output_xlsx_path = Path(output_xlsx) if output_xlsx else run_dir / "manual_official_site_review_task.xlsx"
+    output_xlsx_path = Path(output_xlsx) if output_xlsx else canonical["xlsx"]
     if write_xlsx:
         xlsx_summary = build_workbook([("Manual_Review_Task", output_csv_path)], output_xlsx_path)
+    aliases = publish_review_task_aliases(run_dir, {"csv": output_csv_path, "xlsx": output_xlsx_path})
 
     return {
         "review_rows": len(task_rows),
         "source_final_csv": str(final_path),
         "output_csv": str(output_csv_path),
         "output_xlsx": str(output_xlsx_path) if write_xlsx else "",
+        "legacy_aliases": aliases,
         "xlsx": xlsx_summary,
         "reason_counts": _reason_counts(task_rows),
     }

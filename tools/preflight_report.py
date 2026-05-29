@@ -181,14 +181,16 @@ def build_preflight_report(
         ],
         "handoff_outputs": [
             "manifest.json",
-            "providers_normalized.csv",
-            "provider_official_websites.csv",
-            "provider_official_websites_evidence.jsonl",
-            "provider_review_sheet_enhanced.csv",
-            "provider_final_official_websites.csv",
-            "provider_unresolved.csv",
-            "quality_gate_provider_final.md",
-            "quality_gate_provider_final.json",
+            "official_sites.csv",
+            "official_sites.xlsx",
+            "unresolved.csv",
+            "quality.md",
+            "quality.json",
+            "review_task.csv",
+            "review_task.xlsx",
+            "details/input/providers.csv",
+            "details/first_pass/enriched.csv",
+            "details/second_pass/results.csv",
         ],
         "recommended_commands": commands,
         "reference_links": [{"label": label, "url": url} for label, url in REFERENCE_LINKS],
@@ -414,7 +416,7 @@ def _recommended_commands(
         ),
         "apply_review_after_manual_fill": (
             f"PYTHONPATH=.vendor_eval:. python3 tools/apply_review.py --run-dir {run_dir} "
-            f"--review {run_dir / 'provider_review_sheet_enhanced.csv'}"
+            f"--review {run_dir / 'details/first_pass/review_sheet.csv'}"
             + (f" --labels {labels_csv}" if labels_csv else "")
             + (
                 f" --min-domain-accuracy {min_domain_accuracy} --min-auto-precision {min_auto_precision} "
@@ -426,7 +428,7 @@ def _recommended_commands(
         ),
         "review_learning_after_manual_fill": (
             f"PYTHONPATH=.vendor_eval:. python3 tools/run_review_learning.py --run-dir {run_dir} "
-            f"--review {run_dir / 'manual_official_site_review_task.xlsx'} --write-xlsx --update-config"
+            f"--review {run_dir / 'review_task.xlsx'} --write-xlsx --update-config"
             + (f" --labels {labels_csv}" if labels_csv else "")
         ),
     }
