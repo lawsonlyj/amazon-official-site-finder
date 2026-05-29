@@ -43,6 +43,7 @@ from tools.apply_agent_optimizations import apply_agent_optimizations
 from tools.evaluate_workflow_balance import evaluate_balance
 from tools.build_balance_report import build_balance_report
 from tools.build_calibration_review_sample import build_calibration_review_sample
+from tools.evaluate_calibration_review_sample import evaluate_calibration_review_sample
 from tools.output_layout import DEFAULT_SECOND_PASS_ACCEPT_THRESHOLD, WORKFLOW_VERSION
 
 
@@ -2444,6 +2445,93 @@ class OperationalCommandTests(unittest.TestCase):
         self.assertIn("agent_b_accept_risky_lane", {row["sample_reason"] for row in rows})
         self.assertIn("recall_candidate_label", {row["sample_reason"] for row in rows})
         self.assertTrue(xlsx_exists)
+
+    def test_evaluate_calibration_review_sample_turns_labels_into_rule_guidance(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            sample_csv = root / "sample.csv"
+            sample_xlsx = root / "sample.xlsx"
+            out_json = root / "calibration.json"
+            out_md = root / "calibration.md"
+            out_csv = root / "calibration_details.csv"
+            _write_test_csv(
+                sample_csv,
+                [
+                    {
+                        "provider_id": "p-risk",
+                        "provider_name": "Risky Accept",
+                        "sample_reason": "agent_b_accept_risky_lane",
+                        "review_reason": "precision_generic_identity_term_risk",
+                        "agent_b_decision": "accept",
+                        "reason_for_unsure": "",
+                        "official_url": "https://wrong.example",
+                        "candidate_url": "https://wrong.example",
+                        "manual_decision": "reject",
+                        "manual_url": "",
+                        "notes": "same name, wrong company",
+                    },
+                    {
+                        "provider_id": "p-recall",
+                        "provider_name": "Recall Row",
+                        "sample_reason": "recall_candidate_label",
+                        "review_reason": "recall_unresolved_top_candidate",
+                        "agent_b_decision": "unsure",
+                        "reason_for_unsure": "",
+                        "official_url": "",
+                        "candidate_url": "https://recall.example",
+                        "manual_decision": "replace",
+                        "manual_url": "https://real-recall.example",
+                        "notes": "candidate useful but needs replacement",
+                    },
+                    {
+                        "provider_id": "p-timeout",
+                        "provider_name": "Timeout Row",
+                        "sample_reason": "timeout_needs_manual",
+                        "review_reason": "precision_low_confidence_auto_match",
+                        "agent_b_decision": "unsure",
+                        "reason_for_unsure": "agent_b_row_timeout",
+                        "official_url": "https://timeout.example",
+                        "candidate_url": "https://timeout.example",
+                        "manual_decision": "accept",
+                        "manual_url": "",
+                        "notes": "correct after manual check",
+                    },
+                    {
+                        "provider_id": "p-blank",
+                        "provider_name": "Blank Row",
+                        "sample_reason": "agent_b_unsure_label",
+                        "review_reason": "precision_low_confidence_auto_match",
+                        "agent_b_decision": "unsure",
+                        "reason_for_unsure": "",
+                        "official_url": "https://blank.example",
+                        "candidate_url": "https://blank.example",
+                        "manual_decision": "",
+                        "manual_url": "",
+                        "notes": "",
+                    },
+                ],
+            )
+            build_workbook([("Calibration_Review", sample_csv)], sample_xlsx)
+
+            report = evaluate_calibration_review_sample(
+                sample=sample_xlsx,
+                output_json=out_json,
+                output_md=out_md,
+                output_csv=out_csv,
+            )
+            with out_csv.open(newline="", encoding="utf-8") as f:
+                detail_rows = list(csv.DictReader(f))
+            md_text = out_md.read_text(encoding="utf-8")
+            out_json_exists = out_json.exists()
+
+        self.assertEqual(report["summary"]["sample_rows"], 4)
+        self.assertEqual(report["summary"]["labeled_rows"], 3)
+        self.assertEqual(report["summary"]["candidate_incorrect_rows"], 1)
+        self.assertEqual(report["summary"]["recall_useful_rows"], 1)
+        self.assertEqual(report["by_sample_reason"]["agent_b_accept_risky_lane"]["outcome_counts"]["candidate_incorrect"], 1)
+        self.assertIn("Keep AgentB risky accepts in manual review", md_text)
+        self.assertTrue(out_json_exists)
+        self.assertEqual(detail_rows[1]["normalized_manual_url"], "https://real-recall.example")
 
     def test_scoring_tries_www_variant_before_giving_up_on_candidate(self):
         config = load_config("config/scoring.json")
