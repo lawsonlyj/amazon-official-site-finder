@@ -2930,6 +2930,45 @@ class OperationalCommandTests(unittest.TestCase):
                 ),
                 encoding="utf-8",
             )
+            pattern_release = root / "pattern_release.json"
+            pattern_release.write_text(
+                json.dumps(
+                    {
+                        "summary": {
+                            "scope": "recall",
+                            "baseline_overall_accuracy": 0.81,
+                            "selected_actionable_pattern_count": 2,
+                            "selected_actionable_correct_recovery_rows": 4,
+                            "selected_actionable_wrong_release_rows": 0,
+                            "selected_actionable_accuracy": 0.85,
+                            "selected_actionable_auto_precision": 0.907,
+                            "selected_actionable_official_recall": 0.907,
+                        },
+                        "selected_actionable_pattern_set": [
+                            {
+                                "pattern": "domain_relation:exact_provider_slug AND has:schema_org_organization_seen",
+                                "features": [
+                                    "domain_relation:exact_provider_slug",
+                                    "has:schema_org_organization_seen",
+                                ],
+                                "correct_recovery_rows": 2,
+                                "wrong_release_rows": 0,
+                            }
+                        ],
+                        "selected_actionable_release_summary": {
+                            "pattern_count": 2,
+                            "correct_recovery_rows": 4,
+                            "wrong_release_rows": 0,
+                            "simulated_overall": {
+                                "overall_accuracy": 0.85,
+                                "auto_precision": 0.907,
+                                "official_recall": 0.907,
+                            },
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
             _write_test_csv(
                 review,
                 [
@@ -2950,6 +2989,7 @@ class OperationalCommandTests(unittest.TestCase):
                 batch_review_csv=review,
                 batch_agent_b_csv=agent_b,
                 batch_total_rows=4,
+                pattern_release_jsons=[pattern_release],
                 output_json=out_json,
                 output_md=out_md,
             )
@@ -2958,11 +2998,16 @@ class OperationalCommandTests(unittest.TestCase):
 
         self.assertEqual(report["summary"]["recommended_threshold"], 75)
         self.assertEqual(report["summary"]["recommended_agent_b_recall_release"], "manual_only")
+        self.assertEqual(report["summary"]["recommended_pattern_release"], "narrow_pattern_release_candidate")
+        self.assertEqual(report["summary"]["pattern_release_correct_rows"], 4)
+        self.assertEqual(report["summary"]["pattern_release_wrong_rows"], 0)
         self.assertEqual(report["summary"]["batch_review_rows"], 2)
         self.assertEqual(report["summary"]["batch_review_rate"], 0.5)
         self.assertEqual(report["summary"]["batch_agent_b_timeout_rows"], 1)
         self.assertIn("Keep auto-accept threshold at 75", md_text)
         self.assertIn("AgentB Recall Release Simulation", md_text)
+        self.assertIn("Prefer narrow pattern release over global threshold relaxation", md_text)
+        self.assertIn("Pattern Release", md_text)
         self.assertTrue(json_exists)
 
     def test_build_calibration_review_sample_prioritizes_high_value_rows(self):
@@ -3243,7 +3288,7 @@ class OperationalCommandTests(unittest.TestCase):
                 json.dumps(
                     {
                         "summary": {"scope": "recall"},
-                        "actionable_safe_patterns": [
+                        "selected_actionable_pattern_set": [
                             {
                                 "pattern": "agent_b_score<60 AND domain_relation:exact_provider_slug AND has:schema_org_organization_seen",
                                 "features": [
@@ -3252,6 +3297,17 @@ class OperationalCommandTests(unittest.TestCase):
                                     "has:schema_org_organization_seen",
                                 ],
                                 "correct_recovery_rows": 2,
+                                "wrong_release_rows": 0,
+                            }
+                        ],
+                        "actionable_safe_patterns": [
+                            {
+                                "pattern": "domain_relation:no_such_pattern AND has:schema_org_organization_seen",
+                                "features": [
+                                    "domain_relation:no_such_pattern",
+                                    "has:schema_org_organization_seen",
+                                ],
+                                "correct_recovery_rows": 99,
                                 "wrong_release_rows": 0,
                             }
                         ],

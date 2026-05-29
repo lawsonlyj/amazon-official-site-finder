@@ -200,6 +200,21 @@ def _load_patterns(paths: list[str | Path]) -> list[dict]:
         path = Path(path_value)
         data = json.loads(path.read_text(encoding="utf-8"))
         scope = data.get("summary", {}).get("scope", "")
+        for item in data.get("selected_actionable_pattern_set", [])[:25]:
+            features = set(item.get("features") or _pattern_features(item.get("pattern", "")))
+            if not features:
+                continue
+            out.append(
+                {
+                    "kind": "actionable_release",
+                    "scope": scope,
+                    "pattern": item.get("pattern", ""),
+                    "features": features,
+                    "support_rows": _to_int(item.get("support_rows")),
+                    "correct_recovery_rows": _to_int(item.get("correct_recovery_rows")),
+                    "wrong_release_rows": _to_int(item.get("wrong_release_rows")),
+                }
+            )
         for kind, key in [
             ("actionable_release", "actionable_safe_patterns"),
             ("durable_safe", "durable_safe_patterns"),

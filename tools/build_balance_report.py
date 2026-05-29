@@ -14,6 +14,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--batch-review-csv")
     parser.add_argument("--batch-agent-b-csv")
     parser.add_argument("--batch-total-rows", type=int, default=0)
+    parser.add_argument(
+        "--pattern-release-json",
+        action="append",
+        default=[],
+        help="Optional output from tools/simulate_pattern_release.py. Repeatable.",
+    )
     parser.add_argument("--output-json")
     parser.add_argument("--output-md")
     args = parser.parse_args(argv)
@@ -23,6 +29,7 @@ def main(argv: list[str] | None = None) -> int:
         batch_review_csv=args.batch_review_csv,
         batch_agent_b_csv=args.batch_agent_b_csv,
         batch_total_rows=args.batch_total_rows,
+        pattern_release_jsons=args.pattern_release_json,
         output_json=args.output_json,
         output_md=args.output_md,
     )
@@ -36,6 +43,7 @@ def build_balance_report(
     batch_review_csv: str | Path | None = None,
     batch_agent_b_csv: str | Path | None = None,
     batch_total_rows: int = 0,
+    pattern_release_jsons: list[str | Path] | None = None,
     output_json: str | Path | None = None,
     output_md: str | Path | None = None,
 ) -> dict:
@@ -43,9 +51,17 @@ def build_balance_report(
     overall = labeled.get("overall", {})
     threshold_recommendation = _threshold_recommendation(labeled.get("threshold_simulations", []))
     recall_release = _recall_release_recommendation(labeled.get("agent_b_recall_release_simulations", []))
+    pattern_release = _pattern_release_recommendation(pattern_release_jsons or [])
     batch_review = _review_summary(Path(batch_review_csv), batch_total_rows) if batch_review_csv else {}
     batch_agent_b = _agent_b_summary(Path(batch_agent_b_csv)) if batch_agent_b_csv else {}
-    recommendations = _recommendations(overall, threshold_recommendation, recall_release, batch_review, batch_agent_b)
+    recommendations = _recommendations(
+        overall,
+        threshold_recommendation,
+        recall_release,
+        pattern_release,
+        batch_review,
+        batch_agent_b,
+    )
     report = {
         "summary": {
             "recommended_threshold": threshold_recommendation.get("recommended_threshold"),
@@ -54,6 +70,13 @@ def build_balance_report(
             "recommended_agent_b_recall_release_threshold": recall_release.get("threshold"),
             "agent_b_recall_release_correct_rows": recall_release.get("correct_recovery_rows"),
             "agent_b_recall_release_wrong_rows": recall_release.get("wrong_release_rows"),
+            "recommended_pattern_release": pattern_release.get("recommendation"),
+            "pattern_release_pattern_count": pattern_release.get("pattern_count"),
+            "pattern_release_correct_rows": pattern_release.get("correct_recovery_rows"),
+            "pattern_release_wrong_rows": pattern_release.get("wrong_release_rows"),
+            "pattern_release_accuracy": pattern_release.get("overall_accuracy"),
+            "pattern_release_auto_precision": pattern_release.get("auto_precision"),
+            "pattern_release_official_recall": pattern_release.get("official_recall"),
             "labeled_rows": overall.get("labeled_rows"),
             "auto_precision": overall.get("auto_precision"),
             "official_recall": overall.get("official_recall"),
@@ -74,6 +97,7 @@ def build_balance_report(
         },
         "agent_b_recall_release": recall_release,
         "agent_b_recall_release_simulations": labeled.get("agent_b_recall_release_simulations", []),
+        "pattern_release": pattern_release,
         "labeled_overall": overall,
         "batch_review": batch_review,
         "batch_agent_b": batch_agent_b,
@@ -150,6 +174,71 @@ def _recall_release_recommendation(simulations: list[dict]) -> dict:
     }
 
 
+def _pattern_release_recommendation(paths: list[str | Path]) -> dict:
+    candidates = []
+    for path_value in paths:
+        path = Path(path_value)
+        if not path.exists():
+            continue
+        data = json.loads(path.read_text(encoding="utf-8"))
+        summary = data.get("summary", {})
+        selected = data.get("selected_actionable_release_summary") or {}
+        selected_overall = selected.get("simulated_overall") or {}
+        correct = _to_int(selected.get("correct_recovery_rows") or summary.get("selected_actionable_correct_recovery_rows"))
+        wrong = _to_int(selected.get("wrong_release_rows") or summary.get("selected_actionable_wrong_release_rows"))
+        pattern_count = _to_int(selected.get("pattern_count") or summary.get("selected_actionable_pattern_count"))
+        if not pattern_count:
+            pattern_count = len(data.get("selected_actionable_pattern_set") or [])
+        baseline_accuracy = summary.get("baseline_overall_accuracy")
+        overall_accuracy = selected_overall.get("overall_accuracy") or summary.get("selected_actionable_accuracy")
+        candidate = {
+            "path": str(path),
+            "recommendation": "not_recommended",
+            "reason": "No selected actionable pattern set was available.",
+            "pattern_count": pattern_count,
+            "correct_recovery_rows": correct,
+            "wrong_release_rows": wrong,
+            "baseline_accuracy": baseline_accuracy,
+            "overall_accuracy": overall_accuracy,
+            "accuracy_delta": _delta(overall_accuracy, baseline_accuracy),
+            "auto_precision": selected_overall.get("auto_precision") or summary.get("selected_actionable_auto_precision"),
+            "official_recall": selected_overall.get("official_recall") or summary.get("selected_actionable_official_recall"),
+            "released_correct_provider_ids": selected.get("released_correct_provider_ids", []),
+            "released_wrong_provider_ids": selected.get("released_wrong_provider_ids", []),
+            "patterns": [
+                {
+                    "pattern": item.get("pattern", ""),
+                    "features": item.get("features", []),
+                    "correct_recovery_rows": item.get("correct_recovery_rows"),
+                    "wrong_release_rows": item.get("wrong_release_rows"),
+                }
+                for item in data.get("selected_actionable_pattern_set", [])
+            ],
+        }
+        if pattern_count and correct > 0 and wrong == 0:
+            candidate["recommendation"] = "narrow_pattern_release_candidate"
+            candidate["reason"] = (
+                "Selected actionable evidence patterns recover labeled over-rejected official sites without releasing labeled wrong candidates."
+            )
+        elif pattern_count and wrong > 0:
+            candidate["reason"] = "Selected actionable evidence patterns would release labeled wrong candidates."
+        elif pattern_count:
+            candidate["reason"] = "Selected actionable evidence patterns did not recover labeled official sites."
+        candidates.append(candidate)
+    if not candidates:
+        return {"recommendation": "not_evaluated", "reason": "No pattern release simulation data."}
+    candidates.sort(
+        key=lambda row: (
+            row.get("recommendation") != "narrow_pattern_release_candidate",
+            row.get("wrong_release_rows", 0),
+            -row.get("correct_recovery_rows", 0),
+            -(float(row.get("overall_accuracy") or 0)),
+        )
+    )
+    chosen = candidates[0]
+    return {**chosen, "candidates": candidates}
+
+
 def _review_summary(path: Path, total_rows: int) -> dict:
     rows = _read_rows(path)
     reason_counts = Counter(row.get("review_reason", "") for row in rows)
@@ -186,6 +275,7 @@ def _recommendations(
     overall: dict,
     threshold: dict,
     recall_release: dict,
+    pattern_release: dict,
     batch_review: dict,
     batch_agent_b: dict,
 ) -> list[str]:
@@ -203,6 +293,15 @@ def _recommendations(
         out.append(
             f"Consider a narrow AgentB recall release at evidence threshold {recall_release.get('threshold')} after adding regression tests."
         )
+    if pattern_release.get("recommendation") == "narrow_pattern_release_candidate":
+        out.append(
+            "Prefer narrow pattern release over global threshold relaxation: "
+            f"{pattern_release.get('pattern_count')} actionable pattern(s) recover "
+            f"{pattern_release.get('correct_recovery_rows')} labeled over-rejected row(s) with "
+            f"{pattern_release.get('wrong_release_rows')} labeled wrong release(s)."
+        )
+    elif pattern_release.get("recommendation") == "not_recommended":
+        out.append("Do not release unresolved candidates by evidence pattern yet; the selected pattern set is not clean enough.")
     if batch_review.get("review_rate") and batch_review["review_rate"] > 0.4:
         out.append("Review workload is high on the batch sample; require more labels before widening review lanes.")
     if batch_agent_b.get("timeout_rate") and batch_agent_b["timeout_rate"] > 0.1:
@@ -243,6 +342,9 @@ def _render_markdown(report: dict) -> str:
             f"- AgentB recall release: {summary.get('recommended_agent_b_recall_release')}",
             f"- AgentB recall release threshold: {summary.get('recommended_agent_b_recall_release_threshold')}",
             f"- AgentB recall release correct/wrong rows: {summary.get('agent_b_recall_release_correct_rows')}/{summary.get('agent_b_recall_release_wrong_rows')}",
+            f"- Pattern release: {summary.get('recommended_pattern_release')}",
+            f"- Pattern release correct/wrong rows: {summary.get('pattern_release_correct_rows')}/{summary.get('pattern_release_wrong_rows')}",
+            f"- Pattern release accuracy: {summary.get('pattern_release_accuracy')}",
             "",
             "## Batch Review",
             "",
@@ -275,6 +377,20 @@ def _render_markdown(report: dict) -> str:
                 )
             )
     lines.append("")
+    pattern_release = report.get("pattern_release", {})
+    if pattern_release.get("patterns"):
+        lines.extend(["", "## Pattern Release", ""])
+        lines.append(f"- Recommendation: {pattern_release.get('recommendation')}")
+        lines.append(f"- Reason: {pattern_release.get('reason')}")
+        lines.append(f"- Accuracy delta: {pattern_release.get('accuracy_delta')}")
+        for row in pattern_release.get("patterns", []):
+            lines.append(
+                "- correct={correct}, wrong={wrong}: {pattern}".format(
+                    correct=row.get("correct_recovery_rows"),
+                    wrong=row.get("wrong_release_rows"),
+                    pattern=row.get("pattern"),
+                )
+            )
     return "\n".join(lines)
 
 
@@ -285,6 +401,22 @@ def _read_rows(path: Path) -> list[dict[str, str]]:
 
 def _ratio(num: int, den: int) -> float | None:
     return round(num / den, 4) if den else None
+
+
+def _to_int(value: object) -> int:
+    try:
+        return int(float(value or 0))
+    except (TypeError, ValueError):
+        return 0
+
+
+def _delta(value: object, baseline: object) -> float | None:
+    if value is None or baseline is None:
+        return None
+    try:
+        return round(float(value) - float(baseline), 4)
+    except (TypeError, ValueError):
+        return None
 
 
 if __name__ == "__main__":

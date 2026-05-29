@@ -4,7 +4,7 @@ import shutil
 from pathlib import Path
 
 
-WORKFLOW_VERSION = "agent-loop-v6.1-balance-tuned"
+WORKFLOW_VERSION = "agent-loop-v6.2-pattern-calibrated"
 DEFAULT_SECOND_PASS_ACCEPT_THRESHOLD = 75
 
 

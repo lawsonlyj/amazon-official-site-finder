@@ -151,6 +151,10 @@ def run_calibration_cycle(
             "best_actionable_release_correct_rows": release_simulation["summary"].get("best_actionable_safe_correct_recovery_rows"),
             "best_actionable_release_wrong_rows": release_simulation["summary"].get("best_actionable_safe_wrong_release_rows"),
             "best_actionable_release_accuracy": release_simulation["summary"].get("best_actionable_safe_accuracy"),
+            "selected_actionable_release_patterns": release_simulation["summary"].get("selected_actionable_pattern_count"),
+            "selected_actionable_release_correct_rows": release_simulation["summary"].get("selected_actionable_correct_recovery_rows"),
+            "selected_actionable_release_wrong_rows": release_simulation["summary"].get("selected_actionable_wrong_release_rows"),
+            "selected_actionable_release_accuracy": release_simulation["summary"].get("selected_actionable_accuracy"),
             "sample_rows": sample_summary.get("sample_rows"),
             "actionable_release_validation_rows": sample_summary.get("sample_reason_counts", {}).get(
                 "actionable_release_validation", 0
@@ -206,6 +210,7 @@ def run_calibration_cycle(
         "precision_recommendations": precision_report.get("recommendations", []),
         "release_simulation_summary": release_simulation.get("summary", {}),
         "actionable_release_patterns": release_simulation.get("actionable_safe_patterns", []),
+        "selected_actionable_release_patterns": release_simulation.get("selected_actionable_pattern_set", []),
         "sample": sample_summary,
         "empty_evaluation_summary": empty_eval.get("summary", {}),
         "filled_evaluation_summary": filled_eval.get("summary", {}) if filled_eval else {},
@@ -231,6 +236,9 @@ def _render_markdown(report: dict) -> str:
         f"- Best actionable release pattern: {summary['best_actionable_release_pattern'] or 'None'}",
         f"- Best actionable release correct/wrong rows: {summary['best_actionable_release_correct_rows']}/{summary['best_actionable_release_wrong_rows']}",
         f"- Best actionable release accuracy: {summary['best_actionable_release_accuracy']}",
+        f"- Selected actionable release patterns: {summary['selected_actionable_release_patterns']}",
+        f"- Selected actionable release correct/wrong rows: {summary['selected_actionable_release_correct_rows']}/{summary['selected_actionable_release_wrong_rows']}",
+        f"- Selected actionable release accuracy: {summary['selected_actionable_release_accuracy']}",
         f"- Sample rows: {summary['sample_rows']}",
         f"- Actionable release validation rows: {summary['actionable_release_validation_rows']}",
         f"- Pattern candidate validation rows: {summary['pattern_validation_rows']}",
@@ -258,6 +266,17 @@ def _render_markdown(report: dict) -> str:
     if report.get("actionable_release_patterns"):
         lines.extend(["", "## Actionable Recall Release Patterns", ""])
         for item in report["actionable_release_patterns"][:10]:
+            lines.append(
+                "- correct={correct}, wrong={wrong}, accuracy={accuracy}: {pattern}".format(
+                    correct=item.get("correct_recovery_rows"),
+                    wrong=item.get("wrong_release_rows"),
+                    accuracy=item.get("simulated_overall", {}).get("overall_accuracy"),
+                    pattern=item.get("pattern"),
+                )
+            )
+    if report.get("selected_actionable_release_patterns"):
+        lines.extend(["", "## Selected Actionable Recall Release Set", ""])
+        for item in report["selected_actionable_release_patterns"][:10]:
             lines.append(
                 "- correct={correct}, wrong={wrong}, accuracy={accuracy}: {pattern}".format(
                     correct=item.get("correct_recovery_rows"),
