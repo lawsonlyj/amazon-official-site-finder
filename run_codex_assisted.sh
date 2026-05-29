@@ -15,6 +15,7 @@ Optional:
   --run-agent-b
   --apply-agent-optimizations
   --agent-b-limit N
+  --human-review /path/to/filled_review.xlsx
 USAGE
 }
 
@@ -26,6 +27,7 @@ LABELS_CSV=""
 RUN_AGENT_B=0
 APPLY_AGENT_OPTIMIZATIONS=0
 AGENT_B_LIMIT=0
+HUMAN_REVIEW_FILE=""
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -60,6 +62,11 @@ while [[ $# -gt 0 ]]; do
       ;;
     --agent-b-limit)
       AGENT_B_LIMIT="${2:-0}"
+      shift 2
+      ;;
+    --human-review)
+      HUMAN_REVIEW_FILE="${2:-}"
+      RUN_AGENT_B=1
       shift 2
       ;;
     -h|--help)
@@ -103,6 +110,9 @@ if [[ "$RUN_AGENT_B" == "1" ]]; then
   fi
   if [[ "$AGENT_B_LIMIT" != "0" ]]; then
     WORKFLOW_ARGS+=(--agent-b-limit "$AGENT_B_LIMIT")
+  fi
+  if [[ -n "$HUMAN_REVIEW_FILE" ]]; then
+    WORKFLOW_ARGS+=(--human-review "$HUMAN_REVIEW_FILE")
   fi
 fi
 ./run_workflow.sh "${WORKFLOW_ARGS[@]}"

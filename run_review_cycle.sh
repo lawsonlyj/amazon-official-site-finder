@@ -48,7 +48,7 @@ fi
 
 PYTHONPATH=.vendor_eval:. python3 tools/run_review_learning.py "${ARGS[@]}"
 
-PYTHONPATH=.vendor_eval:. python3 tools/run_agent_c_recommendations.py --run-dir "$RUN_DIR"
+PYTHONPATH=.vendor_eval:. python3 tools/run_agent_c_recommendations.py --run-dir "$RUN_DIR" --human-review "$REVIEW_FILE"
 if [[ "$UPDATE_CONFIG" == "1" ]]; then
   PYTHONPATH=.vendor_eval:. python3 tools/apply_agent_optimizations.py --run-dir "$RUN_DIR" --apply
 fi

@@ -2,7 +2,7 @@
 set -euo pipefail
 
 if [[ $# -lt 2 ]]; then
-  echo "Usage: ./run_workflow.sh /path/to/input.csv outputs/run_dir [labels.csv] [--run-agent-b] [--apply-agent-optimizations] [--agent-b-limit N]" >&2
+  echo "Usage: ./run_workflow.sh /path/to/input.csv outputs/run_dir [labels.csv] [--run-agent-b] [--apply-agent-optimizations] [--agent-b-limit N] [--human-review file.xlsx]" >&2
   exit 2
 fi
 
@@ -12,6 +12,7 @@ LABELS_CSV=""
 RUN_AGENT_B=0
 APPLY_AGENT_OPTIMIZATIONS=0
 AGENT_B_LIMIT=0
+HUMAN_REVIEW_FILE=""
 shift 2
 
 while [[ $# -gt 0 ]]; do
@@ -25,6 +26,11 @@ while [[ $# -gt 0 ]]; do
       ;;
     --agent-b-limit)
       AGENT_B_LIMIT="${2:-0}"
+      shift
+      ;;
+    --human-review)
+      HUMAN_REVIEW_FILE="${2:-}"
+      RUN_AGENT_B=1
       shift
       ;;
     -*)
@@ -93,7 +99,11 @@ if [[ "$RUN_AGENT_B" == "1" ]]; then
     AGENT_B_ARGS+=(--limit "$AGENT_B_LIMIT")
   fi
   PYTHONPATH=.vendor_eval:. python3 tools/run_agent_b_verification.py "${AGENT_B_ARGS[@]}"
-  PYTHONPATH=.vendor_eval:. python3 tools/run_agent_c_recommendations.py --run-dir "$RUN_DIR"
+  AGENT_C_ARGS=(--run-dir "$RUN_DIR")
+  if [[ -n "$HUMAN_REVIEW_FILE" ]]; then
+    AGENT_C_ARGS+=(--human-review "$HUMAN_REVIEW_FILE")
+  fi
+  PYTHONPATH=.vendor_eval:. python3 tools/run_agent_c_recommendations.py "${AGENT_C_ARGS[@]}"
   if [[ "$APPLY_AGENT_OPTIMIZATIONS" == "1" ]]; then
     PYTHONPATH=.vendor_eval:. python3 tools/apply_agent_optimizations.py --run-dir "$RUN_DIR" --apply
   fi

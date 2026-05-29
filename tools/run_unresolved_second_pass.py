@@ -597,6 +597,7 @@ def _risky_auto_accept_url(url: str) -> bool:
         "all.biz",
         "inc.com",
         "itch.io",
+        "indiamart.com",
         "recaptcha.cloud",
     }
     if domain in risky_domains or any(domain.endswith(f".{item}") for item in risky_domains):

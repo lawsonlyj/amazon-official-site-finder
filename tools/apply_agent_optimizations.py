@@ -46,9 +46,17 @@ def apply_agent_optimizations(
     additions = []
     skipped = []
     identity_examples = []
+    human_review_examples = []
+    url_reachability_examples = []
     for item in recommendations:
         if item.get("action") == "write_identity_regression_fixtures" and item.get("safe_artifact"):
             identity_examples.extend(item.get("examples") or [])
+            continue
+        if item.get("action") == "write_human_review_regression_fixtures" and item.get("safe_artifact"):
+            human_review_examples.extend(item.get("examples") or [])
+            continue
+        if item.get("action") == "verify_url_variants_before_accept" and item.get("safe_artifact"):
+            url_reachability_examples.extend(item.get("examples") or [])
             continue
         if item.get("action") != "add_to_excluded_domains" or not item.get("safe_to_apply"):
             skipped.append({"type": item.get("type", ""), "reason": "not_safe_config_action"})
@@ -68,14 +76,26 @@ def apply_agent_optimizations(
     fixtures_written = 0
     if apply and identity_examples:
         fixtures_written = _write_identity_fixtures(fixture_path, identity_examples)
+    human_fixture_path = run_dir / "agent_human_review_regression_cases.csv"
+    human_fixtures_written = 0
+    if apply and human_review_examples:
+        human_fixtures_written = _write_human_review_fixtures(human_fixture_path, human_review_examples)
+    reachability_fixture_path = run_dir / "agent_url_reachability_regression_cases.csv"
+    reachability_fixtures_written = 0
+    if apply and url_reachability_examples:
+        reachability_fixtures_written = _write_human_review_fixtures(reachability_fixture_path, url_reachability_examples)
     summary = {
         "updated": bool(apply and additions),
-        "artifacts_updated": bool(apply and fixtures_written),
+        "artifacts_updated": bool(apply and (fixtures_written or human_fixtures_written or reachability_fixtures_written)),
         "apply_requested": apply,
         "added_excluded_domains": additions if apply else [],
         "pending_excluded_domains": additions if not apply else [],
         "identity_regression_fixture_rows": fixtures_written if apply else 0,
         "identity_regression_fixture": str(fixture_path) if apply and fixtures_written else "",
+        "human_review_regression_fixture_rows": human_fixtures_written if apply else 0,
+        "human_review_regression_fixture": str(human_fixture_path) if apply and human_fixtures_written else "",
+        "url_reachability_regression_fixture_rows": reachability_fixtures_written if apply else 0,
+        "url_reachability_regression_fixture": str(reachability_fixture_path) if apply and reachability_fixtures_written else "",
         "skipped": skipped,
         "config_path": str(config_path),
         "recommendations_json": str(recommendations_path),
@@ -115,6 +135,42 @@ def _write_identity_fixtures(path: Path, examples: list[dict]) -> int:
         writer.writeheader()
         writer.writerows(rows)
     return len(rows)
+
+
+def _write_human_review_fixtures(path: Path, examples: list[dict]) -> int:
+    fields = [
+        "provider_id",
+        "provider_name",
+        "provider_detail_url",
+        "candidate_url",
+        "manual_decision",
+        "manual_url",
+        "confidence",
+        "notes",
+        "note_tags",
+        "expected_outcome",
+    ]
+    rows = []
+    seen = set()
+    for example in examples:
+        key = (example.get("provider_id", ""), example.get("candidate_url", ""), example.get("manual_url", ""))
+        if key in seen:
+            continue
+        seen.add(key)
+        row = {field: _fixture_value(example.get(field, "")) for field in fields}
+        rows.append(row)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=fields)
+        writer.writeheader()
+        writer.writerows(rows)
+    return len(rows)
+
+
+def _fixture_value(value: object) -> str:
+    if isinstance(value, list):
+        return "; ".join(str(item) for item in value if str(item))
+    return str(value or "")
 
 
 def _update_manifest(path: Path, summary: dict) -> None:

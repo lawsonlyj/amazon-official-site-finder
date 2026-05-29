@@ -1305,7 +1305,7 @@ class OperationalCommandTests(unittest.TestCase):
         self.assertEqual(rows["p-4"]["agent_b_decision"], "unsure")
         self.assertTrue(xlsx_exists)
         self.assertIn("https://amazon.example/p-1", rows["p-1"]["provider_detail_url"])
-        self.assertEqual(summary["workflow_version"], "agent-loop-v2")
+        self.assertEqual(summary["workflow_version"], "agent-loop-v3-human-review")
 
     def test_agent_c_recommends_and_agent_a_applies_only_safe_rules(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -1396,6 +1396,106 @@ class OperationalCommandTests(unittest.TestCase):
         self.assertTrue(applied["artifacts_updated"])
         self.assertEqual(applied["identity_regression_fixture_rows"], 3)
         self.assertTrue(fixture_exists)
+
+    def test_human_review_recommendations_write_fixtures_and_platform_rule(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            run_dir = Path(tmp)
+            human_review = run_dir / "human_review.csv"
+            human_rows = [
+                {
+                    "review_batch": "A",
+                    "provider_name": "PT GARUDA SPINTEX PRIVATE LIMITED",
+                    "current_or_candidate_url": "https://www.kaam24.com/Detail-PT-Garuda",
+                    "amazon_detail_url": "https://amazon.example/garuda",
+                    "confidence": "39",
+                    "your_decision": "replace",
+                    "your_true_official_url": "https://www.indiamart.com/company/252021821/",
+                    "your_notes": "人工找到的不确定是官网，像是公司在 IndiaMART 上创建的供应商展示页/店铺页",
+                    "provider_id": "p-1",
+                },
+                {
+                    "review_batch": "F",
+                    "provider_name": "Bitesu India",
+                    "current_or_candidate_url": "https://bitesuindia.com/",
+                    "amazon_detail_url": "https://amazon.example/bitesu",
+                    "confidence": "61",
+                    "your_decision": "replace",
+                    "your_true_official_url": "https://www.bitesuindia.com/",
+                    "your_notes": "AI提供的网址无法打开，但是域名几乎正确，应该是格式问题",
+                    "provider_id": "p-2",
+                },
+                {
+                    "review_batch": "A",
+                    "provider_name": "Digital Tech Force",
+                    "current_or_candidate_url": "https://www.digitalforcetech.com/",
+                    "amazon_detail_url": "https://amazon.example/dtf",
+                    "confidence": "58",
+                    "your_decision": "replace",
+                    "your_true_official_url": "https://digitaltechforce.com/",
+                    "your_notes": "AI提供的网址名字类似，但是服务内容完全不一致",
+                    "provider_id": "p-3",
+                },
+            ]
+            _write_test_csv(human_review, human_rows)
+            config = load_config("config/scoring.json")
+            config["excluded_domains"] = [domain for domain in config.get("excluded_domains", []) if domain != "indiamart.com"]
+            config_path = run_dir / "scoring.json"
+            config_path.write_text(json.dumps(config), encoding="utf-8")
+
+            recommendations = run_agent_c_recommendations(run_dir=run_dir, human_review=human_review)
+            applied = apply_agent_optimizations(run_dir=run_dir, config_path=config_path, apply=True)
+            updated_config = json.loads(config_path.read_text(encoding="utf-8"))
+
+        actions = {item["action"] for item in recommendations["recommendations"]}
+        self.assertIn("write_human_review_regression_fixtures", actions)
+        self.assertIn("verify_url_variants_before_accept", actions)
+        self.assertIn("write_identity_regression_fixtures", actions)
+        self.assertIn("indiamart.com", updated_config["excluded_domains"])
+        self.assertEqual(applied["human_review_regression_fixture_rows"], 3)
+        self.assertEqual(applied["url_reachability_regression_fixture_rows"], 1)
+        self.assertGreaterEqual(applied["identity_regression_fixture_rows"], 1)
+
+    def test_scoring_tries_www_variant_before_giving_up_on_candidate(self):
+        config = load_config("config/scoring.json")
+        provider = {
+            "provider_name": "Bitesu India",
+            "provider_locations": ["India"],
+        }
+        candidate = SearchCandidate(
+            url="https://bitesuindia.com/",
+            title="Bitesu India official website",
+            snippet="Bitesu India Amazon ecommerce services contact India",
+            source="brave",
+            query='"Bitesu India" official website',
+            rank=1,
+        )
+
+        def fake_fetch(url):
+            if url.startswith("https://bitesuindia.com"):
+                return {"ok": False, "status": 0, "final_url": url, "text": ""}
+            html = """
+            <html><head><title>Bitesu India</title></head>
+            <body>Bitesu India provides Amazon marketplace and ecommerce services in India.
+            Contact us. About us.</body></html>
+            """
+            return {"ok": True, "status": 200, "final_url": "https://www.bitesuindia.com/", "text": html}
+
+        with patch("finder.scoring.fetch_text", side_effect=fake_fetch):
+            result = choose_best(provider, [candidate], config)
+
+        self.assertEqual(result["official_url"], "https://www.bitesuindia.com/")
+        self.assertGreaterEqual(result["confidence"], 75)
+
+    def test_indiamart_is_evidence_only_not_official_url(self):
+        config = load_config("config/scoring.json")
+        self.assertTrue(is_excluded_domain("https://www.indiamart.com/company/252021821/", config))
+        platform_result = {
+            "official_url": "https://www.indiamart.com/company/252021821/",
+            "status": "matched",
+            "confidence": "95",
+            "evidence_summary": "page_contains_exact_provider_name",
+        }
+        self.assertFalse(_accepted(platform_result, config, 70))
 
     def test_run_review_learning_applies_manual_feedback_and_writes_report(self):
         with tempfile.TemporaryDirectory() as tmp:

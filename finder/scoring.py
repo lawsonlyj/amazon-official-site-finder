@@ -146,10 +146,18 @@ def _score_candidate(provider: dict, candidate: SearchCandidate, config: dict, *
 
 
 def inspect_candidate_site(url: str, provider: dict, config: dict) -> dict:
-    parsed = urlparse(url if "://" in url else f"https://{url}")
-    root = f"{parsed.scheme or 'https'}://{parsed.netloc or parsed.path}".rstrip("/")
     page_scores = []
-    home = fetch_text(root + "/")
+    home = {}
+    root = ""
+    for candidate_root in _candidate_roots(url):
+        fetched = fetch_text(candidate_root + "/")
+        if fetched.get("ok") and fetched.get("text"):
+            home = fetched
+            root = candidate_root
+            break
+        if not home:
+            home = fetched
+            root = candidate_root
     final_url = home.get("final_url") or root
     home_score = _score_page(home, provider, config, is_home=True)
     page_scores.append(home_score)
@@ -187,6 +195,28 @@ def inspect_candidate_site(url: str, provider: dict, config: dict) -> dict:
 def _root_from_final_url(url: str) -> str:
     parsed = urlparse(url if "://" in url else f"https://{url}")
     return f"{parsed.scheme or 'https'}://{parsed.netloc or parsed.path}".rstrip("/")
+
+
+def _candidate_roots(url: str) -> list[str]:
+    parsed = urlparse(url if "://" in url else f"https://{url}")
+    host = (parsed.netloc or parsed.path).split("/")[0]
+    if not host:
+        return []
+    scheme = parsed.scheme or "https"
+    hosts = [host]
+    if host.startswith("www."):
+        hosts.append(host[4:])
+    else:
+        hosts.append(f"www.{host}")
+    schemes = [scheme]
+    schemes.extend(item for item in ["https", "http"] if item not in schemes)
+    roots = []
+    for candidate_scheme in schemes:
+        for candidate_host in hosts:
+            root = f"{candidate_scheme}://{candidate_host}".rstrip("/")
+            if root not in roots:
+                roots.append(root)
+    return roots
 
 
 def _score_page(fetched: dict, provider: dict, config: dict, *, is_home: bool) -> dict:

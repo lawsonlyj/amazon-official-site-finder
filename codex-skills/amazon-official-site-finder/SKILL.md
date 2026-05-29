@@ -70,7 +70,7 @@ Run this from the repo root. Substitute the paths provided by the user.
 
 This command creates/updates `.env` and then runs the full workflow. The configure step prints only a boolean summary and must not print secrets.
 If the user did not provide an output directory, omit `--run-dir`; the script will create `outputs/codex_run_YYYYMMDD_HHMMSS`.
-Use `--run-agent-b` when the user asks for the `agent-loop-v2` optimization loop or candidate-first verification. In v2, B means verification plus recommendations. Add `--apply-agent-optimizations` when A should apply only safe B recommendations. This does not change the legacy final CSV names.
+Use `--run-agent-b` when the user asks for the `agent-loop-v3-human-review` optimization loop or candidate-first verification. In v3, B means verification plus recommendations, and `--human-review /path/to/filled_review.xlsx` lets B use filled human review notes as regression evidence. Add `--apply-agent-optimizations` when A should apply only safe B recommendations and write regression artifacts. This does not change the legacy final CSV names.
 
 If you need to run the two steps separately:
 
@@ -168,7 +168,7 @@ When the user provides a filled review file, Codex should run this from the repo
 ```
 
 This calls `tools/run_review_learning.py`, which merges the filled manual decisions with existing second-pass decisions, writes reviewed final outputs, creates `manual_review_labels.csv`, reruns the quality gate, writes `manual_review_learning_report.md`, and applies only safe repeated excluded-domain config additions.
-It also writes AgentC recommendations and, with `--update-config`, applies only safe AgentC excluded-domain recommendations.
+It also writes AgentC recommendations and, with `--update-config`, applies only safe AgentC excluded-domain recommendations plus human/identity/reachability regression artifacts.
 
 Expected reviewed outputs:
 

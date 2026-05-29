@@ -23,7 +23,7 @@ Use the Codex-assisted script when API keys are stored in local key files:
   --run-agent-b
 ```
 
-`--run-agent-b` is optional. It adds the `agent-loop-v2` B step after the standard second-pass outputs are verified: candidate-first verification plus optimization recommendations. Add `--apply-agent-optimizations` only when A should apply safe B recommendations such as repeated excluded-domain additions.
+`--run-agent-b` is optional. It adds the `agent-loop-v3-human-review` B step after the standard second-pass outputs are verified: candidate-first verification plus optimization recommendations. Add `--human-review /path/to/filled_review.xlsx` to let B turn filled human-review notes into regression fixtures and safer rule recommendations. Add `--apply-agent-optimizations` only when A should apply safe B recommendations such as repeated excluded-domain additions and write regression artifacts.
 
 If using Codex, ask:
 
@@ -94,7 +94,7 @@ For Codex-assisted usage, `run_codex_assisted.sh` runs first. It calls `tools/co
 
 After manual review, the user gives the filled workbook to Codex. Codex calls `run_review_cycle.sh` internally, which runs `tools/run_review_learning.py`, merges the filled review with the second-pass decisions, writes reviewed final outputs, creates manual labels, runs the quality gate again, and writes a learning report. In Codex mode, Codex also enables safe config optimization for repeated rejected directory/platform patterns and reports whether anything changed.
 
-The review cycle also runs `tools/run_agent_c_recommendations.py`. AgentC reads AgentB verification and manual-review learning reports, then writes recommendation files. When `--update-config` is enabled, `tools/apply_agent_optimizations.py` applies only safe, explainable excluded-domain additions; query, threshold, and identity-constraint ideas remain recommendations and labels until a maintainer implements them with tests.
+The review cycle also runs `tools/run_agent_c_recommendations.py`. AgentC reads AgentB verification, filled human-review notes, and manual-review learning reports, then writes recommendation files. When `--update-config` is enabled, `tools/apply_agent_optimizations.py` applies only safe, explainable excluded-domain additions and writes human/identity/reachability regression fixtures; query, threshold, and identity-constraint logic changes remain recommendations until a maintainer implements them with tests.
 
 ## Main Outputs
 

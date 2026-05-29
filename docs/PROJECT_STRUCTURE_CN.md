@@ -149,6 +149,7 @@ run_codex_assisted.sh
            -> tools/build_linked_workbook.py
      -> tools/build_manual_review_task.py
      -> 可选 B：tools/run_agent_b_verification.py + tools/run_agent_c_recommendations.py
+        -> 可选读取 filled human-review XLSX，生成 notes 分类和回归样例建议
      -> 可选 A 安全应用：tools/apply_agent_optimizations.py --apply
      -> tools/verify_run_outputs.py
 ```
@@ -167,9 +168,9 @@ Codex receives filled manual review workbook
      -> 对重复出现且安全的排除域名更新 config/scoring.json
      -> tools/build_linked_workbook.py
   -> tools/run_agent_c_recommendations.py
-     -> 汇总 AgentB 和人工复核学习报告里的重复模式
+     -> 汇总 AgentB、人工复核 XLSX 和学习报告里的重复模式
   -> tools/apply_agent_optimizations.py --apply
-     -> 只应用安全、可解释的 excluded_domains 更新
+     -> 只应用安全、可解释的 excluded_domains 更新，并写出 human/identity/reachability 回归样例
   -> tools/verify_run_outputs.py
   -> Codex 读取 learning report 并汇报最终输出
 ```

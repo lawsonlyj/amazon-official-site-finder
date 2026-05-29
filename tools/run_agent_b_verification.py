@@ -14,7 +14,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from finder.cli import load_dotenv
 from finder.html_extract import extract_html
 from finder.http import fetch_text
-from finder.scoring import is_excluded_domain, load_config, score_candidate
+from finder.scoring import _candidate_roots, is_excluded_domain, load_config, score_candidate
 from finder.search_sources import SearchCandidate, collect_candidates_for_queries
 from finder.text import domain_from_url, normalize_text, tokens
 from tools.build_linked_workbook import build_workbook
@@ -43,7 +43,7 @@ AGENT_B_FIELDS = [
     "source_confidence",
 ]
 
-WORKFLOW_VERSION = "agent-loop-v2"
+WORKFLOW_VERSION = "agent-loop-v3-human-review"
 
 SUPPORTING_PATHS = ["/", "/about", "/contact", "/services", "/privacy", "/terms", "/about-us", "/contact-us"]
 
@@ -215,26 +215,32 @@ def _verify_url(url: str, provider: dict[str, str], config: dict) -> dict:
             "score": -100,
             "counter_evidence": ["excluded_domain"],
         }
-    root = _root_url(url)
     supporting_facts: list[str] = []
     counter_evidence: list[str] = []
     evidence_urls: list[str] = []
     schema_org = False
     texts = []
     max_pages = _max_pages_to_fetch()
-    for path in SUPPORTING_PATHS:
-        if len(evidence_urls) >= max_pages:
+    for root in _candidate_roots(url):
+        root_had_fetch = False
+        for path in SUPPORTING_PATHS:
+            if len(evidence_urls) >= max_pages:
+                break
+            fetched = fetch_text(root + path)
+            if not fetched.get("ok") or not fetched.get("text"):
+                continue
+            root_had_fetch = True
+            final_url = fetched.get("final_url") or root + path
+            evidence_urls.append(final_url)
+            extracted = extract_html(fetched.get("text", ""), final_url)
+            page_text = " ".join([str(extracted.get("title") or ""), str(extracted.get("meta") or ""), str(extracted.get("text") or "")])
+            texts.append(page_text)
+            if "schema.org/organization" in fetched.get("text", "").casefold() or '"@type"' in fetched.get("text", "").casefold():
+                schema_org = True
+        if root_had_fetch:
+            if domain_from_url(root) != domain_from_url(url):
+                supporting_facts.append("canonical_domain_variant_fetch_ok")
             break
-        fetched = fetch_text(root + path)
-        if not fetched.get("ok") or not fetched.get("text"):
-            continue
-        final_url = fetched.get("final_url") or root + path
-        evidence_urls.append(final_url)
-        extracted = extract_html(fetched.get("text", ""), final_url)
-        page_text = " ".join([str(extracted.get("title") or ""), str(extracted.get("meta") or ""), str(extracted.get("text") or "")])
-        texts.append(page_text)
-        if "schema.org/organization" in fetched.get("text", "").casefold() or '"@type"' in fetched.get("text", "").casefold():
-            schema_org = True
     combined = normalize_text(" ".join(texts))
     name = provider.get("provider_name", "")
     name_norm = normalize_text(name)
