@@ -14,6 +14,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from finder.cli import load_dotenv
 from finder.html_extract import extract_html
 from finder.http import fetch_text
+from finder.logo import logo_evidence
 from finder.scoring import _candidate_roots, is_excluded_domain, load_config, score_candidate
 from finder.search_sources import SearchCandidate, collect_candidates_for_queries
 from finder.text import domain_from_url, normalize_text, tokens
@@ -43,7 +44,7 @@ AGENT_B_FIELDS = [
     "source_confidence",
 ]
 
-WORKFLOW_VERSION = "agent-loop-v3-human-review"
+WORKFLOW_VERSION = "agent-loop-v4-logo"
 
 SUPPORTING_PATHS = ["/", "/about", "/contact", "/services", "/privacy", "/terms", "/about-us", "/contact-us"]
 
@@ -220,6 +221,7 @@ def _verify_url(url: str, provider: dict[str, str], config: dict) -> dict:
     evidence_urls: list[str] = []
     schema_org = False
     texts = []
+    logo_checked = False
     max_pages = _max_pages_to_fetch()
     for root in _candidate_roots(url):
         root_had_fetch = False
@@ -232,6 +234,13 @@ def _verify_url(url: str, provider: dict[str, str], config: dict) -> dict:
             root_had_fetch = True
             final_url = fetched.get("final_url") or root + path
             evidence_urls.append(final_url)
+            if not logo_checked and provider.get("listing_logo_url"):
+                logo = logo_evidence(provider.get("listing_logo_url", ""), fetched.get("text", ""), final_url)
+                logo_checked = True
+                if logo.get("matched"):
+                    supporting_facts.append("listing_logo_visual_match")
+                elif float(logo.get("score") or 0) >= 0.78:
+                    supporting_facts.append("listing_logo_visual_near_match")
             extracted = extract_html(fetched.get("text", ""), final_url)
             page_text = " ".join([str(extracted.get("title") or ""), str(extracted.get("meta") or ""), str(extracted.get("text") or "")])
             texts.append(page_text)
@@ -283,6 +292,10 @@ def _verify_url(url: str, provider: dict[str, str], config: dict) -> dict:
     if schema_org:
         score += 5
         supporting_facts.append("schema_org_organization_seen")
+    if "listing_logo_visual_match" in supporting_facts:
+        score += 18
+    elif "listing_logo_visual_near_match" in supporting_facts:
+        score += 8
     if _looks_non_independent(url):
         score -= 35
         counter_evidence.append("candidate_not_independent_official_site")

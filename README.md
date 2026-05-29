@@ -23,7 +23,7 @@ Use the Codex-assisted script when API keys are stored in local key files:
   --run-agent-b
 ```
 
-`--run-agent-b` is optional. It adds the `agent-loop-v3-human-review` B step after the standard second-pass outputs are verified: candidate-first verification plus optimization recommendations. Add `--human-review /path/to/filled_review.xlsx` to let B turn filled human-review notes into regression fixtures and safer rule recommendations. Add `--apply-agent-optimizations` only when A should apply safe B recommendations such as repeated excluded-domain additions and write regression artifacts.
+`--run-agent-b` is optional. It adds the `agent-loop-v4-logo` B step after the standard second-pass outputs are verified: candidate-first verification plus optimization recommendations. The scorer also compares Amazon listing logos with candidate homepage logo/favicon/og:image assets as positive identity evidence when images are highly similar. Add `--human-review /path/to/filled_review.xlsx` to let B turn filled human-review notes into regression fixtures and safer rule recommendations. Add `--apply-agent-optimizations` only when A should apply safe B recommendations such as repeated excluded-domain additions and write regression artifacts.
 
 If using Codex, ask:
 

@@ -186,6 +186,7 @@ Codex receives filled manual review workbook
 | `tools/preflight_report.py` | 开跑前检查输入文件、API key、依赖和搜索 API 是否可用。 |
 | `tools/run_pipeline.py` | 主调度器。负责标准化输入、搜索候选、评分、生成初版结果、质量门禁和 second-pass。 |
 | `finder/` | 核心逻辑包。包括输入清洗、搜索 query 构建、API 搜索、网页抓取、官网评分。 |
+| `finder/logo.py` | 从候选官网提取 logo/favicon/og:image，并与 Amazon listing logo 做感知哈希相似度比较；只作为正向身份加分证据。 |
 | `tools/run_unresolved_second_pass.py` | 对第一轮没解决的商家做二轮补漏，用 Brave/Exa 找更可能的官网。 |
 | `tools/build_manual_review_task.py` | 生成简化人工复核 CSV/XLSX，只保留工作人员需要判断和填写的列。 |
 | `tools/run_agent_b_verification.py` | B 的候选优先复核部分。先验证当前候选官网，再做少量独立搜索，输出 accept/replace/reject/unsure 和结构化证据。 |

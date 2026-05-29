@@ -499,6 +499,7 @@ def _has_strong_second_pass_reason(result: dict) -> bool:
         "page_contains_exact_provider_name",
         "page_mentions_amazon_spn",
         "page_contains_amazon_service_keywords",
+        "listing_logo_visual_match",
     }
     summary = set(str(result.get("evidence_summary", "")).split("; "))
     if summary & strong_reasons:
@@ -549,6 +550,7 @@ def _has_verified_second_pass_reason(result: dict, *, min_score: int) -> bool:
                 "page_contains_exact_provider_name",
                 "page_contains_provider_name_tokens",
                 "page_fuzzy_provider_name_match",
+                "listing_logo_visual_match",
             }
         )
         search_identity = bool(

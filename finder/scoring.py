@@ -7,6 +7,7 @@ from urllib.parse import urlparse
 from .dynamic import render_dynamic_page
 from .html_extract import extract_html
 from .http import fetch_text
+from .logo import logo_evidence
 from .search_sources import SearchCandidate
 from .text import base_domain_label, domain_from_url, normalize_text, slug, tokens
 
@@ -161,6 +162,9 @@ def inspect_candidate_site(url: str, provider: dict, config: dict) -> dict:
     final_url = home.get("final_url") or root
     home_score = _score_page(home, provider, config, is_home=True)
     page_scores.append(home_score)
+    logo = {}
+    if home.get("ok") and home.get("text") and provider.get("listing_logo_url"):
+        logo = logo_evidence(provider.get("listing_logo_url", ""), home.get("text", ""), final_url)
     if _should_dynamic_render(home_score, config):
         rendered = render_dynamic_page(final_url, timeout_ms=_dynamic_timeout_ms(config))
         rendered_score = _score_page(rendered, provider, config, is_home=True)
@@ -183,12 +187,19 @@ def inspect_candidate_site(url: str, provider: dict, config: dict) -> dict:
             if reason not in combined_reasons:
                 combined_reasons.append(reason)
     score = _combined_site_score(combined_reasons)
+    if logo.get("matched"):
+        score += 18
+        combined_reasons.append("listing_logo_visual_match")
+    elif float(logo.get("score") or 0) >= 0.78:
+        score += 8
+        combined_reasons.append("listing_logo_visual_near_match")
     return {
         "score": score,
         "reasons": combined_reasons[:12],
         "final_url": final_url,
         "title": best.get("title", ""),
         "status": best.get("status"),
+        "logo": logo,
     }
 
 
@@ -418,6 +429,8 @@ def _summary_reasons(reasons: list[str]) -> list[str]:
             "page_contains_amazon_service_keywords",
             "search_snippet_contains_amazon_service_keywords",
             "page_mentions_amazon_spn",
+            "listing_logo_visual_match",
+            "listing_logo_visual_near_match",
         }
     ]
     out = []

@@ -20,6 +20,7 @@ from finder.scoring import choose_best, is_excluded_domain, load_config, _extrac
 from finder import search_sources
 from finder.search_sources import SearchCandidate
 from finder.text import url_like_candidates
+from finder.logo import extract_logo_urls, hash_similarity
 from finder.cli import limit_candidates_for_scoring, read_done_provider_ids, run_workflow
 from tools.evaluate_labeled_results import evaluate as evaluate_labeled
 from tools.build_review_sheet import build_review_sheet
@@ -1305,7 +1306,7 @@ class OperationalCommandTests(unittest.TestCase):
         self.assertEqual(rows["p-4"]["agent_b_decision"], "unsure")
         self.assertTrue(xlsx_exists)
         self.assertIn("https://amazon.example/p-1", rows["p-1"]["provider_detail_url"])
-        self.assertEqual(summary["workflow_version"], "agent-loop-v3-human-review")
+        self.assertEqual(summary["workflow_version"], "agent-loop-v4-logo")
 
     def test_agent_c_recommends_and_agent_a_applies_only_safe_rules(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -1496,6 +1497,53 @@ class OperationalCommandTests(unittest.TestCase):
             "evidence_summary": "page_contains_exact_provider_name",
         }
         self.assertFalse(_accepted(platform_result, config, 70))
+
+    def test_logo_similarity_is_positive_identity_evidence(self):
+        config = load_config("config/scoring.json")
+        provider = {
+            "provider_name": "Logo Agency",
+            "provider_locations": ["United Kingdom"],
+            "listing_logo_url": "https://amazon.example/logo.png",
+        }
+        candidate = SearchCandidate(
+            url="https://logoagency.com/",
+            title="Official website",
+            snippet="Amazon marketplace services in the United Kingdom",
+            source="brave",
+            query='"Logo Agency" official website',
+            rank=1,
+        )
+
+        def fake_fetch(url):
+            html = """
+            <html><head><title>Official website</title></head>
+            <body><img class="site-logo" src="/logo.png">
+            Amazon marketplace advertising services in the United Kingdom. Contact us.</body></html>
+            """
+            return {"ok": True, "status": 200, "final_url": url, "text": html}
+
+        def fake_hash(url):
+            return "1" * 64 if "logo" in url else ""
+
+        with patch("finder.scoring.fetch_text", side_effect=fake_fetch), patch("finder.logo.image_average_hash", side_effect=fake_hash):
+            result = choose_best(provider, [candidate], config)
+
+        self.assertEqual(result["status"], "matched")
+        self.assertIn("listing_logo_visual_match", result["evidence_summary"])
+
+    def test_extract_logo_urls_from_common_logo_markup(self):
+        html = """
+        <html><head>
+        <meta property="og:image" content="/og-logo.png">
+        <link rel="icon" href="/favicon.ico">
+        </head><body><img alt="Company logo" src="/brand.png"></body></html>
+        """
+        urls = extract_logo_urls(html, "https://example.com/about")
+
+        self.assertIn("https://example.com/og-logo.png", urls)
+        self.assertIn("https://example.com/favicon.ico", urls)
+        self.assertIn("https://example.com/brand.png", urls)
+        self.assertEqual(hash_similarity("11110000", "11100000"), 0.875)
 
     def test_run_review_learning_applies_manual_feedback_and_writes_report(self):
         with tempfile.TemporaryDirectory() as tmp:
