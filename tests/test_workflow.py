@@ -45,6 +45,7 @@ from tools.build_balance_report import build_balance_report
 from tools.build_calibration_review_sample import build_calibration_review_sample
 from tools.evaluate_calibration_review_sample import evaluate_calibration_review_sample
 from tools.mine_evidence_patterns import mine_evidence_patterns
+from tools.run_calibration_cycle import run_calibration_cycle
 from tools.output_layout import DEFAULT_SECOND_PASS_ACCEPT_THRESHOLD, WORKFLOW_VERSION
 
 
@@ -2814,6 +2815,181 @@ class OperationalCommandTests(unittest.TestCase):
         self.assertEqual(
             summary["pattern_match_counts"]["agent_b_score<45 AND has:schema_org_organization_seen"], 1
         )
+
+    def test_run_calibration_cycle_writes_patterns_sample_and_empty_eval(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            balance_json = root / "balance.json"
+            labeled_agent_b = root / "labeled_agent_b.csv"
+            review = root / "review.csv"
+            batch_agent_b = root / "batch_agent_b.csv"
+            output_dir = root / "calibration"
+            balance_json.write_text(
+                json.dumps(
+                    {
+                        "details": [
+                            {
+                                "provider_id": "p-good-1",
+                                "provider_name": "Good One",
+                                "expected_kind": "official",
+                                "expected_domain": "goodone.example",
+                                "manual_review_reason": "recall_unresolved_top_candidate",
+                            },
+                            {
+                                "provider_id": "p-good-2",
+                                "provider_name": "Good Two",
+                                "expected_kind": "official",
+                                "expected_domain": "goodtwo.example",
+                                "manual_review_reason": "recall_unresolved_top_candidate",
+                            },
+                            {
+                                "provider_id": "p-bad",
+                                "provider_name": "Bad One",
+                                "expected_kind": "official",
+                                "expected_domain": "badone.example",
+                                "manual_review_reason": "recall_unresolved_top_candidate",
+                            },
+                            {
+                                "provider_id": "p-precision-good",
+                                "provider_name": "Precision Good",
+                                "expected_kind": "official",
+                                "expected_domain": "precisiongood.example",
+                                "outcome": "correct_official",
+                                "manual_review_reason": "precision_low_confidence_auto_match",
+                            },
+                        ]
+                    }
+                ),
+                encoding="utf-8",
+            )
+            _write_test_csv(
+                labeled_agent_b,
+                [
+                    {
+                        "provider_id": "p-good-1",
+                        "provider_name": "Good One",
+                        "candidate_domain": "goodone.example",
+                        "candidate_url": "https://goodone.example",
+                        "agent_b_decision": "unsure",
+                        "evidence_score": "31",
+                        "supporting_facts": "candidate_pages_fetch_ok; schema_org_organization_seen",
+                        "counter_evidence": "",
+                        "reason_for_unsure": "recall_candidate_needs_human_confirmation",
+                    },
+                    {
+                        "provider_id": "p-good-2",
+                        "provider_name": "Good Two",
+                        "candidate_domain": "goodtwo.example",
+                        "candidate_url": "https://goodtwo.example",
+                        "agent_b_decision": "unsure",
+                        "evidence_score": "31",
+                        "supporting_facts": "candidate_pages_fetch_ok; schema_org_organization_seen",
+                        "counter_evidence": "",
+                        "reason_for_unsure": "recall_candidate_needs_human_confirmation",
+                    },
+                    {
+                        "provider_id": "p-bad",
+                        "provider_name": "Bad One",
+                        "candidate_domain": "wrong.example",
+                        "candidate_url": "https://wrong.example",
+                        "agent_b_decision": "unsure",
+                        "evidence_score": "80",
+                        "supporting_facts": "candidate_pages_fetch_ok",
+                        "counter_evidence": "",
+                        "reason_for_unsure": "recall_candidate_needs_human_confirmation",
+                    },
+                    {
+                        "provider_id": "p-precision-good",
+                        "provider_name": "Precision Good",
+                        "candidate_domain": "precisiongood.example",
+                        "candidate_url": "https://precisiongood.example",
+                        "agent_b_decision": "accept",
+                        "evidence_score": "90",
+                        "supporting_facts": "candidate_pages_fetch_ok; page_contains_exact_provider_name",
+                        "counter_evidence": "",
+                        "reason_for_unsure": "",
+                    },
+                ],
+            )
+            _write_test_csv(
+                review,
+                [
+                    {
+                        "provider_id": "batch-recall",
+                        "provider_name": "Batch Recall",
+                        "provider_detail_url": "https://amazon.example/batch-recall",
+                        "official_url": "",
+                        "official_domain": "",
+                        "top_candidate_url": "https://batchrecall.example",
+                        "top_candidate_domain": "batchrecall.example",
+                        "review_reason": "recall_unresolved_top_candidate",
+                    },
+                    {
+                        "provider_id": "batch-precision",
+                        "provider_name": "Batch Precision",
+                        "provider_detail_url": "https://amazon.example/batch-precision",
+                        "official_url": "https://batchprecision.example",
+                        "official_domain": "batchprecision.example",
+                        "top_candidate_url": "",
+                        "top_candidate_domain": "",
+                        "review_reason": "precision_low_confidence_auto_match",
+                    },
+                ],
+            )
+            _write_test_csv(
+                batch_agent_b,
+                [
+                    {
+                        "provider_id": "batch-recall",
+                        "provider_name": "Batch Recall",
+                        "candidate_domain": "batchrecall.example",
+                        "candidate_url": "https://batchrecall.example",
+                        "agent_b_decision": "unsure",
+                        "confidence": "69",
+                        "evidence_score": "31",
+                        "supporting_facts": "candidate_pages_fetch_ok; schema_org_organization_seen",
+                        "counter_evidence": "",
+                        "reason_for_unsure": "recall_candidate_needs_human_confirmation",
+                    },
+                    {
+                        "provider_id": "batch-precision",
+                        "provider_name": "Batch Precision",
+                        "candidate_domain": "batchprecision.example",
+                        "candidate_url": "https://batchprecision.example",
+                        "agent_b_decision": "accept",
+                        "confidence": "90",
+                        "evidence_score": "90",
+                        "supporting_facts": "candidate_pages_fetch_ok; page_contains_exact_provider_name",
+                        "counter_evidence": "",
+                        "reason_for_unsure": "",
+                    },
+                ],
+            )
+
+            report = run_calibration_cycle(
+                labeled_eval_json=balance_json,
+                labeled_agent_b_csv=labeled_agent_b,
+                review_csv=review,
+                batch_agent_b_csv=batch_agent_b,
+                output_dir=output_dir,
+                max_rows=2,
+                max_per_pattern=1,
+            )
+            output_exists = {
+                "recall_json": (output_dir / "evidence_patterns_recall.json").exists(),
+                "precision_md": (output_dir / "evidence_patterns_precision.md").exists(),
+                "sample_xlsx": (output_dir / "pattern_validation_sample_50.xlsx").exists(),
+                "eval_json": (output_dir / "pattern_validation_sample_50_eval_empty.json").exists(),
+                "summary_md": (output_dir / "calibration_cycle_summary.md").exists(),
+            }
+
+        self.assertEqual(report["summary"]["sample_rows"], 2)
+        self.assertTrue(output_exists["recall_json"])
+        self.assertTrue(output_exists["precision_md"])
+        self.assertTrue(output_exists["sample_xlsx"])
+        self.assertTrue(output_exists["eval_json"])
+        self.assertTrue(output_exists["summary_md"])
+        self.assertEqual(report["summary"]["empty_eval_labeled_rows"], 0)
 
     def test_evaluate_calibration_review_sample_turns_labels_into_rule_guidance(self):
         with tempfile.TemporaryDirectory() as tmp:
