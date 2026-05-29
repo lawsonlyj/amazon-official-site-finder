@@ -44,6 +44,7 @@ from tools.evaluate_workflow_balance import evaluate_balance
 from tools.build_balance_report import build_balance_report
 from tools.build_calibration_review_sample import build_calibration_review_sample
 from tools.evaluate_calibration_review_sample import evaluate_calibration_review_sample
+from tools.mine_evidence_patterns import mine_evidence_patterns
 from tools.output_layout import DEFAULT_SECOND_PASS_ACCEPT_THRESHOLD, WORKFLOW_VERSION
 
 
@@ -2357,6 +2358,104 @@ class OperationalCommandTests(unittest.TestCase):
         self.assertEqual(sim_by_threshold[75]["wrong_release_rows"], 2)
         self.assertEqual(sim_by_threshold[75]["release_precision"], 0.3333)
         self.assertEqual(details_by_id["p-1"]["agent_b_candidate_domain"], "one.example")
+
+    def test_mine_evidence_patterns_finds_safe_and_risky_recall_patterns(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            balance_json = root / "balance.json"
+            agent_b = root / "agent_b.csv"
+            output_json = root / "patterns.json"
+            output_md = root / "patterns.md"
+            balance_json.write_text(
+                json.dumps(
+                    {
+                        "details": [
+                            {
+                                "provider_id": "p-1",
+                                "provider_name": "One Agency",
+                                "expected_kind": "official",
+                                "expected_domain": "one.example",
+                                "manual_review_reason": "recall_unresolved_top_candidate",
+                            },
+                            {
+                                "provider_id": "p-2",
+                                "provider_name": "Two Agency",
+                                "expected_kind": "official",
+                                "expected_domain": "two.example",
+                                "manual_review_reason": "recall_unresolved_top_candidate",
+                            },
+                            {
+                                "provider_id": "p-3",
+                                "provider_name": "Three Agency",
+                                "expected_kind": "official",
+                                "expected_domain": "three.example",
+                                "manual_review_reason": "recall_unresolved_top_candidate",
+                            },
+                        ]
+                    }
+                ),
+                encoding="utf-8",
+            )
+            _write_test_csv(
+                agent_b,
+                [
+                    {
+                        "provider_id": "p-1",
+                        "provider_name": "One Agency",
+                        "candidate_url": "https://one.example",
+                        "candidate_domain": "one.example",
+                        "agent_b_decision": "unsure",
+                        "evidence_score": "80",
+                        "supporting_facts": "candidate_pages_fetch_ok; safe_fact; shared_fact",
+                        "counter_evidence": "",
+                        "reason_for_unsure": "recall_candidate_needs_human_confirmation",
+                        "review_reason": "recall_unresolved_top_candidate",
+                    },
+                    {
+                        "provider_id": "p-2",
+                        "provider_name": "Two Agency",
+                        "candidate_url": "https://two.example",
+                        "candidate_domain": "two.example",
+                        "agent_b_decision": "unsure",
+                        "evidence_score": "80",
+                        "supporting_facts": "candidate_pages_fetch_ok; safe_fact; shared_fact",
+                        "counter_evidence": "",
+                        "reason_for_unsure": "recall_candidate_needs_human_confirmation",
+                        "review_reason": "recall_unresolved_top_candidate",
+                    },
+                    {
+                        "provider_id": "p-3",
+                        "provider_name": "Three Agency",
+                        "candidate_url": "https://wrong.example",
+                        "candidate_domain": "wrong.example",
+                        "agent_b_decision": "unsure",
+                        "evidence_score": "80",
+                        "supporting_facts": "candidate_pages_fetch_ok; shared_fact",
+                        "counter_evidence": "",
+                        "reason_for_unsure": "recall_candidate_needs_human_confirmation",
+                        "review_reason": "recall_unresolved_top_candidate",
+                    },
+                ],
+            )
+
+            report = mine_evidence_patterns(
+                balance_json=balance_json,
+                agent_b_csv=agent_b,
+                min_support=2,
+                output_json=output_json,
+                output_md=output_md,
+            )
+            safe_patterns = {row["pattern"] for row in report["durable_safe_patterns"]}
+            all_patterns = {row["pattern"] for row in report["all_patterns"]}
+            md_text = output_md.read_text(encoding="utf-8")
+            output_json_exists = output_json.exists()
+
+        self.assertEqual(report["summary"]["rows"], 3)
+        self.assertGreaterEqual(report["summary"]["durable_safe_patterns"], 1)
+        self.assertIn("has:safe_fact", safe_patterns)
+        self.assertTrue(any("has:shared_fact" in pattern for pattern in all_patterns))
+        self.assertTrue(output_json_exists)
+        self.assertIn("Best candidate pattern", md_text)
 
     def test_build_balance_report_recommends_current_threshold_and_summarizes_batch(self):
         with tempfile.TemporaryDirectory() as tmp:
