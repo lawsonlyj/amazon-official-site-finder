@@ -39,6 +39,7 @@ from tools.configure_env_from_key_files import extract_key_from_file, main as co
 from tools.run_agent_b_verification import run_agent_b_verification
 from tools.run_agent_c_recommendations import run_agent_c_recommendations
 from tools.apply_agent_optimizations import apply_agent_optimizations
+from tools.evaluate_workflow_balance import evaluate_balance
 from tools.output_layout import DEFAULT_SECOND_PASS_ACCEPT_THRESHOLD, WORKFLOW_VERSION
 
 
@@ -334,6 +335,36 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual(result["status"], "needs_review")
         self.assertLess(result["confidence"], 75)
         self.assertIn("identity_cap_country_conflict_needs_review", result["evidence_summary"])
+
+    def test_ambiguous_name_with_page_name_and_weak_service_can_auto_match(self):
+        provider = {
+            "provider_id": "p-bluepace",
+            "provider_name": "Bluepace",
+            "service_apis": ["Account Management"],
+            "provider_locations": ["Germany"],
+        }
+        candidate = SearchCandidate(
+            url="https://bluepace.de/",
+            title="Bluepace official website",
+            snippet="Bluepace marketplace support Germany",
+            source="brave",
+            query='"Bluepace" official website',
+            rank=1,
+        )
+
+        def fake_fetch(url):
+            html = """
+            <html><head><title>Bluepace</title></head>
+            <body>Bluepace supports marketplace sellers in Germany.
+            Contact us. About us.</body></html>
+            """
+            return {"ok": True, "status": 200, "final_url": url, "text": html}
+
+        with patch("finder.scoring.fetch_text", side_effect=fake_fetch):
+            result = choose_best(provider, [candidate], load_config("config/scoring.json"))
+
+        self.assertEqual(result["status"], "matched")
+        self.assertNotIn("identity_cap_ambiguous_name_requires_page_and_service", result["evidence_summary"])
 
     def test_two_stage_scoring_fetches_only_best_preliminary_candidates(self):
         provider = {
@@ -1643,6 +1674,45 @@ class OperationalCommandTests(unittest.TestCase):
         self.assertEqual(applied["no_official_regression_fixture_rows"], 1)
         self.assertEqual(fixture_rows[0]["candidate_url"], "https://aaconsulting.nl/")
         self.assertIn("confirmed_no_official", fixture_rows[0]["note_tags"])
+
+    def test_evaluate_workflow_balance_counts_false_and_over_rejected_rows(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            baseline = root / "baseline.csv"
+            candidate = root / "candidate.csv"
+            review = root / "review.csv"
+            _write_test_csv(
+                baseline,
+                [
+                    {"provider_id": "p-1", "provider_name": "One", "official_url": "https://one.example", "official_domain": "one.example"},
+                    {"provider_id": "p-2", "provider_name": "Two", "official_url": "https://wrong.example", "official_domain": "wrong.example"},
+                    {"provider_id": "p-3", "provider_name": "Three", "official_url": "https://three.example", "official_domain": "three.example"},
+                    {"provider_id": "p-4", "provider_name": "Four", "official_url": "", "official_domain": ""},
+                ],
+            )
+            _write_test_csv(
+                candidate,
+                [
+                    {"provider_id": "p-1", "provider_name": "One", "official_url": "https://one.example", "official_domain": "one.example", "status": "matched", "confidence": "90"},
+                    {"provider_id": "p-2", "provider_name": "Two", "official_url": "https://two.example", "official_domain": "two.example", "status": "matched", "confidence": "90"},
+                    {"provider_id": "p-3", "provider_name": "Three", "official_url": "", "official_domain": "", "status": "unresolved", "confidence": "0"},
+                    {"provider_id": "p-4", "provider_name": "Four", "official_url": "https://four.example", "official_domain": "four.example", "status": "matched", "confidence": "90"},
+                ],
+            )
+            _write_test_csv(
+                review,
+                [
+                    {"provider_id": "p-2", "provider_name": "Two", "manual_decision": "replace", "manual_url": "https://two.example"},
+                    {"provider_id": "p-4", "provider_name": "Four", "manual_decision": "reject", "manual_url": ""},
+                ],
+            )
+
+            summary = evaluate_balance(baseline_final=baseline, candidate_final=candidate, human_review=review)
+
+        self.assertEqual(summary["overall"]["correct_official_rows"], 2)
+        self.assertEqual(summary["overall"]["false_official_rows"], 1)
+        self.assertEqual(summary["overall"]["over_rejected_rows"], 1)
+        self.assertEqual(summary["overall"]["auto_precision"], 0.6667)
 
     def test_scoring_tries_www_variant_before_giving_up_on_candidate(self):
         config = load_config("config/scoring.json")

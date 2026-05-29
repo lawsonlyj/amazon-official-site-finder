@@ -25,7 +25,7 @@ Use the Codex-assisted script when API keys are stored in local key files:
 
 `--run-agent-b` is optional. It adds the AgentB step after AgentA's main workflow: high-risk candidate verification plus optimization suggestions. AgentB now checks only rows that are likely to need attention, such as low-confidence accepts, second-pass/manual accepts, unresolved rows with candidates, platform/profile URLs, generic names, logo-only evidence, and weak identity/service matches. Add `--human-review /path/to/filled_review.xlsx` to let B turn filled human-review notes into regression fixtures and safer rule recommendations. Add `--apply-agent-optimizations` only when A should apply safe B recommendations such as repeated excluded-domain additions and write regression artifacts.
 
-The current workflow version is `agent-loop-v6-identity-country`. This version adds country/language-aware search terms, country TLD and page-location corroboration, identity caps for same-name/service/country conflicts, logo-only risk handling, and no-official regression fixtures learned from human review. Logo similarity is useful positive evidence, but a logo alone is not enough to auto-accept a site.
+The current workflow version is `agent-loop-v6.1-balance-tuned`. This version adds country/language-aware search terms, country TLD and page-location corroboration, identity caps for same-name/service/country conflicts, logo-only risk handling, and no-official regression fixtures learned from human review. It also relaxes the ambiguous-name cap when a candidate has page-level provider identity plus at least weak marketplace/service evidence, which reduces over-rejection of otherwise correct official sites. Logo similarity is useful positive evidence, but a logo alone is not enough to auto-accept a site.
 
 If using Codex, ask:
 
@@ -97,6 +97,8 @@ For Codex-assisted usage, `run_codex_assisted.sh` runs first. It calls `tools/co
 After manual review, the user gives the filled workbook to Codex. Codex calls `run_review_cycle.sh` internally, which runs `tools/run_review_learning.py`, merges the filled review with the second-pass decisions, writes reviewed final outputs, creates manual labels, runs the quality gate again, and writes a learning report. In Codex mode, Codex also enables safe config optimization for repeated rejected directory/platform patterns and reports whether anything changed.
 
 The review cycle also runs `tools/run_agent_b_recommendations.py`. B reads AgentB verification, filled human-review notes, and manual-review learning reports, then writes suggestion files. When `--update-config` is enabled, `tools/apply_agent_optimizations.py` applies only safe, explainable excluded-domain additions and writes human/identity/no-official/reachability regression fixtures. Query, threshold, and new identity-constraint logic changes should still be implemented deliberately with tests.
+
+For threshold/rule tuning, use `tools/evaluate_workflow_balance.py` with a baseline final CSV, a candidate final CSV, and the filled yellow-row review workbook. It reports false official URLs, over-rejected correct sites, automatic precision, official-site recall, unresolved rows, and manual-review workload under the same assumptions used for the 100-row calibration set.
 
 ## Main Outputs
 

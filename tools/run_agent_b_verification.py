@@ -252,7 +252,7 @@ def _is_high_risk_for_agent_b(row: dict[str, str], second_pass_row: dict[str, st
         return True
     if _looks_non_independent(candidate_url):
         return True
-    if _has_generic_or_ambiguous_name(row.get("provider_name", "")):
+    if _has_generic_or_ambiguous_name(row.get("provider_name", "")) and not _has_strong_identity_evidence(evidence):
         return True
     has_logo = "listing_logo_visual_match" in evidence or "listing_logo_visual_near_match" in evidence
     has_name = "page_contains_exact_provider_name" in evidence or "page_contains_provider_name_tokens" in evidence
@@ -262,6 +262,25 @@ def _is_high_risk_for_agent_b(row: dict[str, str], second_pass_row: dict[str, st
     if "provider_name_not_found" in evidence:
         return True
     return False
+
+
+def _has_strong_identity_evidence(evidence: str) -> bool:
+    if "identity_cap_" in evidence or "page_industry_mismatch:" in evidence:
+        return False
+    has_page_name = (
+        "page_contains_exact_provider_name" in evidence
+        or "page_contains_provider_name_tokens" in evidence
+        or "page_fuzzy_provider_name_match" in evidence
+    )
+    has_name = has_page_name or "search_result_contains_exact_name" in evidence or "domain_exact_provider_slug" in evidence
+    has_service = (
+        "page_contains_amazon_service_keywords" in evidence
+        or "page_contains_some_service_keywords" in evidence
+        or "page_mentions_amazon_spn" in evidence
+        or "search_snippet_contains_amazon_service_keywords" in evidence
+    )
+    has_domain_or_logo = "domain_exact_provider_slug" in evidence or "listing_logo_visual_match" in evidence
+    return has_name and has_service and (has_page_name or has_domain_or_logo)
 
 
 def _verify_url(url: str, provider: dict[str, str], config: dict) -> dict:

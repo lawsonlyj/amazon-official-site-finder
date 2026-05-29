@@ -296,9 +296,22 @@ def _ambiguous_provider_name(name: str) -> bool:
 
 
 def _has_strong_identity_summary(evidence: str) -> bool:
-    has_name = "page_contains_exact_provider_name" in evidence or "page_contains_provider_name_tokens" in evidence
-    has_service = "page_contains_amazon_service_keywords" in evidence or "page_mentions_amazon_spn" in evidence
-    return has_name and has_service
+    if "identity_cap_" in evidence or "page_industry_mismatch:" in evidence:
+        return False
+    has_page_name = (
+        "page_contains_exact_provider_name" in evidence
+        or "page_contains_provider_name_tokens" in evidence
+        or "page_fuzzy_provider_name_match" in evidence
+    )
+    has_name = has_page_name or "search_result_contains_exact_name" in evidence or "domain_exact_provider_slug" in evidence
+    has_service = (
+        "page_contains_amazon_service_keywords" in evidence
+        or "page_contains_some_service_keywords" in evidence
+        or "page_mentions_amazon_spn" in evidence
+        or "search_snippet_contains_amazon_service_keywords" in evidence
+    )
+    has_domain_or_logo = "domain_exact_provider_slug" in evidence or "listing_logo_visual_match" in evidence
+    return has_name and has_service and (has_page_name or has_domain_or_logo)
 
 
 if __name__ == "__main__":

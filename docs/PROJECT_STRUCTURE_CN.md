@@ -187,7 +187,7 @@ Codex receives filled manual review workbook
 | `tools/run_pipeline.py` | 主调度器。负责标准化输入、搜索候选、评分、生成初版结果、质量门禁和 second-pass。 |
 | `finder/` | 核心逻辑包。包括输入清洗、国家/语言相关搜索 query 构建、API 搜索、网页抓取、官网评分。 |
 | `finder/geo.py` | 国家/地区 profile。提供本地语言官网/联系方式查询词、国家 TLD 信号和页面国家文本 marker。 |
-| `finder/scoring.py` | 官网打分器。当前版本加入身份 cap：同名/通用名、国家冲突、服务不一致、logo-only、缺少服务或地区佐证时不能直接高分接受。 |
+| `finder/scoring.py` | 官网打分器。当前版本加入身份 cap：同名/通用名、国家冲突、服务不一致、logo-only、缺少服务或地区佐证时不能直接高分接受；但当页面级名称证据和 marketplace/service 证据同时存在时，会放宽同名/通用名 cap，避免过度拒绝正确官网。 |
 | `finder/logo.py` | 从候选官网提取 logo/favicon/og:image，并与 Amazon listing logo 做感知哈希相似度比较；作为正向身份加分证据，但 logo-only 不足以自动接受。 |
 | `tools/run_unresolved_second_pass.py` | 对第一轮没解决的商家做二轮补漏，用 Brave/Exa 找更可能的官网；默认接受阈值为 `75`，与 first pass 对齐，同时保留强证据、风险 URL 和身份 cap 约束。 |
 | `tools/build_manual_review_task.py` | 生成简化人工复核 CSV/XLSX，只保留工作人员需要判断和填写的列。 |
@@ -198,6 +198,7 @@ Codex receives filled manual review workbook
 | `tools/apply_agent_optimizations.py` | A 的安全应用器，只自动写入可解释、可回滚的 excluded_domains 配置，并生成 human/identity/no_official/reachability 回归样例。 |
 | `tools/build_linked_workbook.py` | 生成链接可点击的 XLSX。 |
 | `tools/verify_run_outputs.py` | 检查最终 CSV、unresolved CSV、质量 JSON、XLSX 链接公式是否正常。 |
+| `tools/evaluate_workflow_balance.py` | 调参评估工具。用基线结果、候选结果和人工标黄复核表计算 false official、over-reject、precision、recall、manual review rows 等平衡指标。 |
 | `tools/apply_review.py` | 人工复核后，把人工 decision 应用回已有 run。 |
 | `tests/` | 自动化测试，确保精简或改代码后 workflow 没坏。 |
 | `docs/guides/` | 给工作人员看的 PDF 教程。 |

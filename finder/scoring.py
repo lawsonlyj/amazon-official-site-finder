@@ -474,6 +474,23 @@ def _apply_identity_caps(score: int, reasons: list[str], provider: dict) -> tupl
     industry_mismatch = any(reason.startswith("page_industry_mismatch:") for reason in reasons)
     ambiguous_name = _ambiguous_provider_name(provider.get("provider_name", ""))
     logo_identity = _has_any_reason(reasons, {"listing_logo_visual_match", "listing_logo_visual_near_match"})
+    weak_page_service = _has_any_reason(
+        reasons,
+        {
+            "page_contains_amazon_service_keywords",
+            "page_contains_some_service_keywords",
+            "page_mentions_amazon_spn",
+        },
+    )
+    exact_domain_identity = "domain_exact_provider_slug" in reasons
+    localized_domain_identity = "domain_contains_provider_slug" in reasons and country_identity
+    strong_ambiguous_identity = (
+        page_identity
+        and weak_page_service
+        and (exact_domain_identity or localized_domain_identity or logo_identity)
+        and not country_conflict
+        and not industry_mismatch
+    )
 
     if industry_mismatch and not service_identity:
         caps.append((49, "identity_cap_industry_mismatch_without_service"))
@@ -481,7 +498,7 @@ def _apply_identity_caps(score: int, reasons: list[str], provider: dict) -> tupl
         caps.append((49, "identity_cap_country_conflict_without_service"))
     elif country_conflict and not (page_identity and service_identity and country_identity):
         caps.append((74, "identity_cap_country_conflict_needs_review"))
-    if ambiguous_name and not ((page_identity or logo_identity) and service_identity):
+    if ambiguous_name and not (((page_identity or logo_identity) and service_identity) or strong_ambiguous_identity):
         caps.append((69, "identity_cap_ambiguous_name_requires_page_and_service"))
     if logo_identity and not (page_identity or service_identity):
         caps.append((69, "identity_cap_logo_only_evidence"))
@@ -595,8 +612,13 @@ def _summary_reasons(reasons: list[str]) -> list[str]:
             "dynamic_render_unavailable",
             "dynamic_render_failed",
             "page_contains_amazon_service_keywords",
+            "page_contains_some_service_keywords",
             "search_snippet_contains_amazon_service_keywords",
+            "search_snippet_contains_some_service_keywords",
             "page_mentions_amazon_spn",
+            "page_contains_exact_provider_name",
+            "page_contains_provider_name_tokens",
+            "page_fuzzy_provider_name_match",
             "listing_logo_visual_match",
             "listing_logo_visual_near_match",
             "identity_cap_industry_mismatch_without_service",

@@ -4,7 +4,7 @@ import shutil
 from pathlib import Path
 
 
-WORKFLOW_VERSION = "agent-loop-v6-identity-country"
+WORKFLOW_VERSION = "agent-loop-v6.1-balance-tuned"
 DEFAULT_SECOND_PASS_ACCEPT_THRESHOLD = 75
 
 
