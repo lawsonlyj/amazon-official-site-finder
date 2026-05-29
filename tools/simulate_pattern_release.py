@@ -248,7 +248,11 @@ def _pattern_scope(item: dict, data: dict) -> str:
 
 def _simulate_pattern(pattern: dict, rows: list[dict], baseline: dict) -> dict:
     features = set(pattern.get("features") or [])
-    released = [row for row in rows if features <= set(row.get("features") or set())]
+    released = [
+        row
+        for row in rows
+        if features <= set(row.get("features") or set()) and not _risky_release_domain(row.get("candidate_domain", ""))
+    ]
     correct = [
         row
         for row in released
@@ -493,6 +497,28 @@ def _has_corroboration_anchor(features: set[str]) -> bool:
         "has:listing_logo_visual_near_match",
     }
     return bool(features & corroboration_features)
+
+
+def _risky_release_domain(domain: str) -> bool:
+    labels = domain_from_url(domain).split(".")
+    if len(labels) < 3:
+        return False
+    risky_subdomains = {
+        "api",
+        "app",
+        "apps",
+        "auth",
+        "developer",
+        "developers",
+        "dev",
+        "docs",
+        "help",
+        "login",
+        "portal",
+        "signin",
+        "support",
+    }
+    return labels[0].casefold() in risky_subdomains
 
 
 def _read_rows(path: Path) -> list[dict[str, str]]:

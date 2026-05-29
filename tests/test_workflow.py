@@ -2473,17 +2473,17 @@ class OperationalCommandTests(unittest.TestCase):
                 json.dumps(
                     {
                         "overall": {
-                            "labeled_rows": 4,
+                            "labeled_rows": 5,
                             "expected_official_rows": 3,
-                            "expected_no_official_rows": 1,
+                            "expected_no_official_rows": 2,
                             "official_output_rows": 1,
                             "correct_official_rows": 1,
-                            "correct_no_official_rows": 1,
+                            "correct_no_official_rows": 2,
                             "false_official_rows": 0,
                             "over_rejected_rows": 2,
                             "auto_precision": 1.0,
                             "official_recall": 0.3333,
-                            "overall_accuracy": 0.5,
+                            "overall_accuracy": 0.6,
                         },
                         "details": [
                             {
@@ -2505,6 +2505,14 @@ class OperationalCommandTests(unittest.TestCase):
                             {
                                 "provider_id": "p-bad",
                                 "provider_name": "Bad One",
+                                "expected_kind": "no_official",
+                                "expected_domain": "",
+                                "outcome": "correct_no_official",
+                                "manual_review_reason": "recall_unresolved_top_candidate",
+                            },
+                            {
+                                "provider_id": "p-docs",
+                                "provider_name": "Good Docs",
                                 "expected_kind": "no_official",
                                 "expected_domain": "",
                                 "outcome": "correct_no_official",
@@ -2550,6 +2558,18 @@ class OperationalCommandTests(unittest.TestCase):
                         "agent_b_decision": "unsure",
                         "evidence_score": "31",
                         "supporting_facts": "candidate_pages_fetch_ok; shared_fact",
+                        "counter_evidence": "",
+                        "reason_for_unsure": "recall_candidate_needs_human_confirmation",
+                        "review_reason": "recall_unresolved_top_candidate",
+                    },
+                    {
+                        "provider_id": "p-docs",
+                        "provider_name": "Good Docs",
+                        "candidate_url": "https://docs.gooddocs.example",
+                        "candidate_domain": "docs.gooddocs.example",
+                        "agent_b_decision": "unsure",
+                        "evidence_score": "31",
+                        "supporting_facts": "candidate_pages_fetch_ok; schema_org_organization_seen",
                         "counter_evidence": "",
                         "reason_for_unsure": "recall_candidate_needs_human_confirmation",
                         "review_reason": "recall_unresolved_top_candidate",
@@ -2791,6 +2811,24 @@ class OperationalCommandTests(unittest.TestCase):
                         "notes": "",
                     },
                     {
+                        "provider_id": "docs",
+                        "provider_name": "Docs Brand",
+                        "provider_detail_url": "https://amazon.example/docs",
+                        "listing_logo_url": "",
+                        "official_url": "",
+                        "official_domain": "",
+                        "status": "unresolved",
+                        "decision_source": "pending_review",
+                        "confidence": "69",
+                        "source_status": "needs_review",
+                        "evidence_summary": "candidate",
+                        "candidate_count": "1",
+                        "scored_candidate_count": "1",
+                        "service_apis": "[]",
+                        "provider_locations": "[]",
+                        "notes": "",
+                    },
+                    {
                         "provider_id": "kept",
                         "provider_name": "Kept Brand",
                         "provider_detail_url": "https://amazon.example/kept",
@@ -2831,6 +2869,19 @@ class OperationalCommandTests(unittest.TestCase):
                         "provider_name": "Kept Brand",
                         "candidate_url": "https://wrong.example/",
                         "candidate_domain": "wrong.example",
+                        "agent_b_decision": "unsure",
+                        "confidence": "69",
+                        "evidence_score": "31",
+                        "supporting_facts": "candidate_pages_fetch_ok; schema_org_organization_seen",
+                        "counter_evidence": "",
+                        "reason_for_unsure": "recall_candidate_needs_human_confirmation",
+                        "review_reason": "recall_unresolved_top_candidate",
+                    },
+                    {
+                        "provider_id": "docs",
+                        "provider_name": "Docs Brand",
+                        "candidate_url": "https://docs.docsbrand.example/",
+                        "candidate_domain": "docs.docsbrand.example",
                         "agent_b_decision": "unsure",
                         "confidence": "69",
                         "evidence_score": "31",
@@ -2888,6 +2939,8 @@ class OperationalCommandTests(unittest.TestCase):
 
         self.assertEqual(summary["released_rows"], 1)
         self.assertEqual(rows["release"]["status"], "experimental_released")
+        self.assertEqual(rows["docs"]["status"], "unresolved")
+        self.assertEqual(rows["docs"]["official_domain"], "")
         self.assertEqual(rows["release"]["official_domain"], "releasebrand.example")
         self.assertEqual(rows["kept"]["official_domain"], "kept.example")
         self.assertTrue(output_xlsx_exists)
@@ -3013,6 +3066,91 @@ class OperationalCommandTests(unittest.TestCase):
         self.assertTrue(summary_exists)
         self.assertEqual(manifest_data["summary"]["pattern_release_applied_rows"], 1)
         self.assertTrue(manifest_data["summary"]["quality_passed"])
+
+    def test_apply_pattern_release_to_run_reads_legacy_second_pass_outputs(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            run_dir = root / "run"
+            agent_b_dir = run_dir / "agent_b"
+            legacy_final = run_dir / "provider_final_official_websites_second_pass.csv"
+            legacy_unresolved = run_dir / "provider_unresolved_second_pass.csv"
+            agent_b_csv = agent_b_dir / "check.csv"
+            patterns = root / "pattern_release_simulation.json"
+            run_dir.mkdir(parents=True)
+            agent_b_dir.mkdir(parents=True)
+            source_row = {
+                "provider_id": "legacy",
+                "provider_name": "Legacy Brand",
+                "provider_detail_url": "https://amazon.example/legacy",
+                "listing_logo_url": "",
+                "official_url": "",
+                "official_domain": "",
+                "status": "unresolved",
+                "decision_source": "pending_review",
+                "confidence": "69",
+                "source_status": "needs_review",
+                "evidence_summary": "candidate",
+                "candidate_count": "1",
+                "scored_candidate_count": "1",
+                "service_apis": "[]",
+                "provider_locations": "[]",
+                "notes": "",
+            }
+            _write_test_csv(legacy_final, [source_row])
+            _write_test_csv(legacy_unresolved, [source_row])
+            _write_test_csv(
+                agent_b_csv,
+                [
+                    {
+                        "provider_id": "legacy",
+                        "provider_name": "Legacy Brand",
+                        "candidate_url": "https://legacybrand.example/",
+                        "candidate_domain": "legacybrand.example",
+                        "agent_b_decision": "unsure",
+                        "confidence": "69",
+                        "evidence_score": "31",
+                        "supporting_facts": "candidate_pages_fetch_ok; schema_org_organization_seen",
+                        "counter_evidence": "",
+                        "reason_for_unsure": "recall_candidate_needs_human_confirmation",
+                        "review_reason": "recall_unresolved_top_candidate",
+                    }
+                ],
+            )
+            patterns.write_text(
+                json.dumps(
+                    {
+                        "summary": {"scope": "recall"},
+                        "selected_actionable_pattern_set": [
+                            {
+                                "pattern": "agent_b_score<60 AND domain_relation:exact_provider_slug AND has:schema_org_organization_seen",
+                                "features": [
+                                    "agent_b_score<60",
+                                    "domain_relation:exact_provider_slug",
+                                    "has:schema_org_organization_seen",
+                                ],
+                                "correct_recovery_rows": 1,
+                                "wrong_release_rows": 0,
+                            }
+                        ],
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            summary = apply_pattern_release_to_run(
+                run_dir=run_dir,
+                pattern_jsons=[patterns],
+                write_xlsx=False,
+            )
+            with (run_dir / "official_sites.csv").open(newline="", encoding="utf-8") as f:
+                canonical_rows = list(csv.DictReader(f))
+            with legacy_final.open(newline="", encoding="utf-8") as f:
+                legacy_rows = list(csv.DictReader(f))
+
+        self.assertEqual(summary["source_final_csv"], str(legacy_final))
+        self.assertEqual(summary["released_rows"], 1)
+        self.assertEqual(canonical_rows[0]["official_domain"], "legacybrand.example")
+        self.assertEqual(legacy_rows[0]["official_domain"], "legacybrand.example")
 
     def test_build_balance_report_recommends_current_threshold_and_summarizes_batch(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -3375,6 +3513,16 @@ class OperationalCommandTests(unittest.TestCase):
                         "top_candidate_domain": "ordinary.example",
                         "review_reason": "recall_unresolved_top_candidate",
                     },
+                    {
+                        "provider_id": "docs",
+                        "provider_name": "Docs Brand",
+                        "provider_detail_url": "https://amazon.example/docs",
+                        "official_url": "",
+                        "official_domain": "",
+                        "top_candidate_url": "https://docs.docsbrand.example",
+                        "top_candidate_domain": "docs.docsbrand.example",
+                        "review_reason": "recall_unresolved_top_candidate",
+                    },
                 ],
             )
             _write_test_csv(
@@ -3401,6 +3549,18 @@ class OperationalCommandTests(unittest.TestCase):
                         "confidence": "69",
                         "evidence_score": "31",
                         "supporting_facts": "candidate_pages_fetch_ok",
+                        "counter_evidence": "",
+                        "reason_for_unsure": "recall_candidate_needs_human_confirmation",
+                    },
+                    {
+                        "provider_id": "docs",
+                        "provider_name": "Docs Brand",
+                        "candidate_url": "https://docs.docsbrand.example",
+                        "candidate_domain": "docs.docsbrand.example",
+                        "agent_b_decision": "unsure",
+                        "confidence": "69",
+                        "evidence_score": "31",
+                        "supporting_facts": "candidate_pages_fetch_ok; schema_org_organization_seen",
                         "counter_evidence": "",
                         "reason_for_unsure": "recall_candidate_needs_human_confirmation",
                     },
@@ -3442,7 +3602,7 @@ class OperationalCommandTests(unittest.TestCase):
                 review_csv=review,
                 agent_b_csv=agent_b,
                 output_csv=output_csv,
-                max_rows=2,
+                max_rows=3,
                 max_per_pattern=1,
                 pattern_jsons=[release_patterns],
             )
@@ -3452,6 +3612,7 @@ class OperationalCommandTests(unittest.TestCase):
         self.assertEqual(rows[0]["provider_id"], "actionable")
         self.assertEqual(rows[0]["sample_reason"], "actionable_release_validation")
         self.assertIn("domain_relation:exact_provider_slug", rows[0]["pattern_match"])
+        self.assertEqual({row["provider_id"]: row["sample_reason"] for row in rows}["docs"], "recall_candidate_label")
         self.assertEqual(summary["sample_reason_counts"]["actionable_release_validation"], 1)
 
     def test_build_calibration_review_sample_balances_repeated_pattern_matches(self):

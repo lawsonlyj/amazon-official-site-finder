@@ -166,12 +166,15 @@ def _matching_pattern(row: dict[str, str], agent_row: dict[str, str], patterns: 
 def _can_release(row: dict[str, str], agent_row: dict[str, str]) -> bool:
     if row.get("official_url"):
         return False
-    if row.get("status") not in {"unresolved", "low_confidence", "not_found", "needs_review", ""}:
+    if (row.get("status") or "") not in {"unresolved", "low_confidence", "not_found", "needs_review", ""}:
         return False
     if agent_row.get("review_reason") and not agent_row.get("review_reason", "").startswith("recall_unresolved"):
         return False
     candidate_url = _normalize_url(agent_row.get("candidate_url", ""))
-    if not candidate_url or not domain_from_url(candidate_url):
+    candidate_domain = domain_from_url(candidate_url)
+    if not candidate_url or not candidate_domain:
+        return False
+    if _risky_release_domain(candidate_domain):
         return False
     if agent_row.get("counter_evidence") and "candidate_not_independent_official_site" in agent_row["counter_evidence"]:
         return False
@@ -239,6 +242,28 @@ def _append_note(existing: str, note: str) -> str:
     if not existing:
         return note
     return f"{existing}; {note}"
+
+
+def _risky_release_domain(domain: str) -> bool:
+    labels = domain_from_url(domain).split(".")
+    if len(labels) < 3:
+        return False
+    risky_subdomains = {
+        "api",
+        "app",
+        "apps",
+        "auth",
+        "developer",
+        "developers",
+        "dev",
+        "docs",
+        "help",
+        "login",
+        "portal",
+        "signin",
+        "support",
+    }
+    return labels[0].casefold() in risky_subdomains
 
 
 def _read_rows(path: Path) -> list[dict[str, str]]:

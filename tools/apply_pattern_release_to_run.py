@@ -27,6 +27,7 @@ from tools.build_manual_review_task import build_manual_review_task
 from tools.evaluate_labeled_results import read_rows as read_csv_rows
 from tools.output_layout import (
     agent_b_paths,
+    first_existing,
     publish_second_pass_aliases,
     second_pass_paths,
 )
@@ -77,19 +78,33 @@ def apply_pattern_release_to_run(
 ) -> dict:
     run_dir = Path(run_dir)
     paths = second_pass_paths(run_dir)
+    source_final_path = first_existing(
+        run_dir,
+        paths["final"],
+        "provider_final_official_websites_second_pass.csv",
+        "provider_final_official_websites.csv",
+    )
+    if not source_final_path:
+        raise FileNotFoundError(f"official site final CSV not found in {run_dir}")
     final_path = paths["final"]
     unresolved_path = paths["unresolved"]
+    source_unresolved_path = first_existing(
+        run_dir,
+        paths["unresolved"],
+        "provider_unresolved_second_pass.csv",
+        "provider_unresolved.csv",
+    )
     quality_json_path = paths["quality_json"]
     quality_md_path = paths["quality_md"]
     xlsx_path = paths["xlsx"]
     agent_b_csv = agent_b_paths(run_dir)["csv"]
-    if not final_path.exists():
-        raise FileNotFoundError(f"official_sites.csv not found: {final_path}")
     if not agent_b_csv.exists():
         raise FileNotFoundError(f"AgentB check.csv not found: {agent_b_csv}")
 
     backup_dir = _backup_outputs(
         [
+            source_final_path,
+            source_unresolved_path or unresolved_path,
             final_path,
             unresolved_path,
             quality_json_path,
@@ -101,7 +116,7 @@ def apply_pattern_release_to_run(
         enabled=backup,
     )
 
-    final_rows = _read_rows(final_path)
+    final_rows = _read_rows(source_final_path)
     agent_rows = {_row_key(row): row for row in _read_rows(agent_b_csv) if _row_key(row)}
     patterns = _load_release_patterns(pattern_jsons, include_non_actionable=False)
 
@@ -137,6 +152,8 @@ def apply_pattern_release_to_run(
     summary = {
         "run_dir": str(run_dir),
         "pattern_jsons": [str(path) for path in pattern_jsons],
+        "source_final_csv": str(source_final_path),
+        "source_unresolved_csv": str(source_unresolved_path or ""),
         "agent_b_csv": str(agent_b_csv),
         "pattern_count": len(patterns),
         "input_rows": len(final_rows),

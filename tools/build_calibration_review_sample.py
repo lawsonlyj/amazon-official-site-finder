@@ -10,6 +10,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from tools.build_linked_workbook import build_workbook
+from tools.apply_pattern_release_experiment import _can_release
 from tools.mine_evidence_patterns import features_for_review_agent_row
 
 
@@ -255,6 +256,8 @@ def _matching_pattern(review_row: dict[str, str], agent_row: dict[str, str], pat
         if pattern.get("scope") == "recall" and review_reason != "recall_unresolved_top_candidate":
             continue
         if pattern.get("scope") == "precision" and not review_reason.startswith("precision_"):
+            continue
+        if pattern.get("kind") == "actionable_release" and not _can_release(review_row, agent_row):
             continue
         if pattern["features"] <= features:
             return pattern
