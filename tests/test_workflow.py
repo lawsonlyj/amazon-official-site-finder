@@ -1707,12 +1707,19 @@ class OperationalCommandTests(unittest.TestCase):
                 ],
             )
 
-            summary = evaluate_balance(baseline_final=baseline, candidate_final=candidate, human_review=review)
+            summary = evaluate_balance(
+                baseline_final=baseline,
+                candidate_final=candidate,
+                human_review=review,
+                simulate_thresholds=[85],
+            )
 
         self.assertEqual(summary["overall"]["correct_official_rows"], 2)
         self.assertEqual(summary["overall"]["false_official_rows"], 1)
         self.assertEqual(summary["overall"]["over_rejected_rows"], 1)
         self.assertEqual(summary["overall"]["auto_precision"], 0.6667)
+        self.assertEqual(summary["threshold_simulations"][0]["threshold"], 85)
+        self.assertEqual(summary["threshold_simulations"][0]["official_output_rows"], 3)
 
     def test_scoring_tries_www_variant_before_giving_up_on_candidate(self):
         config = load_config("config/scoring.json")

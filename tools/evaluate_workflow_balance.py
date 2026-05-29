@@ -34,6 +34,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--candidate-final", required=True, help="Candidate workflow final CSV to evaluate.")
     parser.add_argument("--human-review", required=True, help="Filled human review CSV/XLSX with corrected yellow rows.")
     parser.add_argument("--run-dir", help="Optional candidate run dir, used to count review_task rows.")
+    parser.add_argument(
+        "--simulate-thresholds",
+        default="",
+        help="Comma-separated matched confidence thresholds to simulate by moving lower matched rows to unresolved.",
+    )
     parser.add_argument("--output-json")
     parser.add_argument("--output-csv")
     args = parser.parse_args(argv)
@@ -45,6 +50,7 @@ def main(argv: list[str] | None = None) -> int:
         run_dir=args.run_dir,
         output_json=args.output_json,
         output_csv=args.output_csv,
+        simulate_thresholds=args.simulate_thresholds,
     )
     print(json.dumps(summary["overall"], ensure_ascii=False, indent=2))
     return 0
@@ -58,6 +64,7 @@ def evaluate_balance(
     run_dir: str | Path | None = None,
     output_json: str | Path | None = None,
     output_csv: str | Path | None = None,
+    simulate_thresholds: str | list[int] | None = None,
 ) -> dict:
     baseline_rows = _read_rows(Path(baseline_final))
     candidate_rows = _index_rows(_read_rows(Path(candidate_final)))
@@ -76,6 +83,7 @@ def evaluate_balance(
             overall["unresolved_rows"] = len(_read_rows(unresolved))
     summary = {
         "overall": overall,
+        "threshold_simulations": _threshold_simulations(labels, candidate_rows, simulate_thresholds),
         "inputs": {
             "baseline_final": str(baseline_final),
             "candidate_final": str(candidate_final),
@@ -91,6 +99,52 @@ def evaluate_balance(
     if output_csv:
         _write_rows(Path(output_csv), details, DETAIL_FIELDS)
     return summary
+
+
+def _threshold_simulations(
+    labels: list[dict[str, str]],
+    candidate_rows: dict[str, dict[str, str]],
+    thresholds: str | list[int] | None,
+) -> list[dict]:
+    if not thresholds:
+        return []
+    if isinstance(thresholds, str):
+        values = [item.strip() for item in thresholds.split(",") if item.strip()]
+        threshold_values = []
+        for value in values:
+            try:
+                threshold_values.append(int(float(value)))
+            except ValueError:
+                continue
+    else:
+        threshold_values = [int(value) for value in thresholds]
+    out = []
+    for threshold in threshold_values:
+        rows = []
+        for label in labels:
+            candidate = dict(_candidate_for_label(label, candidate_rows))
+            if _should_drop_for_threshold(candidate, threshold):
+                candidate["official_url"] = ""
+                candidate["official_domain"] = ""
+                candidate["status"] = "unresolved"
+                candidate["decision_source"] = f"threshold_sim:{threshold}"
+            rows.append(_evaluate_label(label, candidate))
+        overall = _summarize(rows)
+        overall["threshold"] = threshold
+        out.append(overall)
+    return out
+
+
+def _should_drop_for_threshold(row: dict[str, str], threshold: int) -> bool:
+    if row.get("status") != "matched":
+        return False
+    if not row.get("official_url"):
+        return False
+    try:
+        confidence = int(float(row.get("confidence") or 0))
+    except (TypeError, ValueError):
+        return True
+    return confidence < threshold
 
 
 def _label_from_row(row: dict[str, str], review_row: dict[str, str]) -> dict[str, str] | None:
