@@ -2756,6 +2756,8 @@ class OperationalCommandTests(unittest.TestCase):
                         "provider_id": "p-risk",
                         "provider_name": "Risky Accept",
                         "sample_reason": "agent_b_accept_risky_lane",
+                        "pattern_scope": "",
+                        "pattern_match": "",
                         "review_reason": "precision_generic_identity_term_risk",
                         "agent_b_decision": "accept",
                         "reason_for_unsure": "",
@@ -2769,6 +2771,8 @@ class OperationalCommandTests(unittest.TestCase):
                         "provider_id": "p-recall",
                         "provider_name": "Recall Row",
                         "sample_reason": "recall_candidate_label",
+                        "pattern_scope": "recall",
+                        "pattern_match": "has:schema_org_organization_seen",
                         "review_reason": "recall_unresolved_top_candidate",
                         "agent_b_decision": "unsure",
                         "reason_for_unsure": "",
@@ -2782,6 +2786,8 @@ class OperationalCommandTests(unittest.TestCase):
                         "provider_id": "p-timeout",
                         "provider_name": "Timeout Row",
                         "sample_reason": "timeout_needs_manual",
+                        "pattern_scope": "",
+                        "pattern_match": "",
                         "review_reason": "precision_low_confidence_auto_match",
                         "agent_b_decision": "unsure",
                         "reason_for_unsure": "agent_b_row_timeout",
@@ -2795,6 +2801,8 @@ class OperationalCommandTests(unittest.TestCase):
                         "provider_id": "p-blank",
                         "provider_name": "Blank Row",
                         "sample_reason": "agent_b_unsure_label",
+                        "pattern_scope": "",
+                        "pattern_match": "",
                         "review_reason": "precision_low_confidence_auto_match",
                         "agent_b_decision": "unsure",
                         "reason_for_unsure": "",
@@ -2824,9 +2832,57 @@ class OperationalCommandTests(unittest.TestCase):
         self.assertEqual(report["summary"]["candidate_incorrect_rows"], 1)
         self.assertEqual(report["summary"]["recall_useful_rows"], 1)
         self.assertEqual(report["by_sample_reason"]["agent_b_accept_risky_lane"]["outcome_counts"]["candidate_incorrect"], 1)
+        self.assertEqual(report["pattern_recommendations"][0]["pattern"], "has:schema_org_organization_seen")
+        self.assertEqual(report["pattern_recommendations"][0]["recommendation"], "needs_more_labels")
         self.assertIn("Keep AgentB risky accepts in manual review", md_text)
+        self.assertIn("Pattern Validation", md_text)
         self.assertTrue(out_json_exists)
         self.assertEqual(detail_rows[1]["normalized_manual_url"], "https://real-recall.example")
+
+    def test_evaluate_calibration_review_sample_rejects_pattern_when_label_blocks_it(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            sample = root / "pattern_sample.csv"
+            _write_test_csv(
+                sample,
+                [
+                    {
+                        "provider_id": "p-good",
+                        "provider_name": "Good",
+                        "sample_reason": "pattern_candidate_validation",
+                        "pattern_scope": "precision",
+                        "pattern_match": "has:page_contains_exact_provider_name",
+                        "review_reason": "precision_low_confidence_auto_match",
+                        "agent_b_decision": "unsure",
+                        "reason_for_unsure": "",
+                        "official_url": "https://good.example",
+                        "candidate_url": "https://good.example",
+                        "manual_decision": "accept",
+                        "manual_url": "",
+                        "notes": "",
+                    },
+                    {
+                        "provider_id": "p-bad",
+                        "provider_name": "Bad",
+                        "sample_reason": "pattern_candidate_validation",
+                        "pattern_scope": "precision",
+                        "pattern_match": "has:page_contains_exact_provider_name",
+                        "review_reason": "precision_low_confidence_auto_match",
+                        "agent_b_decision": "unsure",
+                        "reason_for_unsure": "",
+                        "official_url": "https://bad.example",
+                        "candidate_url": "https://bad.example",
+                        "manual_decision": "reject",
+                        "manual_url": "",
+                        "notes": "wrong company",
+                    },
+                ],
+            )
+
+            report = evaluate_calibration_review_sample(sample=sample)
+
+        self.assertEqual(report["pattern_recommendations"][0]["recommendation"], "reject_pattern")
+        self.assertEqual(report["pattern_recommendations"][0]["blocking_rows"], 1)
 
     def test_scoring_tries_www_variant_before_giving_up_on_candidate(self):
         config = load_config("config/scoring.json")

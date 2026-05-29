@@ -16,6 +16,8 @@ DETAIL_FIELDS = [
     "provider_id",
     "provider_name",
     "sample_reason",
+    "pattern_scope",
+    "pattern_match",
     "review_reason",
     "agent_b_decision",
     "reason_for_unsure",
@@ -75,6 +77,8 @@ def evaluate_calibration_review_sample(
         "by_sample_reason": _group_stats(details, "sample_reason"),
         "by_review_reason": _group_stats(details, "review_reason"),
         "by_agent_b_decision": _group_stats(details, "agent_b_decision"),
+        "by_pattern_match": _group_stats(details, "pattern_match"),
+        "pattern_recommendations": _pattern_recommendations(details),
         "recommendations": _recommendations(details),
         "details": details,
         "inputs": {"sample": str(sample)},
@@ -100,6 +104,8 @@ def _detail(row: dict[str, str]) -> dict[str, str]:
         "provider_id": _first(row, "provider_id"),
         "provider_name": _first(row, "provider_name"),
         "sample_reason": _first(row, "sample_reason"),
+        "pattern_scope": _first(row, "pattern_scope"),
+        "pattern_match": _first(row, "pattern_match"),
         "review_reason": _first(row, "review_reason"),
         "agent_b_decision": _first(row, "agent_b_decision"),
         "reason_for_unsure": _first(row, "reason_for_unsure"),
@@ -243,6 +249,62 @@ def _recommendations(details: list[dict[str, str]]) -> list[str]:
     return recommendations
 
 
+def _pattern_recommendations(details: list[dict[str, str]]) -> list[dict]:
+    groups: dict[str, list[dict[str, str]]] = defaultdict(list)
+    for row in details:
+        if row.get("pattern_match"):
+            groups[row["pattern_match"]].append(row)
+    out = []
+    for pattern, rows in sorted(groups.items()):
+        labeled = [row for row in rows if row["normalized_decision"]]
+        decisive = [row for row in labeled if row["normalized_decision"] != "unsure"]
+        good = [
+            row
+            for row in decisive
+            if row["calibration_outcome"] in {"candidate_correct", "recall_candidate_useful"}
+        ]
+        bad = [
+            row
+            for row in decisive
+            if row["calibration_outcome"] in {"candidate_incorrect", "recall_candidate_not_useful"}
+        ]
+        if bad:
+            recommendation = "reject_pattern"
+            reason = "Human labels found at least one wrong candidate for this pattern."
+        elif len(good) >= 5:
+            recommendation = "candidate_for_rule"
+            reason = "Five or more decisive labels supported this pattern with no wrong candidates."
+        elif good:
+            recommendation = "needs_more_labels"
+            reason = "Current labels support this pattern, but support is still too small for a production rule."
+        else:
+            recommendation = "unlabeled"
+            reason = "No decisive human labels for this pattern yet."
+        out.append(
+            {
+                "pattern": pattern,
+                "pattern_scope": _first(rows[0], "pattern_scope"),
+                "rows": len(rows),
+                "labeled_rows": len(labeled),
+                "decisive_rows": len(decisive),
+                "supporting_rows": len(good),
+                "blocking_rows": len(bad),
+                "recommendation": recommendation,
+                "reason": reason,
+            }
+        )
+    out.sort(
+        key=lambda row: (
+            {"reject_pattern": 0, "candidate_for_rule": 1, "needs_more_labels": 2, "unlabeled": 3}.get(
+                row["recommendation"], 9
+            ),
+            -row["decisive_rows"],
+            row["pattern"],
+        )
+    )
+    return out
+
+
 def _decision(row: dict[str, str]) -> str:
     raw = _first(row, "manual_decision", "your_decision", "decision").casefold()
     aliases = {
@@ -343,6 +405,20 @@ def _render_markdown(report: dict) -> str:
     for reason, stats in report["by_review_reason"].items():
         outcomes = ", ".join(f"{key}={value}" for key, value in stats["outcome_counts"].items()) or "none"
         lines.append(f"- {reason}: rows={stats['rows']}, labeled={stats['labeled_rows']}, outcomes=({outcomes})")
+    if report.get("pattern_recommendations"):
+        lines.extend(["", "## Pattern Validation", ""])
+        for row in report["pattern_recommendations"][:25]:
+            lines.append(
+                "- {recommendation}: scope={scope}, rows={rows}, decisive={decisive}, support={support}, block={block} :: {pattern}".format(
+                    recommendation=row["recommendation"],
+                    scope=row.get("pattern_scope", ""),
+                    rows=row["rows"],
+                    decisive=row["decisive_rows"],
+                    support=row["supporting_rows"],
+                    block=row["blocking_rows"],
+                    pattern=row["pattern"],
+                )
+            )
     lines.append("")
     return "\n".join(lines)
 
