@@ -1557,6 +1557,55 @@ class OperationalCommandTests(unittest.TestCase):
         self.assertEqual(summary["input_rows"], 4)
         self.assertEqual(checked_ids, ["second", "low", "logo", "ambiguous"])
 
+    def test_agent_b_keeps_high_risk_ambiguous_identity_as_unsure_without_exact_logo(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            run_dir = Path(tmp)
+            final_rows = [
+                {
+                    "provider_id": "p-1",
+                    "provider_name": "AA Consulting",
+                    "provider_detail_url": "https://amazon.example/p-1",
+                    "official_url": "https://aaconsulting.example",
+                    "status": "matched",
+                    "confidence": "100",
+                    "evidence_summary": "page_contains_exact_provider_name; page_contains_amazon_service_keywords; domain_exact_provider_slug",
+                },
+            ]
+            manual_rows = [
+                {
+                    "provider_id": "p-1",
+                    "provider_name": "AA Consulting",
+                    "provider_detail_url": "https://amazon.example/p-1",
+                    "official_url": "https://aaconsulting.example",
+                    "status": "matched",
+                    "confidence": "100",
+                    "review_reason": "precision_generic_identity_term_risk",
+                },
+            ]
+            _write_test_csv(run_dir / "official_sites.csv", final_rows)
+            _write_test_csv(run_dir / "review_task.csv", manual_rows)
+
+            def fake_fetch(url):
+                html = """
+                <html><head><title>AA Consulting</title>
+                <script type="application/ld+json">{"@type":"Organization"}</script></head>
+                <body>AA Consulting LLC. About us. Contact us. Privacy policy.
+                Amazon marketplace account management ecommerce services.</body></html>
+                """
+                return {"ok": True, "status": 200, "final_url": url, "text": html}
+
+            with patch("tools.run_agent_b_verification.fetch_text", side_effect=fake_fetch), patch(
+                "tools.run_agent_b_verification.collect_candidates_for_queries", return_value=[]
+            ):
+                summary = run_agent_b_verification(run_dir=run_dir, write_xlsx=False)
+            with (run_dir / "agent_b/check.csv").open(newline="", encoding="utf-8") as f:
+                rows = list(csv.DictReader(f))
+
+        self.assertEqual(summary["decision_counts"], {"unsure": 1})
+        self.assertEqual(rows[0]["agent_b_decision"], "unsure")
+        self.assertEqual(rows[0]["review_reason"], "precision_generic_identity_term_risk")
+        self.assertEqual(rows[0]["reason_for_unsure"], "high_risk_identity_needs_human_confirmation")
+
     def test_agent_c_recommends_and_agent_a_applies_only_safe_rules(self):
         with tempfile.TemporaryDirectory() as tmp:
             run_dir = Path(tmp)

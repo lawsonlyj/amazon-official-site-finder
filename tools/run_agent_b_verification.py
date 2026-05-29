@@ -49,6 +49,7 @@ AGENT_B_FIELDS = [
     "replacement_domain",
     "source_status",
     "source_confidence",
+    "review_reason",
 ]
 
 SUPPORTING_PATHS = ["/", "/about", "/contact", "/services", "/privacy", "/terms", "/about-us", "/contact-us"]
@@ -164,7 +165,8 @@ def verify_row(row: dict[str, str], *, config: dict, per_query: int = 2) -> dict
     search_candidates = _safe_collect(search_queries, per_query=per_query)
     replacement = _best_replacement(row, search_candidates, candidate_url, config)
 
-    decision, manual_url, confidence, unsure_reason = _decide(candidate, replacement)
+    review_reason = row.get("review_reason", "")
+    decision, manual_url, confidence, unsure_reason = _decide(candidate, replacement, review_reason)
     notes = _notes_for(decision, candidate, replacement)
     out_row = {
         "provider_id": row.get("provider_id", ""),
@@ -187,6 +189,7 @@ def verify_row(row: dict[str, str], *, config: dict, per_query: int = 2) -> dict
         "replacement_domain": replacement.get("domain", ""),
         "source_status": row.get("status", ""),
         "source_confidence": row.get("confidence", ""),
+        "review_reason": review_reason,
     }
     return {
         "row": out_row,
@@ -420,9 +423,12 @@ def _best_replacement(
     }
 
 
-def _decide(candidate: dict, replacement: dict[str, str]) -> tuple[str, str, int, str]:
+def _decide(candidate: dict, replacement: dict[str, str], review_reason: str = "") -> tuple[str, str, int, str]:
     score = int(candidate.get("score") or 0)
     counters = set(candidate.get("counter_evidence") or [])
+    facts = set(candidate.get("supporting_facts") or [])
+    if _is_precision_high_risk_reason(review_reason) and 70 <= score < 85 and "listing_logo_visual_match" not in facts:
+        return "unsure", "", min(69, score), "high_risk_identity_needs_human_confirmation"
     if score >= 70 and "candidate_not_independent_official_site" not in counters:
         return "accept", "", min(100, score), ""
     if replacement.get("url"):
@@ -431,6 +437,14 @@ def _decide(candidate: dict, replacement: dict[str, str]) -> tuple[str, str, int
     if score <= 20 and counters:
         return "reject", "", min(90, max(50, 100 - score)), ""
     return "unsure", "", max(0, min(69, score)), "insufficient_or_conflicting_evidence"
+
+
+def _is_precision_high_risk_reason(reason: str) -> bool:
+    return reason in {
+        "precision_second_pass_accepted_70_84",
+        "precision_generic_identity_term_risk",
+        "precision_slug_extension_identity_risk",
+    }
 
 
 def _notes_for(decision: str, candidate: dict, replacement: dict[str, str]) -> str:
