@@ -3,6 +3,7 @@ import io
 import json
 import os
 import tempfile
+import time
 import unittest
 import urllib.error
 import zipfile
@@ -1866,6 +1867,49 @@ class OperationalCommandTests(unittest.TestCase):
         self.assertEqual([row["provider_id"] for row in rows], ["p-1", "p-2"])
         self.assertEqual(rows[0]["notes"], "cached row")
         self.assertEqual(len(jsonl_lines), 2)
+
+    def test_agent_b_row_timeout_records_unsure_and_keeps_output(self):
+        if not hasattr(__import__("signal"), "SIGALRM"):
+            self.skipTest("SIGALRM unavailable")
+        with tempfile.TemporaryDirectory() as tmp:
+            run_dir = Path(tmp)
+            final_rows = [
+                {
+                    "provider_id": "p-1",
+                    "provider_name": "Slow Brand",
+                    "provider_detail_url": "https://amazon.example/p-1",
+                    "official_url": "https://slow.example",
+                    "status": "matched",
+                    "confidence": "80",
+                    "evidence_summary": "slow candidate",
+                },
+            ]
+            manual_rows = [
+                {
+                    "provider_id": "p-1",
+                    "provider_name": "Slow Brand",
+                    "official_url": "https://slow.example",
+                    "review_reason": "precision_low_confidence_auto_match",
+                },
+            ]
+            _write_test_csv(run_dir / "official_sites.csv", final_rows)
+            _write_test_csv(run_dir / "review_task.csv", manual_rows)
+
+            def slow_fetch(url):
+                time.sleep(2)
+                return {"ok": True, "status": 200, "final_url": url, "text": "<html><body>Slow Brand</body></html>"}
+
+            with patch("tools.run_agent_b_verification.fetch_text", side_effect=slow_fetch), patch(
+                "tools.run_agent_b_verification.collect_candidates_for_queries", return_value=[]
+            ):
+                summary = run_agent_b_verification(run_dir=run_dir, write_xlsx=False, row_timeout=1)
+            with (run_dir / "agent_b/check.csv").open(newline="", encoding="utf-8") as f:
+                rows = list(csv.DictReader(f))
+
+        self.assertEqual(summary["output_rows"], 1)
+        self.assertEqual(rows[0]["agent_b_decision"], "unsure")
+        self.assertEqual(rows[0]["reason_for_unsure"], "agent_b_row_timeout")
+        self.assertIn("agent_b_row_timeout", rows[0]["counter_evidence"])
 
     def test_agent_c_recommends_and_agent_a_applies_only_safe_rules(self):
         with tempfile.TemporaryDirectory() as tmp:

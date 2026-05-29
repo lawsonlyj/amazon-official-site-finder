@@ -5,6 +5,7 @@ import csv
 import json
 import os
 import re
+import signal
 import sys
 from pathlib import Path
 from urllib.parse import urlparse
@@ -67,6 +68,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--write-xlsx", action="store_true")
     parser.add_argument("--include-all-final", action="store_true")
     parser.add_argument("--resume", action="store_true", help="Reuse existing output rows and keep incremental progress.")
+    parser.add_argument(
+        "--row-timeout",
+        type=int,
+        default=_default_row_timeout(),
+        help="Maximum seconds per row before recording an unsure timeout result. 0 disables it.",
+    )
     args = parser.parse_args(argv)
 
     load_dotenv(Path(".env"))
@@ -81,6 +88,7 @@ def main(argv: list[str] | None = None) -> int:
         write_xlsx=args.write_xlsx,
         include_all_final=args.include_all_final,
         resume=args.resume,
+        row_timeout=args.row_timeout,
     )
     print(json.dumps(summary, ensure_ascii=False, indent=2))
     return 0
@@ -98,6 +106,7 @@ def run_agent_b_verification(
     write_xlsx: bool = True,
     include_all_final: bool = False,
     resume: bool = False,
+    row_timeout: int = 0,
 ) -> dict:
     run_dir = Path(run_dir)
     config = load_config(config_path)
@@ -124,7 +133,7 @@ def run_agent_b_verification(
             resumed_rows += 1
             continue
         print(f"agent-b {index}/{len(rows)} {row.get('provider_name', '')}", file=sys.stderr)
-        result = verify_row(row, config=config, per_query=per_query)
+        result = _verify_row_with_timeout(row, config=config, per_query=per_query, row_timeout=row_timeout)
         result_rows.append(result["row"])
         json_rows.append(result["details"])
         processed_rows += 1
@@ -216,6 +225,73 @@ def verify_row(row: dict[str, str], *, config: dict, per_query: int = 2) -> dict
             "replacement": replacement,
             "search_queries": search_queries,
             "decision": decision,
+        },
+    }
+
+
+def _verify_row_with_timeout(row: dict[str, str], *, config: dict, per_query: int, row_timeout: int) -> dict:
+    if row_timeout <= 0 or not hasattr(signal, "SIGALRM"):
+        return verify_row(row, config=config, per_query=per_query)
+
+    def _raise_timeout(signum, frame):
+        raise TimeoutError("agent_b_row_timeout")
+
+    previous_handler = signal.getsignal(signal.SIGALRM)
+    try:
+        signal.signal(signal.SIGALRM, _raise_timeout)
+        signal.setitimer(signal.ITIMER_REAL, row_timeout)
+        return verify_row(row, config=config, per_query=per_query)
+    except TimeoutError:
+        print(f"warning: AgentB row timed out after {row_timeout}s: {row.get('provider_name', '')}", file=sys.stderr)
+        return _timeout_result(row, row_timeout)
+    finally:
+        signal.setitimer(signal.ITIMER_REAL, 0)
+        signal.signal(signal.SIGALRM, previous_handler)
+
+
+def _timeout_result(row: dict[str, str], row_timeout: int) -> dict:
+    candidate_url = _candidate_url(row)
+    search_queries = _independent_queries(row.get("provider_name", ""), _parse_locations(row.get("provider_locations", "")))
+    out_row = {
+        "provider_id": row.get("provider_id", ""),
+        "provider_name": row.get("provider_name", ""),
+        "provider_detail_url": row.get("provider_detail_url", ""),
+        "candidate_url": candidate_url,
+        "candidate_domain": domain_from_url(candidate_url),
+        "agent_b_decision": "unsure",
+        "manual_decision": "unsure",
+        "manual_url": "",
+        "confidence": "0",
+        "evidence_score": "0",
+        "evidence_urls": "",
+        "supporting_facts": "",
+        "counter_evidence": "agent_b_row_timeout",
+        "reason_for_unsure": "agent_b_row_timeout",
+        "notes": f"AgentB unsure: row timed out after {row_timeout}s",
+        "independent_search_queries": "; ".join(search_queries),
+        "replacement_url": "",
+        "replacement_domain": "",
+        "source_status": row.get("status", ""),
+        "source_confidence": row.get("confidence", ""),
+        "review_reason": row.get("review_reason", ""),
+    }
+    return {
+        "row": out_row,
+        "details": {
+            "provider_id": out_row["provider_id"],
+            "provider_name": out_row["provider_name"],
+            "candidate": {
+                "url": candidate_url,
+                "domain": domain_from_url(candidate_url),
+                "score": 0,
+                "evidence_urls": [],
+                "supporting_facts": [],
+                "counter_evidence": ["agent_b_row_timeout"],
+            },
+            "replacement": {},
+            "search_queries": search_queries,
+            "decision": "unsure",
+            "timeout_seconds": row_timeout,
         },
     }
 
@@ -610,6 +686,13 @@ def _max_pages_to_fetch() -> int:
         return max(1, int(os.getenv("FINDER_AGENT_B_MAX_PAGES", "4")))
     except ValueError:
         return 4
+
+
+def _default_row_timeout() -> int:
+    try:
+        return max(0, int(os.getenv("FINDER_AGENT_B_ROW_TIMEOUT", "0")))
+    except ValueError:
+        return 0
 
 
 def _parse_locations(value: str) -> list[str]:
