@@ -169,6 +169,8 @@ def _priority(review_row: dict[str, str], agent_row: dict[str, str], pattern: di
     if unsure == "agent_b_row_timeout":
         return 100, "timeout_needs_manual"
     if pattern:
+        if pattern.get("kind") == "actionable_release":
+            return 98, "actionable_release_validation"
         if pattern.get("kind") == "durable_safe":
             return 96, "pattern_candidate_validation"
         if pattern.get("kind") == "risky":
@@ -198,7 +200,11 @@ def _load_patterns(paths: list[str | Path]) -> list[dict]:
         path = Path(path_value)
         data = json.loads(path.read_text(encoding="utf-8"))
         scope = data.get("summary", {}).get("scope", "")
-        for kind, key in [("durable_safe", "durable_safe_patterns"), ("risky", "risky_patterns")]:
+        for kind, key in [
+            ("actionable_release", "actionable_safe_patterns"),
+            ("durable_safe", "durable_safe_patterns"),
+            ("risky", "risky_patterns"),
+        ]:
             for item in data.get(key, [])[:25]:
                 features = set(item.get("features") or _pattern_features(item.get("pattern", "")))
                 if not features:
@@ -210,13 +216,13 @@ def _load_patterns(paths: list[str | Path]) -> list[dict]:
                         "pattern": item.get("pattern", ""),
                         "features": features,
                         "support_rows": int(item.get("support_rows") or 0),
-                        "correct_recovery_rows": int(item.get("correct_recovery_rows") or 0),
-                        "wrong_release_rows": int(item.get("wrong_release_rows") or 0),
+                        "correct_recovery_rows": _to_int(item.get("correct_recovery_rows")),
+                        "wrong_release_rows": _to_int(item.get("wrong_release_rows")),
                     }
                 )
     out.sort(
         key=lambda row: (
-            0 if row["kind"] == "durable_safe" else 1,
+            {"actionable_release": 0, "durable_safe": 1, "risky": 2}.get(row["kind"], 9),
             -row["correct_recovery_rows"],
             row["wrong_release_rows"],
             len(row["features"]),
@@ -321,6 +327,13 @@ def _write_rows(path: Path, rows: list[dict[str, str]], fields: list[str]) -> No
         writer = csv.DictWriter(f, fieldnames=fields, extrasaction="ignore")
         writer.writeheader()
         writer.writerows(rows)
+
+
+def _to_int(value: object) -> int:
+    try:
+        return int(float(value or 0))
+    except (TypeError, ValueError):
+        return 0
 
 
 if __name__ == "__main__":

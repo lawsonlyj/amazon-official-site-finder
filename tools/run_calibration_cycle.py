@@ -119,7 +119,7 @@ def run_calibration_cycle(
         max_rows=max_rows,
         max_per_reason=max_per_reason,
         max_per_pattern=max_per_pattern,
-        pattern_jsons=[recall_json, precision_json],
+        pattern_jsons=[release_sim_json, recall_json, precision_json],
     )
     empty_eval = evaluate_calibration_review_sample(
         sample=sample_xlsx,
@@ -152,6 +152,9 @@ def run_calibration_cycle(
             "best_actionable_release_wrong_rows": release_simulation["summary"].get("best_actionable_safe_wrong_release_rows"),
             "best_actionable_release_accuracy": release_simulation["summary"].get("best_actionable_safe_accuracy"),
             "sample_rows": sample_summary.get("sample_rows"),
+            "actionable_release_validation_rows": sample_summary.get("sample_reason_counts", {}).get(
+                "actionable_release_validation", 0
+            ),
             "pattern_validation_rows": sample_summary.get("sample_reason_counts", {}).get("pattern_candidate_validation", 0),
             "pattern_control_rows": sample_summary.get("sample_reason_counts", {}).get("pattern_control_validation", 0),
             "timeout_rows": sample_summary.get("sample_reason_counts", {}).get("timeout_needs_manual", 0),
@@ -229,6 +232,7 @@ def _render_markdown(report: dict) -> str:
         f"- Best actionable release correct/wrong rows: {summary['best_actionable_release_correct_rows']}/{summary['best_actionable_release_wrong_rows']}",
         f"- Best actionable release accuracy: {summary['best_actionable_release_accuracy']}",
         f"- Sample rows: {summary['sample_rows']}",
+        f"- Actionable release validation rows: {summary['actionable_release_validation_rows']}",
         f"- Pattern candidate validation rows: {summary['pattern_validation_rows']}",
         f"- Pattern control validation rows: {summary['pattern_control_rows']}",
         f"- Timeout rows: {summary['timeout_rows']}",

@@ -2885,6 +2885,104 @@ class OperationalCommandTests(unittest.TestCase):
         self.assertEqual(summary["max_per_pattern"], 1)
         self.assertEqual(summary["pattern_match_counts"][rows[0]["pattern_match"]], 1)
 
+    def test_build_calibration_review_sample_prioritizes_actionable_release_patterns(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            review = root / "review.csv"
+            agent_b = root / "agent_b.csv"
+            release_patterns = root / "release_patterns.json"
+            output_csv = root / "sample.csv"
+            _write_test_csv(
+                review,
+                [
+                    {
+                        "provider_id": "actionable",
+                        "provider_name": "Actionable Brand",
+                        "provider_detail_url": "https://amazon.example/actionable",
+                        "official_url": "",
+                        "official_domain": "",
+                        "top_candidate_url": "https://actionablebrand.example",
+                        "top_candidate_domain": "actionablebrand.example",
+                        "review_reason": "recall_unresolved_top_candidate",
+                    },
+                    {
+                        "provider_id": "ordinary",
+                        "provider_name": "Ordinary Brand",
+                        "provider_detail_url": "https://amazon.example/ordinary",
+                        "official_url": "",
+                        "official_domain": "",
+                        "top_candidate_url": "https://ordinary.example",
+                        "top_candidate_domain": "ordinary.example",
+                        "review_reason": "recall_unresolved_top_candidate",
+                    },
+                ],
+            )
+            _write_test_csv(
+                agent_b,
+                [
+                    {
+                        "provider_id": "actionable",
+                        "provider_name": "Actionable Brand",
+                        "candidate_url": "https://actionablebrand.example",
+                        "candidate_domain": "actionablebrand.example",
+                        "agent_b_decision": "unsure",
+                        "confidence": "69",
+                        "evidence_score": "31",
+                        "supporting_facts": "candidate_pages_fetch_ok; schema_org_organization_seen",
+                        "counter_evidence": "",
+                        "reason_for_unsure": "recall_candidate_needs_human_confirmation",
+                    },
+                    {
+                        "provider_id": "ordinary",
+                        "provider_name": "Ordinary Brand",
+                        "candidate_url": "https://ordinary.example",
+                        "candidate_domain": "ordinary.example",
+                        "agent_b_decision": "unsure",
+                        "confidence": "69",
+                        "evidence_score": "31",
+                        "supporting_facts": "candidate_pages_fetch_ok",
+                        "counter_evidence": "",
+                        "reason_for_unsure": "recall_candidate_needs_human_confirmation",
+                    },
+                ],
+            )
+            release_patterns.write_text(
+                json.dumps(
+                    {
+                        "summary": {"scope": "recall"},
+                        "actionable_safe_patterns": [
+                            {
+                                "pattern": "agent_b_score<60 AND domain_relation:exact_provider_slug AND has:schema_org_organization_seen",
+                                "features": [
+                                    "agent_b_score<60",
+                                    "domain_relation:exact_provider_slug",
+                                    "has:schema_org_organization_seen",
+                                ],
+                                "correct_recovery_rows": 2,
+                                "wrong_release_rows": 0,
+                            }
+                        ],
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            summary = build_calibration_review_sample(
+                review_csv=review,
+                agent_b_csv=agent_b,
+                output_csv=output_csv,
+                max_rows=2,
+                max_per_pattern=1,
+                pattern_jsons=[release_patterns],
+            )
+            with output_csv.open(newline="", encoding="utf-8") as f:
+                rows = list(csv.DictReader(f))
+
+        self.assertEqual(rows[0]["provider_id"], "actionable")
+        self.assertEqual(rows[0]["sample_reason"], "actionable_release_validation")
+        self.assertIn("domain_relation:exact_provider_slug", rows[0]["pattern_match"])
+        self.assertEqual(summary["sample_reason_counts"]["actionable_release_validation"], 1)
+
     def test_build_calibration_review_sample_balances_repeated_pattern_matches(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -3134,6 +3232,7 @@ class OperationalCommandTests(unittest.TestCase):
         self.assertTrue(output_exists["summary_md"])
         self.assertEqual(report["summary"]["empty_eval_labeled_rows"], 0)
         self.assertIn("release_actionable_safe_patterns", report["summary"])
+        self.assertIn("actionable_release_validation_rows", report["summary"])
 
     def test_run_calibration_cycle_can_evaluate_filled_pattern_sample(self):
         with tempfile.TemporaryDirectory() as tmp:
