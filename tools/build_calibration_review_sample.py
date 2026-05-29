@@ -10,11 +10,14 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from tools.build_linked_workbook import build_workbook
+from tools.mine_evidence_patterns import features_for_review_agent_row
 
 
 SAMPLE_FIELDS = [
     "sample_priority",
     "sample_reason",
+    "pattern_scope",
+    "pattern_match",
     "review_reason",
     "agent_b_decision",
     "agent_b_confidence",
@@ -52,6 +55,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--output-xlsx")
     parser.add_argument("--max-rows", type=int, default=50)
     parser.add_argument("--max-per-reason", type=int, default=10)
+    parser.add_argument(
+        "--pattern-json",
+        action="append",
+        default=[],
+        help="Optional output from tools/mine_evidence_patterns.py. Can be provided multiple times.",
+    )
     args = parser.parse_args(argv)
 
     summary = build_calibration_review_sample(
@@ -61,6 +70,7 @@ def main(argv: list[str] | None = None) -> int:
         output_xlsx=args.output_xlsx,
         max_rows=args.max_rows,
         max_per_reason=args.max_per_reason,
+        pattern_jsons=args.pattern_json,
     )
     print(json.dumps(summary, ensure_ascii=False, indent=2))
     return 0
@@ -74,10 +84,12 @@ def build_calibration_review_sample(
     output_xlsx: str | Path | None = None,
     max_rows: int = 50,
     max_per_reason: int = 10,
+    pattern_jsons: list[str | Path] | None = None,
 ) -> dict:
     review_rows = _read_rows(Path(review_csv))
     agent_rows = {_row_key(row): row for row in _read_rows(Path(agent_b_csv)) if _row_key(row)}
-    candidates = [_sample_row(row, agent_rows.get(_row_key(row), {})) for row in review_rows]
+    patterns = _load_patterns(pattern_jsons or [])
+    candidates = [_sample_row(row, agent_rows.get(_row_key(row), {}), patterns) for row in review_rows]
     candidates = sorted(candidates, key=_sort_key)
     selected = _select_balanced(candidates, max_rows=max_rows, max_per_reason=max_per_reason)
     _write_rows(Path(output_csv), selected, SAMPLE_FIELDS)
@@ -92,16 +104,20 @@ def build_calibration_review_sample(
         "output_xlsx": str(output_xlsx or ""),
         "reason_counts": dict(Counter(row["review_reason"] for row in selected)),
         "sample_reason_counts": dict(Counter(row["sample_reason"] for row in selected)),
+        "pattern_match_counts": dict(Counter(row["pattern_match"] for row in selected if row.get("pattern_match"))),
         "agent_b_decision_counts": dict(Counter(row["agent_b_decision"] for row in selected)),
         "xlsx": xlsx_summary,
     }
 
 
-def _sample_row(review_row: dict[str, str], agent_row: dict[str, str]) -> dict[str, str]:
-    priority, sample_reason = _priority(review_row, agent_row)
+def _sample_row(review_row: dict[str, str], agent_row: dict[str, str], patterns: list[dict]) -> dict[str, str]:
+    pattern = _matching_pattern(review_row, agent_row, patterns)
+    priority, sample_reason = _priority(review_row, agent_row, pattern)
     return {
         "sample_priority": str(priority),
         "sample_reason": sample_reason,
+        "pattern_scope": pattern.get("scope", "") if pattern else "",
+        "pattern_match": pattern.get("pattern", "") if pattern else "",
         "review_reason": review_row.get("review_reason", ""),
         "agent_b_decision": agent_row.get("agent_b_decision", ""),
         "agent_b_confidence": agent_row.get("confidence", ""),
@@ -131,12 +147,17 @@ def _sample_row(review_row: dict[str, str], agent_row: dict[str, str]) -> dict[s
     }
 
 
-def _priority(review_row: dict[str, str], agent_row: dict[str, str]) -> tuple[int, str]:
+def _priority(review_row: dict[str, str], agent_row: dict[str, str], pattern: dict | None = None) -> tuple[int, str]:
     review_reason = review_row.get("review_reason", "")
     decision = agent_row.get("agent_b_decision", "")
     unsure = agent_row.get("reason_for_unsure", "")
     if unsure == "agent_b_row_timeout":
         return 100, "timeout_needs_manual"
+    if pattern:
+        if pattern.get("kind") == "durable_safe":
+            return 96, "pattern_candidate_validation"
+        if pattern.get("kind") == "risky":
+            return 74, "pattern_control_validation"
     if decision == "reject":
         return 92, "agent_b_reject_check"
     if decision == "accept" and review_reason.startswith("precision_"):
@@ -154,6 +175,58 @@ def _priority(review_row: dict[str, str], agent_row: dict[str, str]) -> tuple[in
     if "low_confidence" in review_reason:
         return 58, "low_confidence_label"
     return 40, "general_calibration"
+
+
+def _load_patterns(paths: list[str | Path]) -> list[dict]:
+    out: list[dict] = []
+    for path_value in paths:
+        path = Path(path_value)
+        data = json.loads(path.read_text(encoding="utf-8"))
+        scope = data.get("summary", {}).get("scope", "")
+        for kind, key in [("durable_safe", "durable_safe_patterns"), ("risky", "risky_patterns")]:
+            for item in data.get(key, [])[:25]:
+                features = set(item.get("features") or _pattern_features(item.get("pattern", "")))
+                if not features:
+                    continue
+                out.append(
+                    {
+                        "kind": kind,
+                        "scope": scope,
+                        "pattern": item.get("pattern", ""),
+                        "features": features,
+                        "support_rows": int(item.get("support_rows") or 0),
+                        "correct_recovery_rows": int(item.get("correct_recovery_rows") or 0),
+                        "wrong_release_rows": int(item.get("wrong_release_rows") or 0),
+                    }
+                )
+    out.sort(
+        key=lambda row: (
+            0 if row["kind"] == "durable_safe" else 1,
+            -row["correct_recovery_rows"],
+            row["wrong_release_rows"],
+            len(row["features"]),
+        )
+    )
+    return out
+
+
+def _matching_pattern(review_row: dict[str, str], agent_row: dict[str, str], patterns: list[dict]) -> dict | None:
+    if not patterns or not agent_row:
+        return None
+    features = features_for_review_agent_row(review_row, agent_row)
+    review_reason = review_row.get("review_reason", "")
+    for pattern in patterns:
+        if pattern.get("scope") == "recall" and review_reason != "recall_unresolved_top_candidate":
+            continue
+        if pattern.get("scope") == "precision" and not review_reason.startswith("precision_"):
+            continue
+        if pattern["features"] <= features:
+            return pattern
+    return None
+
+
+def _pattern_features(pattern: str) -> list[str]:
+    return [part.strip() for part in str(pattern or "").split(" AND ") if part.strip()]
 
 
 def _select_balanced(rows: list[dict[str, str]], *, max_rows: int, max_per_reason: int) -> list[dict[str, str]]:

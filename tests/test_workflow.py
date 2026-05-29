@@ -2646,6 +2646,101 @@ class OperationalCommandTests(unittest.TestCase):
         self.assertIn("recall_candidate_label", {row["sample_reason"] for row in rows})
         self.assertTrue(xlsx_exists)
 
+    def test_build_calibration_review_sample_prioritizes_pattern_validation_rows(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            review = root / "review.csv"
+            agent_b = root / "agent_b.csv"
+            patterns = root / "patterns.json"
+            output_csv = root / "sample.csv"
+            _write_test_csv(
+                review,
+                [
+                    {
+                        "provider_id": "pattern",
+                        "provider_name": "Pattern Agency",
+                        "provider_detail_url": "https://amazon.example/pattern",
+                        "official_url": "",
+                        "official_domain": "",
+                        "top_candidate_url": "https://pattern.example",
+                        "top_candidate_domain": "pattern.example",
+                        "review_reason": "recall_unresolved_top_candidate",
+                    },
+                    {
+                        "provider_id": "ordinary",
+                        "provider_name": "Ordinary Agency",
+                        "provider_detail_url": "https://amazon.example/ordinary",
+                        "official_url": "",
+                        "official_domain": "",
+                        "top_candidate_url": "https://ordinary.example",
+                        "top_candidate_domain": "ordinary.example",
+                        "review_reason": "recall_unresolved_top_candidate",
+                    },
+                ],
+            )
+            _write_test_csv(
+                agent_b,
+                [
+                    {
+                        "provider_id": "pattern",
+                        "provider_name": "Pattern Agency",
+                        "candidate_url": "https://pattern.example",
+                        "candidate_domain": "pattern.example",
+                        "agent_b_decision": "unsure",
+                        "confidence": "69",
+                        "evidence_score": "31",
+                        "supporting_facts": "candidate_pages_fetch_ok; schema_org_organization_seen",
+                        "counter_evidence": "",
+                        "reason_for_unsure": "recall_candidate_needs_human_confirmation",
+                    },
+                    {
+                        "provider_id": "ordinary",
+                        "provider_name": "Ordinary Agency",
+                        "candidate_url": "https://ordinary.example",
+                        "candidate_domain": "ordinary.example",
+                        "agent_b_decision": "unsure",
+                        "confidence": "69",
+                        "evidence_score": "69",
+                        "supporting_facts": "candidate_pages_fetch_ok",
+                        "counter_evidence": "",
+                        "reason_for_unsure": "recall_candidate_needs_human_confirmation",
+                    },
+                ],
+            )
+            patterns.write_text(
+                json.dumps(
+                    {
+                        "summary": {"scope": "recall"},
+                        "durable_safe_patterns": [
+                            {
+                                "pattern": "agent_b_score<45 AND has:schema_org_organization_seen",
+                                "features": ["agent_b_score<45", "has:schema_org_organization_seen"],
+                                "correct_recovery_rows": 3,
+                                "wrong_release_rows": 0,
+                            }
+                        ],
+                        "risky_patterns": [],
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            summary = build_calibration_review_sample(
+                review_csv=review,
+                agent_b_csv=agent_b,
+                output_csv=output_csv,
+                max_rows=2,
+                pattern_jsons=[patterns],
+            )
+            with output_csv.open(newline="", encoding="utf-8") as f:
+                rows = list(csv.DictReader(f))
+
+        self.assertEqual(rows[0]["provider_id"], "pattern")
+        self.assertEqual(rows[0]["sample_reason"], "pattern_candidate_validation")
+        self.assertEqual(rows[0]["pattern_scope"], "recall")
+        self.assertIn("schema_org_organization_seen", rows[0]["pattern_match"])
+        self.assertEqual(summary["pattern_match_counts"][rows[0]["pattern_match"]], 1)
+
     def test_evaluate_calibration_review_sample_turns_labels_into_rule_guidance(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

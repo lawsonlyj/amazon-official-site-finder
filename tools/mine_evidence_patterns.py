@@ -141,6 +141,24 @@ def _pattern_row(detail: dict, agent_row: dict[str, str], scope: str) -> dict | 
     }
 
 
+def features_for_review_agent_row(review_row: dict[str, str], agent_row: dict[str, str]) -> set[str]:
+    candidate_domain = domain_from_url(
+        agent_row.get("candidate_domain", "")
+        or agent_row.get("candidate_url", "")
+        or review_row.get("top_candidate_domain", "")
+        or review_row.get("top_candidate_url", "")
+        or review_row.get("official_domain", "")
+        or review_row.get("official_url", "")
+    )
+    detail = {
+        "provider_name": review_row.get("provider_name", "") or agent_row.get("provider_name", ""),
+        "manual_review_reason": review_row.get("review_reason", "") or agent_row.get("review_reason", ""),
+        "agent_b_reason_for_unsure": agent_row.get("reason_for_unsure", ""),
+        "agent_b_candidate_score": agent_row.get("evidence_score", "") or agent_row.get("confidence", ""),
+    }
+    return _features(detail, agent_row, candidate_domain)
+
+
 def _features(detail: dict, agent_row: dict[str, str], candidate_domain: str) -> set[str]:
     features = {
         f"review_reason:{detail.get('manual_review_reason', '') or agent_row.get('review_reason', '')}",
