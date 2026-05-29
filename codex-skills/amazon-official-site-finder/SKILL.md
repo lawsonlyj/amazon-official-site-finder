@@ -70,7 +70,7 @@ Run this from the repo root. Substitute the paths provided by the user.
 
 This command creates/updates `.env` and then runs the full workflow. The configure step prints only a boolean summary and must not print secrets.
 If the user did not provide an output directory, omit `--run-dir`; the script will create `outputs/codex_run_YYYYMMDD_HHMMSS`.
-Use `--run-agent-b` when the user asks for the AgentB optimization loop or candidate-first verification. B checks only high-risk rows by default, writes verification evidence plus suggestions, and the scorer uses high-similarity Amazon listing logo matches as positive identity evidence. `--human-review /path/to/filled_review.xlsx` lets B use filled human review notes as regression evidence. Add `--apply-agent-optimizations` when A should apply only safe B recommendations and write regression artifacts. Legacy public filenames are still generated.
+Use `--run-agent-b` when the user asks for the AgentB optimization loop or candidate-first verification. B checks only high-risk rows by default, writes verification evidence plus suggestions, and the scorer uses country/language search hints, country/location corroboration, service consistency, and high-similarity Amazon listing logo matches as positive identity evidence. Logo-only evidence is review risk, not an automatic accept. `--human-review /path/to/filled_review.xlsx` lets B use filled human review notes, including no-official labels, as regression evidence. Add `--apply-agent-optimizations` when A should apply only safe B recommendations and write regression artifacts. Legacy public filenames are still generated.
 
 If you need to run the two steps separately:
 
@@ -166,7 +166,7 @@ When the user provides a filled review file, Codex should run this from the repo
 ```
 
 This calls `tools/run_review_learning.py`, which merges the filled manual decisions with existing second-pass decisions, writes reviewed final outputs, creates `reviewed/labels.csv`, reruns the quality gate, writes `reviewed/learning.md`, and applies only safe repeated excluded-domain config additions.
-It also writes AgentB suggestions and, with `--update-config`, applies only safe AgentB excluded-domain recommendations plus human/identity/reachability regression artifacts.
+It also writes AgentB suggestions and, with `--update-config`, applies only safe AgentB excluded-domain recommendations plus human/identity/no-official/reachability regression artifacts.
 
 Expected reviewed outputs:
 

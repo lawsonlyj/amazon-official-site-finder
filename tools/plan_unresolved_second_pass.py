@@ -9,6 +9,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from finder.geo import local_search_terms
 from finder.text import domain_from_url, normalize_text
 from tools.output_layout import first_existing
 
@@ -170,6 +171,8 @@ def _queries(*, name: str, location: str, service: str, top_domain: str, tier: s
     if top_domain:
         queries.extend([f'site:{top_domain} "{name}"', f'"{name}" "{top_domain}"'])
     queries.extend(_country_queries(name, location))
+    for term in local_search_terms([location])[:5]:
+        queries.append(f'"{name}" "{term}"')
     if tier == "D_registry_social_then_manual":
         queries.extend([f'"{name}" LinkedIn website', f'"{name}" Crunchbase website'])
     return _dedupe([query for query in queries if query])

@@ -15,6 +15,7 @@ from finder.cli import load_dotenv
 from finder.html_extract import extract_html
 from finder.http import fetch_text
 from finder.logo import logo_evidence
+from finder.geo import local_search_terms
 from finder.scoring import _candidate_roots, is_excluded_domain, load_config, score_candidate
 from finder.search_sources import SearchCandidate, collect_candidates_for_queries
 from finder.text import domain_from_url, normalize_text, tokens
@@ -247,6 +248,8 @@ def _is_high_risk_for_agent_b(row: dict[str, str], second_pass_row: dict[str, st
         return True
     if confidence < 85:
         return True
+    if "identity_cap_" in evidence or "page_industry_mismatch:" in evidence:
+        return True
     if _looks_non_independent(candidate_url):
         return True
     if _has_generic_or_ambiguous_name(row.get("provider_name", "")):
@@ -428,6 +431,8 @@ def _independent_queries(name: str, locations: list[str]) -> list[str]:
     queries = [f'"{name}" official website', f'"{name}" contact']
     if locations:
         queries.append(f'"{name}" "{locations[0]}"')
+    for term in local_search_terms(locations)[:4]:
+        queries.append(f'"{name}" "{term}"')
     return [query for query in queries if name]
 
 

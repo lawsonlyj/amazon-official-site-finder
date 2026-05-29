@@ -59,6 +59,7 @@ COMBINED_REVIEW_FIELDS = [
     "scored_candidate_count",
     "service_apis",
     "provider_locations",
+    "error_type",
 ]
 
 LABEL_FIELDS = ["provider_id", "provider_name", "expected_url", "expected_domain", "label_source", "notes"]
@@ -260,6 +261,7 @@ def _normalize_manual_review_rows(rows: list[dict[str, str]]) -> tuple[list[dict
         out["manual_decision"] = decision
         out["manual_url"] = manual_url
         out["notes"] = _first(row, "notes", "your_notes", "manual_notes")
+        out["error_type"] = _first(row, "error_type", "your_error_type", "error_reason")
         if not out.get("official_url"):
             out["official_url"] = _first(row, "top_candidate_url", "candidate_1_url")
         if not out.get("candidate_1_url"):
@@ -359,11 +361,14 @@ def _optimization_summary(
     accepted_low_confidence = 0
     rejected_auto_accepted = 0
     recall_additions = 0
+    no_official_rows = 0
+    wrong_candidate_rows = 0
     examples = []
     for row in manual_rows:
         raw = raw_by_key.get(_row_key(row), {})
         base = base_by_key.get(_row_key(row), {})
         decision = row.get("manual_decision", "")
+        error_type = row.get("error_type", "")
         current_url = raw.get("official_url") or raw.get("top_candidate_url") or base.get("manual_url") or base.get("official_url") or ""
         current_domain = domain_from_url(current_url)
         final_url = row.get("manual_url") or raw.get("official_url") or raw.get("candidate_1_url") or ""
@@ -379,6 +384,10 @@ def _optimization_summary(
             rejected_domains[current_domain] += 1
             if base.get("manual_decision") or raw.get("status") == "manual_accepted":
                 rejected_auto_accepted += 1
+        if _is_no_official_error(error_type, row.get("notes", "")):
+            no_official_rows += 1
+            if current_domain:
+                wrong_candidate_rows += 1
         examples.append(
             {
                 "provider_id": row.get("provider_id", ""),
@@ -387,6 +396,7 @@ def _optimization_summary(
                 "previous_domain": current_domain,
                 "final_domain": final_domain,
                 "confidence": confidence,
+                "error_type": error_type,
             }
         )
     exclude_candidates = [
@@ -399,6 +409,8 @@ def _optimization_summary(
         rejected_auto_accepted=rejected_auto_accepted,
         accepted_low_confidence=accepted_low_confidence,
         recall_additions=recall_additions,
+        no_official_rows=no_official_rows,
+        wrong_candidate_rows=wrong_candidate_rows,
         exclude_candidates=exclude_candidates,
     )
     return {
@@ -406,6 +418,8 @@ def _optimization_summary(
         "rejected_auto_accepted_rows": rejected_auto_accepted,
         "accepted_low_confidence_rows": accepted_low_confidence,
         "recall_additions_from_manual_review": recall_additions,
+        "confirmed_no_official_rows": no_official_rows,
+        "wrong_candidate_no_official_rows": wrong_candidate_rows,
         "rejected_domains": dict(rejected_domains),
         "accepted_domains": dict(accepted_domains),
         "safe_excluded_domain_candidates": exclude_candidates,
@@ -420,6 +434,8 @@ def _recommendations(
     rejected_auto_accepted: int,
     accepted_low_confidence: int,
     recall_additions: int,
+    no_official_rows: int,
+    wrong_candidate_rows: int,
     exclude_candidates: list[str],
 ) -> list[str]:
     recommendations = []
@@ -434,6 +450,14 @@ def _recommendations(
     if recall_additions:
         recommendations.append(
             "Manual replacements on unresolved rows indicate recall gaps; inspect their query patterns and add targeted second-pass queries only when several examples share the same pattern."
+        )
+    if no_official_rows:
+        recommendations.append(
+            "No-official labels are precision regression seeds; prevent forced same-name matches and keep these as no_official fixtures."
+        )
+    if wrong_candidate_rows:
+        recommendations.append(
+            "Rejected candidates marked as actual no-official should tighten identity, country, and service gates rather than become excluded domains."
         )
     if exclude_candidates:
         recommendations.append(
@@ -455,6 +479,11 @@ def _maybe_update_config(config_path: str | Path, optimization: dict[str, Any], 
         config["excluded_domains"] = list(config.get("excluded_domains", [])) + additions
         path.write_text(json.dumps(config, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     return {"updated": bool(additions), "added_excluded_domains": additions, "config_path": str(path)}
+
+
+def _is_no_official_error(error_type: str, notes: str) -> bool:
+    text = f"{error_type} {notes}".casefold()
+    return any(marker in text for marker in ["实际无官网", "no official", "no reliable official"])
 
 
 def _write_report(path: Path, summary: dict[str, Any]) -> None:

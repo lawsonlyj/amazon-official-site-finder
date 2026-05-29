@@ -5,6 +5,7 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 from .dynamic import render_dynamic_page
+from .geo import domain_country_signal, location_text_markers
 from .html_extract import extract_html
 from .http import fetch_text
 from .logo import logo_evidence
@@ -115,6 +116,17 @@ def _score_candidate(provider: dict, candidate: SearchCandidate, config: dict, *
         score += 3
         reasons.append("search_snippet_contains_some_service_keywords")
 
+    country_signal = domain_country_signal(domain, provider.get("provider_locations") or [])
+    if country_signal == "match":
+        score += 6
+        reasons.append("domain_tld_matches_provider_country")
+    elif country_signal == "conflict":
+        score -= 8
+        reasons.append("domain_tld_conflicts_provider_country")
+    if _text_mentions_provider_location(title_snippet_norm, provider):
+        score += 4
+        reasons.append("search_result_contains_provider_country")
+
     page_evidence = {}
     if inspect_site:
         page_evidence = inspect_candidate_site(candidate.url, provider, config)
@@ -128,6 +140,10 @@ def _score_candidate(provider: dict, candidate: SearchCandidate, config: dict, *
             reasons.append("javascript_page_requires_dynamic_review")
     else:
         reasons.append("not_fetched_preliminary_score")
+
+    if inspect_site:
+        score, cap_reasons = _apply_identity_caps(score, reasons, provider)
+        reasons.extend(cap_reasons)
 
     return {
         "url": page_evidence.get("final_url") or candidate.url,
@@ -264,12 +280,18 @@ def _score_page(fetched: dict, provider: dict, config: dict, *, is_home: bool) -
             score += 5
             reasons.append(f"page_contains_location:{location}")
             break
+    if _text_mentions_provider_location(text, provider) and not any(r.startswith("page_contains_location:") for r in reasons):
+        score += 4
+        reasons.append("page_mentions_provider_country")
     if any(term in text for term in ["amazon service provider network", "amazon spn", "seller central partner"]):
         score += 18
         reasons.append("page_mentions_amazon_spn")
     if any(term in text for term in ["contact us", "about us", "privacy policy"]):
         score += 3
         reasons.append("site_has_standard_company_pages")
+    for mismatch in _industry_mismatch_reasons(text, service_hits):
+        score -= 18
+        reasons.append(mismatch)
     return {"score": score, "reasons": reasons, "title": title, "status": fetched.get("status")}
 
 
@@ -352,6 +374,8 @@ def _combined_site_score(reasons: list[str]) -> int:
 
     if any(r.startswith("page_contains_location:") for r in reasons):
         score += 5
+    if "page_mentions_provider_country" in reasons:
+        score += 4
     if "page_mentions_amazon_spn" in reasons:
         score += 18
     if "site_has_standard_company_pages" in reasons:
@@ -359,6 +383,150 @@ def _combined_site_score(reasons: list[str]) -> int:
     if "dynamic_rendered_page" in reasons:
         score += 2
     return min(55, score)
+
+
+def _text_mentions_provider_location(text: str, provider: dict) -> bool:
+    for marker in location_text_markers(provider.get("provider_locations") or []):
+        normalized = normalize_text(marker)
+        if normalized and normalized in text:
+            return True
+    return False
+
+
+def _industry_mismatch_reasons(text: str, service_hits: list[str]) -> list[str]:
+    if service_hits:
+        return []
+    categories = {
+        "government_medical": [
+            "federal institute",
+            "government agency",
+            "medical devices",
+            "medicines",
+            "health authority",
+            "regulatory authority",
+            "pharmaceutical",
+        ],
+        "financial_accounting": [
+            "accounting",
+            "tax advisory",
+            "internal audit",
+            "bookkeeping",
+            "financial consulting",
+            "audit firm",
+        ],
+        "fuel_shipping": [
+            "marine fuel",
+            "bunker fuel",
+            "oil trading",
+            "shipping fuel",
+            "fuel supplier",
+        ],
+        "offline_retail": [
+            "physical stores",
+            "retail stores",
+            "offline retail",
+            "multibrand stores",
+            "lojas fisicas",
+        ],
+    }
+    reasons = []
+    for category, markers in categories.items():
+        hits = [marker for marker in markers if normalize_text(marker) in text]
+        if len(hits) >= 1:
+            reasons.append(f"page_industry_mismatch:{category}")
+    return reasons[:2]
+
+
+def _apply_identity_caps(score: int, reasons: list[str], provider: dict) -> tuple[int, list[str]]:
+    caps: list[tuple[int, str]] = []
+    page_identity = _has_any_reason(
+        reasons,
+        {
+            "page_contains_exact_provider_name",
+            "page_contains_provider_name_tokens",
+            "page_fuzzy_provider_name_match",
+        },
+    )
+    search_identity = _has_any_reason(
+        reasons,
+        {
+            "search_result_contains_exact_name",
+            "search_result_contains_name_tokens",
+            "search_result_fuzzy_name_match",
+        },
+    )
+    service_identity = _has_any_reason(
+        reasons,
+        {
+            "page_contains_amazon_service_keywords",
+            "page_mentions_amazon_spn",
+            "search_snippet_contains_amazon_service_keywords",
+        },
+    )
+    country_identity = any(
+        reason == "domain_tld_matches_provider_country"
+        or reason == "search_result_contains_provider_country"
+        or reason == "page_mentions_provider_country"
+        or reason.startswith("page_contains_location:")
+        for reason in reasons
+    )
+    country_conflict = "domain_tld_conflicts_provider_country" in reasons
+    industry_mismatch = any(reason.startswith("page_industry_mismatch:") for reason in reasons)
+    ambiguous_name = _ambiguous_provider_name(provider.get("provider_name", ""))
+    logo_identity = _has_any_reason(reasons, {"listing_logo_visual_match", "listing_logo_visual_near_match"})
+
+    if industry_mismatch and not service_identity:
+        caps.append((49, "identity_cap_industry_mismatch_without_service"))
+    if country_conflict and not service_identity:
+        caps.append((49, "identity_cap_country_conflict_without_service"))
+    elif country_conflict and not (page_identity and service_identity and country_identity):
+        caps.append((74, "identity_cap_country_conflict_needs_review"))
+    if ambiguous_name and not ((page_identity or logo_identity) and service_identity):
+        caps.append((69, "identity_cap_ambiguous_name_requires_page_and_service"))
+    if logo_identity and not (page_identity or service_identity):
+        caps.append((69, "identity_cap_logo_only_evidence"))
+    if score >= 75 and not service_identity and not country_identity and not (page_identity and search_identity):
+        caps.append((69, "identity_cap_missing_service_country_corroboration"))
+
+    if not caps:
+        return score, []
+    cap_value = min(value for value, _ in caps)
+    cap_reasons = [reason for _, reason in caps]
+    return min(score, cap_value), cap_reasons
+
+
+def _has_any_reason(reasons: list[str], targets: set[str]) -> bool:
+    return any(reason in targets for reason in reasons)
+
+
+def _ambiguous_provider_name(name: str) -> bool:
+    provider_tokens = tokens(name)
+    if not provider_tokens:
+        return False
+    generic = {
+        "amazon",
+        "account",
+        "agency",
+        "consulting",
+        "consultancy",
+        "digital",
+        "ecom",
+        "ecommerce",
+        "global",
+        "growth",
+        "management",
+        "marketplace",
+        "media",
+        "seller",
+        "service",
+        "services",
+        "solution",
+        "solutions",
+        "brand",
+        "brands",
+    }
+    meaningful = [token for token in provider_tokens if token not in generic]
+    return len(meaningful) <= 1 or len("".join(provider_tokens)) <= 4
 
 
 def choose_best(provider: dict, candidates: list[SearchCandidate], config: dict) -> dict:
@@ -431,7 +599,14 @@ def _summary_reasons(reasons: list[str]) -> list[str]:
             "page_mentions_amazon_spn",
             "listing_logo_visual_match",
             "listing_logo_visual_near_match",
+            "identity_cap_industry_mismatch_without_service",
+            "identity_cap_country_conflict_without_service",
+            "identity_cap_country_conflict_needs_review",
+            "identity_cap_ambiguous_name_requires_page_and_service",
+            "identity_cap_logo_only_evidence",
+            "identity_cap_missing_service_country_corroboration",
         }
+        or r.startswith("page_industry_mismatch:")
     ]
     out = []
     for reason in priority + reasons:

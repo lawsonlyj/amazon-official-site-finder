@@ -165,6 +165,19 @@ class WorkflowTests(unittest.TestCase):
         self.assertIn('"Example Agency LLC" "United Kingdom" website', queries)
         self.assertIn('site:github.com "Example Agency LLC"', queries)
 
+    def test_query_builder_adds_country_language_terms(self):
+        provider = {
+            "provider_name": "Akkountweb",
+            "service_apis": ["Account Management"],
+            "provider_locations": ["Italy"],
+        }
+
+        queries = build_queries(provider)
+
+        self.assertIn('"Akkountweb" "sito ufficiale"', queries)
+        self.assertIn('"Akkountweb" "contatti"', queries)
+        self.assertIn('"Akkountweb" "agenzia amazon"', queries)
+
     def test_scoring_rejects_excluded_domains_and_selects_official_site(self):
         provider = {
             "provider_id": "p-1",
@@ -257,6 +270,70 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual(result["status"], "needs_review")
         self.assertEqual(result["official_domain"], "plainname.com")
         self.assertLess(result["confidence"], 75)
+
+    def test_identity_caps_block_country_and_industry_same_name_false_positive(self):
+        provider = {
+            "provider_id": "p-bfarm",
+            "provider_name": "BFarm",
+            "service_apis": ["Account Management"],
+            "provider_locations": ["Ukraine"],
+        }
+        candidate = SearchCandidate(
+            url="https://www.bfarm.de/DE/Home/_node.html",
+            title="BFarm - Federal Institute",
+            snippet="BFarm Federal Institute for drugs and medical devices",
+            source="brave",
+            query='"BFarm" official website',
+            rank=1,
+        )
+
+        def fake_fetch(url):
+            html = """
+            <html><head><title>BFarm Federal Institute</title></head>
+            <body>BFarm is a government agency for medicines, medical devices,
+            pharmaceutical safety and health authority services. Contact us. About us.</body></html>
+            """
+            return {"ok": True, "status": 200, "final_url": url, "text": html}
+
+        with patch("finder.scoring.fetch_text", side_effect=fake_fetch):
+            result = choose_best(provider, [candidate], load_config("config/scoring.json"))
+
+        self.assertEqual(result["status"], "needs_review")
+        self.assertEqual(result["official_url"], "https://www.bfarm.de/")
+        self.assertLess(result["confidence"], 75)
+        self.assertIn("identity_cap_industry_mismatch_without_service", result["evidence_summary"])
+        self.assertIn("identity_cap_country_conflict_without_service", result["evidence_summary"])
+
+    def test_country_conflict_requires_provider_country_corroboration(self):
+        provider = {
+            "provider_id": "p-armr",
+            "provider_name": "ARMR",
+            "service_apis": ["Account Management"],
+            "provider_locations": ["United States of America"],
+        }
+        candidate = SearchCandidate(
+            url="https://www.armr.in/",
+            title="ARMR official website",
+            snippet="ARMR Amazon marketplace account management services",
+            source="brave",
+            query='"ARMR" official website',
+            rank=1,
+        )
+
+        def fake_fetch(url):
+            html = """
+            <html><head><title>ARMR</title></head>
+            <body>ARMR provides Amazon marketplace account management and seller
+            advertising services. Contact us. About us.</body></html>
+            """
+            return {"ok": True, "status": 200, "final_url": url, "text": html}
+
+        with patch("finder.scoring.fetch_text", side_effect=fake_fetch):
+            result = choose_best(provider, [candidate], load_config("config/scoring.json"))
+
+        self.assertEqual(result["status"], "needs_review")
+        self.assertLess(result["confidence"], 75)
+        self.assertIn("identity_cap_country_conflict_needs_review", result["evidence_summary"])
 
     def test_two_stage_scoring_fetches_only_best_preliminary_candidates(self):
         provider = {
@@ -1291,6 +1368,8 @@ class OperationalCommandTests(unittest.TestCase):
             ]
 
             with patch("tools.run_agent_b_verification.fetch_text", side_effect=fake_fetch), patch(
+                "finder.scoring.fetch_text", side_effect=fake_fetch
+            ), patch(
                 "tools.run_agent_b_verification.collect_candidates_for_queries",
                 side_effect=lambda queries, per_query=2: replacement_candidates
                 if any("Replace Agency" in query for query in queries)
@@ -1518,6 +1597,53 @@ class OperationalCommandTests(unittest.TestCase):
         self.assertEqual(applied["url_reachability_regression_fixture_rows"], 1)
         self.assertGreaterEqual(applied["identity_regression_fixture_rows"], 1)
 
+    def test_human_review_xlsx_formula_urls_feed_no_official_fixtures(self):
+        try:
+            from openpyxl import Workbook
+        except ImportError:
+            self.skipTest("openpyxl not installed")
+        with tempfile.TemporaryDirectory() as tmp:
+            run_dir = Path(tmp)
+            human_review = run_dir / "human_review.xlsx"
+            workbook = Workbook()
+            sheet = workbook.active
+            sheet.append(
+                [
+                    "provider_id",
+                    "provider_name",
+                    "current_or_candidate_url",
+                    "your_decision",
+                    "your_true_official_url",
+                    "error_type",
+                    "your_notes",
+                ]
+            )
+            sheet.append(
+                [
+                    "p-1",
+                    "AA Consulting",
+                    '=HYPERLINK("https://aaconsulting.nl/","https://aaconsulting.nl/")',
+                    "reject",
+                    "",
+                    "实际无官网",
+                    "同名高分，但人工确认不是该 Amazon provider 的官网",
+                ]
+            )
+            workbook.save(human_review)
+            config_path = run_dir / "scoring.json"
+            config_path.write_text(json.dumps(load_config("config/scoring.json")), encoding="utf-8")
+
+            recommendations = run_agent_c_recommendations(run_dir=run_dir, human_review=human_review)
+            applied = apply_agent_optimizations(run_dir=run_dir, config_path=config_path, apply=True)
+            with open(applied["no_official_regression_fixture"], newline="", encoding="utf-8") as f:
+                fixture_rows = list(csv.DictReader(f))
+
+        actions = {item["action"] for item in recommendations["recommendations"]}
+        self.assertIn("write_no_official_regression_fixtures", actions)
+        self.assertEqual(applied["no_official_regression_fixture_rows"], 1)
+        self.assertEqual(fixture_rows[0]["candidate_url"], "https://aaconsulting.nl/")
+        self.assertIn("confirmed_no_official", fixture_rows[0]["note_tags"])
+
     def test_scoring_tries_www_variant_before_giving_up_on_candidate(self):
         config = load_config("config/scoring.json")
         provider = {
@@ -1559,6 +1685,13 @@ class OperationalCommandTests(unittest.TestCase):
             "evidence_summary": "page_contains_exact_provider_name",
         }
         self.assertFalse(_accepted(platform_result, config, 70))
+        capped_result = {
+            "official_url": "https://www.bfarm.de/DE/Home/_node.html",
+            "status": "matched",
+            "confidence": "95",
+            "evidence_summary": "identity_cap_industry_mismatch_without_service",
+        }
+        self.assertFalse(_accepted(capped_result, config, 75))
 
     def test_logo_similarity_is_positive_identity_evidence(self):
         config = load_config("config/scoring.json")

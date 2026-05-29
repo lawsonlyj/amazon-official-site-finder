@@ -4,7 +4,7 @@ import shutil
 from pathlib import Path
 
 
-WORKFLOW_VERSION = "agent-loop-v5-organized"
+WORKFLOW_VERSION = "agent-loop-v6-identity-country"
 DEFAULT_SECOND_PASS_ACCEPT_THRESHOLD = 75
 
 
@@ -77,6 +77,7 @@ def agent_a_paths(run_dir: str | Path) -> dict[str, Path]:
         "applied": root / "agent_a/applied.json",
         "identity_cases": root / "agent_a/identity_cases.csv",
         "human_cases": root / "agent_a/human_cases.csv",
+        "no_official_cases": root / "agent_a/no_official_cases.csv",
         "reachability_cases": root / "agent_a/reachability_cases.csv",
     }
 
@@ -239,6 +240,7 @@ def publish_agent_a_aliases(run_dir: str | Path, paths: dict[str, Path]) -> dict
         "agent_a_applied_optimizations_summary": root / "agent_a_applied_optimizations_summary.json",
         "agent_identity_constraint_regression_cases": root / "agent_identity_constraint_regression_cases.csv",
         "agent_human_review_regression_cases": root / "agent_human_review_regression_cases.csv",
+        "agent_no_official_regression_cases": root / "agent_no_official_regression_cases.csv",
         "agent_url_reachability_regression_cases": root / "agent_url_reachability_regression_cases.csv",
     }
     copy_aliases(
@@ -246,6 +248,7 @@ def publish_agent_a_aliases(run_dir: str | Path, paths: dict[str, Path]) -> dict
             (paths["applied"], aliases["agent_a_applied_optimizations_summary"]),
             (paths["identity_cases"], aliases["agent_identity_constraint_regression_cases"]),
             (paths["human_cases"], aliases["agent_human_review_regression_cases"]),
+            (paths["no_official_cases"], aliases["agent_no_official_regression_cases"]),
             (paths["reachability_cases"], aliases["agent_url_reachability_regression_cases"]),
         ]
     )

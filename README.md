@@ -25,6 +25,8 @@ Use the Codex-assisted script when API keys are stored in local key files:
 
 `--run-agent-b` is optional. It adds the AgentB step after AgentA's main workflow: high-risk candidate verification plus optimization suggestions. AgentB now checks only rows that are likely to need attention, such as low-confidence accepts, second-pass/manual accepts, unresolved rows with candidates, platform/profile URLs, generic names, logo-only evidence, and weak identity/service matches. Add `--human-review /path/to/filled_review.xlsx` to let B turn filled human-review notes into regression fixtures and safer rule recommendations. Add `--apply-agent-optimizations` only when A should apply safe B recommendations such as repeated excluded-domain additions and write regression artifacts.
 
+The current workflow version is `agent-loop-v6-identity-country`. This version adds country/language-aware search terms, country TLD and page-location corroboration, identity caps for same-name/service/country conflicts, logo-only risk handling, and no-official regression fixtures learned from human review. Logo similarity is useful positive evidence, but a logo alone is not enough to auto-accept a site.
+
 If using Codex, ask:
 
 ```text
@@ -73,10 +75,10 @@ That command runs the workflow in this order:
    Orchestrates the full provider workflow: normalize input, search candidates, score official websites, build review rows, finalize outputs, run quality gates, and trigger second-pass.
 
 4. `finder/`
-   Core library used by the pipeline. It normalizes Amazon rows, builds search queries, calls search sources, fetches pages, scores candidates, and finalizes rows.
+   Core library used by the pipeline. It normalizes Amazon rows, builds country/language-aware search queries, calls search sources, fetches pages, scores candidates, and finalizes rows. The scorer requires identity, service, and location evidence to agree before high-risk candidates can be accepted automatically.
 
 5. `tools/run_unresolved_second_pass.py`
-   Runs the Brave/Exa second-pass on unresolved providers. Its default accept threshold is `75`, aligned with first-pass `auto_match_threshold=75`, and it still requires identity evidence and URL risk checks.
+   Runs the Brave/Exa second-pass on unresolved providers. Its default accept threshold is `75`, aligned with first-pass `auto_match_threshold=75`, and it still requires identity evidence, URL risk checks, and no blocking identity cap.
 
 6. `tools/build_manual_review_task.py`
    Builds the simplified manual review CSV/XLSX. This is the worker-facing task file for checking uncertain official websites and unresolved top candidates.
@@ -88,13 +90,13 @@ That command runs the workflow in this order:
    Verifies the final CSV, unresolved CSV, quality JSON, and XLSX hyperlink formulas.
 
 9. Optional B loop
-   `tools/run_agent_b_verification.py` re-checks high-risk official/top-candidate URLs first, inspects company pages and lightweight independent search corroboration, and writes structured `accept`/`replace`/`reject`/`unsure` evidence while preserving `manual_decision`, `manual_url`, and `notes`. `tools/run_agent_b_recommendations.py` writes B suggestions, and `tools/apply_agent_optimizations.py` is A's safe apply step. The legacy `tools/run_agent_c_recommendations.py` wrapper still works.
+   `tools/run_agent_b_verification.py` re-checks high-risk official/top-candidate URLs first, inspects company pages and lightweight independent search corroboration, and writes structured `accept`/`replace`/`reject`/`unsure` evidence while preserving `manual_decision`, `manual_url`, and `notes`. It also uses country/language search hints when building independent queries. `tools/run_agent_b_recommendations.py` writes B suggestions, and `tools/apply_agent_optimizations.py` is A's safe apply step. The legacy `tools/run_agent_c_recommendations.py` wrapper still works.
 
 For Codex-assisted usage, `run_codex_assisted.sh` runs first. It calls `tools/configure_env_from_key_files.py` to create `.env` from local key files without printing secrets, then hands off to `run_workflow.sh`.
 
 After manual review, the user gives the filled workbook to Codex. Codex calls `run_review_cycle.sh` internally, which runs `tools/run_review_learning.py`, merges the filled review with the second-pass decisions, writes reviewed final outputs, creates manual labels, runs the quality gate again, and writes a learning report. In Codex mode, Codex also enables safe config optimization for repeated rejected directory/platform patterns and reports whether anything changed.
 
-The review cycle also runs `tools/run_agent_b_recommendations.py`. B reads AgentB verification, filled human-review notes, and manual-review learning reports, then writes suggestion files. When `--update-config` is enabled, `tools/apply_agent_optimizations.py` applies only safe, explainable excluded-domain additions and writes human/identity/reachability regression fixtures; query, threshold, and identity-constraint logic changes remain recommendations until a maintainer implements them with tests.
+The review cycle also runs `tools/run_agent_b_recommendations.py`. B reads AgentB verification, filled human-review notes, and manual-review learning reports, then writes suggestion files. When `--update-config` is enabled, `tools/apply_agent_optimizations.py` applies only safe, explainable excluded-domain additions and writes human/identity/no-official/reachability regression fixtures. Query, threshold, and new identity-constraint logic changes should still be implemented deliberately with tests.
 
 ## Main Outputs
 

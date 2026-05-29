@@ -483,6 +483,8 @@ def _accepted(result: dict, config: dict, accept_threshold: int) -> bool:
     url = result.get("official_url", "")
     if not url or is_excluded_domain(url, config) or _risky_auto_accept_url(url):
         return False
+    if _has_blocking_identity_cap(result):
+        return False
     if result.get("status") not in {"matched", "needs_review"}:
         return False
     try:
@@ -494,6 +496,24 @@ def _accepted(result: dict, config: dict, accept_threshold: int) -> bool:
     if result.get("status") == "matched" and confidence >= accept_threshold:
         return _has_strong_second_pass_reason(result)
     return _has_verified_second_pass_reason(result, min_score=50)
+
+
+def _has_blocking_identity_cap(result: dict) -> bool:
+    blocking = {
+        "identity_cap_industry_mismatch_without_service",
+        "identity_cap_country_conflict_without_service",
+        "identity_cap_country_conflict_needs_review",
+        "identity_cap_ambiguous_name_requires_page_and_service",
+        "identity_cap_logo_only_evidence",
+        "identity_cap_missing_service_country_corroboration",
+    }
+    summary = set(str(result.get("evidence_summary", "")).split("; "))
+    if summary & blocking:
+        return True
+    for candidate in result.get("candidates", []):
+        if set(candidate.get("reasons") or []) & blocking:
+            return True
+    return False
 
 
 def _has_strong_second_pass_reason(result: dict) -> bool:

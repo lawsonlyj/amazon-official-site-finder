@@ -263,14 +263,20 @@ def _human_review_recommendations(rows: list[dict[str, str]]) -> list[dict]:
                 "reason": "Human review flagged IndiaMART-style profiles as platform pages or uncertain evidence rather than independent official websites.",
             }
         )
-    if tag_counts.get("wrong_company") or tag_counts.get("service_mismatch") or tag_counts.get("name_or_logo_mismatch"):
+    if (
+        tag_counts.get("wrong_company")
+        or tag_counts.get("service_mismatch")
+        or tag_counts.get("name_or_logo_mismatch")
+        or tag_counts.get("region_mismatch")
+    ):
         recommendations.append(
             {
                 "type": "identity_constraint",
                 "title": "Human review confirms identity and service consistency constraints",
                 "count": tag_counts.get("wrong_company", 0)
                 + tag_counts.get("service_mismatch", 0)
-                + tag_counts.get("name_or_logo_mismatch", 0),
+                + tag_counts.get("name_or_logo_mismatch", 0)
+                + tag_counts.get("region_mismatch", 0),
                 "safe_to_apply": False,
                 "safe_artifact": True,
                 "action": "write_identity_regression_fixtures",
@@ -287,8 +293,26 @@ def _human_review_recommendations(rows: list[dict[str, str]]) -> list[dict]:
                         "reason_for_unsure": "human_review_identity_or_service_gap",
                     }
                     for row in normalized
-                    if {"wrong_company", "service_mismatch", "name_or_logo_mismatch"} & set(row["note_tags"])
+                    if {"wrong_company", "service_mismatch", "name_or_logo_mismatch", "region_mismatch"} & set(row["note_tags"])
                 ][:50],
+            }
+        )
+    if tag_counts.get("confirmed_no_official") or tag_counts.get("wrong_candidate_no_replacement"):
+        examples = [
+            row
+            for row in normalized
+            if {"confirmed_no_official", "wrong_candidate_no_replacement"} & set(row["note_tags"])
+        ][:100]
+        recommendations.append(
+            {
+                "type": "no_official_regression",
+                "title": "Human review confirms no reliable official website for some providers",
+                "count": len(examples),
+                "safe_to_apply": False,
+                "safe_artifact": True,
+                "action": "write_no_official_regression_fixtures",
+                "reason": "No-official labels should prevent same-name forced matches and become regression fixtures rather than excluded-domain rules.",
+                "examples": examples,
             }
         )
     return recommendations
@@ -299,6 +323,7 @@ def _normalize_human_review_row(row: dict[str, str]) -> dict:
     candidate_url = _first(row, "current_or_candidate_url", "official_url", "candidate_url", "top_candidate_url")
     manual_url = _first(row, "your_true_official_url", "manual_url", "true_official_url")
     notes = _first(row, "your_notes", "notes", "manual_notes")
+    error_type = _first(row, "error_type", "your_error_type", "error_reason")
     if decision == "reject" and manual_url:
         decision = "replace"
     return {
@@ -309,8 +334,9 @@ def _normalize_human_review_row(row: dict[str, str]) -> dict:
         "manual_decision": decision,
         "manual_url": manual_url,
         "confidence": _first(row, "confidence"),
+        "error_type": error_type,
         "notes": notes,
-        "note_tags": _note_tags(notes, candidate_url, manual_url, decision),
+        "note_tags": _note_tags(notes, candidate_url, manual_url, decision, error_type),
         "expected_outcome": _expected_outcome(decision),
     }
 
@@ -325,20 +351,30 @@ def _expected_outcome(decision: str) -> str:
     return "needs_identity_review"
 
 
-def _note_tags(notes: str, candidate_url: str, manual_url: str, decision: str) -> list[str]:
-    text = notes.casefold()
+def _note_tags(notes: str, candidate_url: str, manual_url: str, decision: str, error_type: str = "") -> list[str]:
+    text = f"{notes} {error_type}".casefold()
     tags = []
+    if any(marker in text for marker in ["实际无官网", "no official", "no reliable official"]):
+        if candidate_url:
+            tags.append("wrong_candidate_no_replacement")
+        tags.append("confirmed_no_official")
+    if any(marker in text for marker in ["错误官网", "wrong official", "wrong website"]):
+        tags.append("wrong_company")
+    if any(marker in text for marker in ["没找到官网", "未找到官网", "not found official", "recall gap"]):
+        tags.append("recall_gap")
     if any(marker in text for marker in ["无法打开", "打不开", "无法访问", "not open", "not working", "does not open", "timeout"]):
         tags.append("candidate_unreachable")
     if manual_url and candidate_url and domain_from_url(manual_url) == domain_from_url(candidate_url):
         tags.append("domain_variant_fix")
     if any(marker in text for marker in ["平台 profile", "平台profile", "平台页", "店铺页", "linkedin", "indiamart", "amazon listing", "社媒"]):
         tags.append("platform_profile_only")
-    if any(marker in text for marker in ["不是", "另一个", "无关", "公司不同"]):
+    if any(marker in text for marker in ["不是", "另一个", "无关", "公司不同", "同名"]):
         tags.append("wrong_company")
-    if any(marker in text for marker in ["服务内容不匹配", "服务类型", "业务类型", "具体内容不一致", "内容完全不一致"]):
+    if any(marker in text for marker in ["服务内容不匹配", "服务类型", "业务类型", "具体内容不一致", "内容完全不一致", "行业", "主营业务"]):
         tags.append("service_mismatch")
-    if any(marker in text for marker in ["名字不一致", "名称不一致", "logo不一致", "logo 和名字", "logo和名字"]):
+    if any(marker in text for marker in ["地区不匹配", "国家", "provider location", "tld", "域名后缀"]):
+        tags.append("region_mismatch")
+    if any(marker in text for marker in ["名字不一致", "名称不一致", "logo不一致", "logo 和名字", "logo和名字", "品牌不匹配"]):
         tags.append("name_or_logo_mismatch")
     if any(marker in text for marker in ["不完全确定", "不确定", "缺少证据", "无法确认", "证据"]):
         tags.append("insufficient_evidence")
@@ -417,22 +453,38 @@ def _read_xlsx(path: Path) -> list[dict[str, str]]:
         from openpyxl import load_workbook
     except ImportError:
         return _read_simple_xlsx(path)
-    workbook = load_workbook(path, data_only=True, read_only=True)
+    workbook = load_workbook(path, data_only=False, read_only=True)
     sheet = workbook.active
-    rows = list(sheet.iter_rows(values_only=True))
+    rows = list(sheet.iter_rows())
     if not rows:
         return []
-    headers = [str(value or "").strip() for value in rows[0]]
+    headers = [_cell_text(cell) for cell in rows[0]]
     out = []
-    for values in rows[1:]:
+    for cells in rows[1:]:
         row = {
-            headers[idx]: str(values[idx] or "").strip()
+            headers[idx]: _cell_text(cells[idx])
             for idx in range(len(headers))
             if headers[idx]
         }
         if any(row.values()):
             out.append(row)
     return out
+
+
+def _cell_text(cell) -> str:
+    value = cell.value
+    if isinstance(value, str) and value.startswith("="):
+        url = _formula_to_url(value)
+        if url:
+            return url
+    return str(value or "").strip()
+
+
+def _formula_to_url(value: str) -> str:
+    match = re.search(r'HYPERLINK\("([^"]+)"', value, flags=re.IGNORECASE)
+    if match:
+        return match.group(1).strip()
+    return ""
 
 
 def _read_simple_xlsx(path: Path) -> list[dict[str, str]]:

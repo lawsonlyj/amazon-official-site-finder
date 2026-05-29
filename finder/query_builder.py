@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from .geo import local_search_terms
 from .text import compact_space, slug
 
 
@@ -16,6 +17,8 @@ def build_queries(provider: dict, *, include_github: bool = True) -> list[str]:
     ]
     if locations:
         queries.append(f'"{name}" "{locations[0]}" website')
+    for term in local_search_terms(locations)[:5]:
+        queries.append(f'"{name}" "{term}"')
     if slug(name):
         queries.append(f'{slug(name)} website')
     if include_github:

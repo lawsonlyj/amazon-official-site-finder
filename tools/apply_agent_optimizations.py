@@ -51,6 +51,7 @@ def apply_agent_optimizations(
     skipped = []
     identity_examples = []
     human_review_examples = []
+    no_official_examples = []
     url_reachability_examples = []
     for item in recommendations:
         if item.get("action") == "write_identity_regression_fixtures" and item.get("safe_artifact"):
@@ -58,6 +59,9 @@ def apply_agent_optimizations(
             continue
         if item.get("action") == "write_human_review_regression_fixtures" and item.get("safe_artifact"):
             human_review_examples.extend(item.get("examples") or [])
+            continue
+        if item.get("action") == "write_no_official_regression_fixtures" and item.get("safe_artifact"):
+            no_official_examples.extend(item.get("examples") or [])
             continue
         if item.get("action") == "verify_url_variants_before_accept" and item.get("safe_artifact"):
             url_reachability_examples.extend(item.get("examples") or [])
@@ -85,13 +89,20 @@ def apply_agent_optimizations(
     human_fixtures_written = 0
     if apply and human_review_examples:
         human_fixtures_written = _write_human_review_fixtures(human_fixture_path, human_review_examples)
+    no_official_fixture_path = canonical["no_official_cases"]
+    no_official_fixtures_written = 0
+    if apply and no_official_examples:
+        no_official_fixtures_written = _write_human_review_fixtures(no_official_fixture_path, no_official_examples)
     reachability_fixture_path = canonical["reachability_cases"]
     reachability_fixtures_written = 0
     if apply and url_reachability_examples:
         reachability_fixtures_written = _write_human_review_fixtures(reachability_fixture_path, url_reachability_examples)
     summary = {
         "updated": bool(apply and additions),
-        "artifacts_updated": bool(apply and (fixtures_written or human_fixtures_written or reachability_fixtures_written)),
+        "artifacts_updated": bool(
+            apply
+            and (fixtures_written or human_fixtures_written or no_official_fixtures_written or reachability_fixtures_written)
+        ),
         "apply_requested": apply,
         "added_excluded_domains": additions if apply else [],
         "pending_excluded_domains": additions if not apply else [],
@@ -99,6 +110,8 @@ def apply_agent_optimizations(
         "identity_regression_fixture": str(fixture_path) if apply and fixtures_written else "",
         "human_review_regression_fixture_rows": human_fixtures_written if apply else 0,
         "human_review_regression_fixture": str(human_fixture_path) if apply and human_fixtures_written else "",
+        "no_official_regression_fixture_rows": no_official_fixtures_written if apply else 0,
+        "no_official_regression_fixture": str(no_official_fixture_path) if apply and no_official_fixtures_written else "",
         "url_reachability_regression_fixture_rows": reachability_fixtures_written if apply else 0,
         "url_reachability_regression_fixture": str(reachability_fixture_path) if apply and reachability_fixtures_written else "",
         "skipped": skipped,
@@ -108,6 +121,7 @@ def apply_agent_optimizations(
             "applied": str(canonical["applied"]),
             "identity_cases": str(fixture_path),
             "human_cases": str(human_fixture_path),
+            "no_official_cases": str(no_official_fixture_path),
             "reachability_cases": str(reachability_fixture_path),
         },
     }
@@ -159,6 +173,7 @@ def _write_human_review_fixtures(path: Path, examples: list[dict]) -> int:
         "manual_decision",
         "manual_url",
         "confidence",
+        "error_type",
         "notes",
         "note_tags",
         "expected_outcome",

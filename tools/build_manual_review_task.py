@@ -9,6 +9,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from finder.text import domain_from_url
+from finder.text import tokens
 from tools.build_linked_workbook import build_workbook
 from tools.output_layout import first_existing, publish_review_task_aliases, review_task_paths
 
@@ -125,6 +126,11 @@ def _needs_manual_review(row: dict[str, str], second_pass_row: dict[str, str], c
         return True
     if confidence < confidence_cutoff:
         return True
+    evidence = (row.get("evidence_summary") or second_pass_row.get("evidence_summary") or "").casefold()
+    if "identity_cap_" in evidence or "page_industry_mismatch:" in evidence:
+        return True
+    if _ambiguous_provider_name(row.get("provider_name", "")) and not _has_strong_identity_summary(evidence):
+        return True
     if second_pass_row.get("accepted_for_final") == "true" and confidence < confidence_cutoff:
         return True
     return False
@@ -174,6 +180,11 @@ def _review_reason(row: dict[str, str], second_pass_row: dict[str, str]) -> str:
         return "precision_second_pass_accepted_70_84"
     if status == "manual_accepted":
         return "precision_second_pass_accepted_85_plus"
+    evidence = (row.get("evidence_summary") or second_pass_row.get("evidence_summary") or "").casefold()
+    if "identity_cap_" in evidence or "page_industry_mismatch:" in evidence:
+        return "precision_identity_constraint_risk"
+    if _ambiguous_provider_name(row.get("provider_name", "")) and not _has_strong_identity_summary(evidence):
+        return "precision_ambiguous_name_risk"
     if confidence < 85:
         return "precision_low_confidence_auto_match"
     return "spot_check_non_matched_status"
@@ -230,9 +241,11 @@ def _sort_key(row: dict[str, str]) -> tuple[int, int, str]:
         "precision_second_pass_accepted_lt70": 0,
         "precision_second_pass_accepted_70_84": 1,
         "precision_second_pass_accepted_85_plus": 2,
-        "precision_low_confidence_auto_match": 3,
-        "recall_unresolved_top_candidate": 4,
-        "recall_unresolved_manual_search": 5,
+        "precision_identity_constraint_risk": 3,
+        "precision_ambiguous_name_risk": 4,
+        "precision_low_confidence_auto_match": 5,
+        "recall_unresolved_top_candidate": 6,
+        "recall_unresolved_manual_search": 7,
     }
     return (priority.get(row.get("review_reason", ""), 9), _to_int(row.get("confidence")), row.get("provider_name", ""))
 
@@ -250,6 +263,42 @@ def _to_int(value: object) -> int:
         return int(float(value or 0))
     except (TypeError, ValueError):
         return 0
+
+
+def _ambiguous_provider_name(name: str) -> bool:
+    provider_tokens = tokens(name)
+    if not provider_tokens:
+        return False
+    generic = {
+        "amazon",
+        "account",
+        "agency",
+        "consulting",
+        "consultancy",
+        "digital",
+        "ecom",
+        "ecommerce",
+        "global",
+        "growth",
+        "management",
+        "marketplace",
+        "media",
+        "seller",
+        "service",
+        "services",
+        "solution",
+        "solutions",
+        "brand",
+        "brands",
+    }
+    meaningful = [token for token in provider_tokens if token not in generic]
+    return len(meaningful) <= 1 or len("".join(provider_tokens)) <= 4
+
+
+def _has_strong_identity_summary(evidence: str) -> bool:
+    has_name = "page_contains_exact_provider_name" in evidence or "page_contains_provider_name_tokens" in evidence
+    has_service = "page_contains_amazon_service_keywords" in evidence or "page_mentions_amazon_spn" in evidence
+    return has_name and has_service
 
 
 if __name__ == "__main__":

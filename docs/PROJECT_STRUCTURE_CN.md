@@ -149,7 +149,7 @@ run_codex_assisted.sh
            -> tools/build_linked_workbook.py
      -> tools/build_manual_review_task.py
      -> 可选 B：tools/run_agent_b_verification.py + tools/run_agent_b_recommendations.py
-        -> 可选读取 filled human-review XLSX，生成 notes 分类和回归样例建议
+        -> 可选读取 filled human-review XLSX，生成 notes 分类、无官网标签和回归样例建议
      -> 可选 A 安全应用：tools/apply_agent_optimizations.py --apply
      -> tools/verify_run_outputs.py
 ```
@@ -170,7 +170,7 @@ Codex receives filled manual review workbook
   -> tools/run_agent_b_recommendations.py
      -> 汇总 AgentB、人工复核 XLSX 和学习报告里的重复模式
   -> tools/apply_agent_optimizations.py --apply
-     -> 只应用安全、可解释的 excluded_domains 更新，并写出 human/identity/reachability 回归样例
+     -> 只应用安全、可解释的 excluded_domains 更新，并写出 human/identity/no_official/reachability 回归样例
   -> tools/verify_run_outputs.py
   -> Codex 读取 learning report 并汇报最终输出
 ```
@@ -185,16 +185,17 @@ Codex receives filled manual review workbook
 | `run_review_cycle.sh` | Codex 在人工复核填完后内部调用。把反馈应用回结果，生成 reviewed 输出和学习报告，可启用安全规则优化。 |
 | `tools/preflight_report.py` | 开跑前检查输入文件、API key、依赖和搜索 API 是否可用。 |
 | `tools/run_pipeline.py` | 主调度器。负责标准化输入、搜索候选、评分、生成初版结果、质量门禁和 second-pass。 |
-| `finder/` | 核心逻辑包。包括输入清洗、搜索 query 构建、API 搜索、网页抓取、官网评分。 |
-| `finder/logo.py` | 从候选官网提取 logo/favicon/og:image，并与 Amazon listing logo 做感知哈希相似度比较；只作为正向身份加分证据。 |
-| `tools/run_unresolved_second_pass.py` | 对第一轮没解决的商家做二轮补漏，用 Brave/Exa 找更可能的官网；默认接受阈值为 `75`，与 first pass 对齐，同时保留强证据和风险 URL 约束。 |
+| `finder/` | 核心逻辑包。包括输入清洗、国家/语言相关搜索 query 构建、API 搜索、网页抓取、官网评分。 |
+| `finder/geo.py` | 国家/地区 profile。提供本地语言官网/联系方式查询词、国家 TLD 信号和页面国家文本 marker。 |
+| `finder/scoring.py` | 官网打分器。当前版本加入身份 cap：同名/通用名、国家冲突、服务不一致、logo-only、缺少服务或地区佐证时不能直接高分接受。 |
+| `finder/logo.py` | 从候选官网提取 logo/favicon/og:image，并与 Amazon listing logo 做感知哈希相似度比较；作为正向身份加分证据，但 logo-only 不足以自动接受。 |
+| `tools/run_unresolved_second_pass.py` | 对第一轮没解决的商家做二轮补漏，用 Brave/Exa 找更可能的官网；默认接受阈值为 `75`，与 first pass 对齐，同时保留强证据、风险 URL 和身份 cap 约束。 |
 | `tools/build_manual_review_task.py` | 生成简化人工复核 CSV/XLSX，只保留工作人员需要判断和填写的列。 |
-| `tools/run_agent_b_verification.py` | B 的高风险候选优先复核部分。只复核低置信、二轮新增、平台页、logo-only、同名/通用名等风险行，输出 accept/replace/reject/unsure 和结构化证据。 |
+| `tools/run_agent_b_verification.py` | B 的高风险候选优先复核部分。只复核低置信、二轮新增、平台页、logo-only、同名/通用名、身份 cap 等风险行，输出 accept/replace/reject/unsure 和结构化证据。 |
 | `tools/run_agent_b_recommendations.py` | B 的建议部分。读取 B 复核结果和人工复核学习报告，输出可执行或需人工评估的优化建议。 |
 | `tools/run_review_learning.py` | 读取填好的复核表，合并人工反馈，输出 reviewed 结果、人工标签和优化建议。 |
-| `tools/run_agent_b_recommendations.py` | B 的建议部分。读取复核结果和人工复核学习报告，输出可执行或需人工评估的优化建议。 |
 | `tools/run_agent_c_recommendations.py` | 旧名称兼容入口，内部仍生成 AgentB 建议。 |
-| `tools/apply_agent_optimizations.py` | A 的安全应用器，只自动写入可解释、可回滚的 excluded_domains 配置。 |
+| `tools/apply_agent_optimizations.py` | A 的安全应用器，只自动写入可解释、可回滚的 excluded_domains 配置，并生成 human/identity/no_official/reachability 回归样例。 |
 | `tools/build_linked_workbook.py` | 生成链接可点击的 XLSX。 |
 | `tools/verify_run_outputs.py` | 检查最终 CSV、unresolved CSV、质量 JSON、XLSX 链接公式是否正常。 |
 | `tools/apply_review.py` | 人工复核后，把人工 decision 应用回已有 run。 |
