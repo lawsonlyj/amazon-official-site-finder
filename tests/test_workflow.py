@@ -1322,6 +1322,79 @@ class OperationalCommandTests(unittest.TestCase):
         self.assertTrue(task_xlsx_exists)
         self.assertTrue(legacy_task_exists)
 
+    def test_build_manual_review_task_flags_high_confidence_ambiguous_identity_risks(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            run_dir = Path(tmp)
+            final_rows = [
+                {
+                    "provider_id": "generic",
+                    "provider_name": "AA Consulting",
+                    "provider_detail_url": "https://amazon.example/generic",
+                    "official_url": "https://aaconsulting.example",
+                    "official_domain": "aaconsulting.example",
+                    "status": "matched",
+                    "decision_source": "auto_matched",
+                    "confidence": "100",
+                    "source_status": "matched",
+                    "evidence_summary": "page_contains_exact_provider_name; page_contains_amazon_service_keywords; domain_exact_provider_slug",
+                    "service_apis": "[]",
+                    "provider_locations": "[]",
+                },
+                {
+                    "provider_id": "slug",
+                    "provider_name": "Behemoth",
+                    "provider_detail_url": "https://amazon.example/slug",
+                    "official_url": "https://behemothimports.example",
+                    "official_domain": "behemothimports.example",
+                    "status": "matched",
+                    "decision_source": "auto_matched",
+                    "confidence": "100",
+                    "source_status": "matched",
+                    "evidence_summary": "page_contains_exact_provider_name; page_contains_amazon_service_keywords; domain_contains_provider_slug",
+                    "service_apis": "[]",
+                    "provider_locations": "[]",
+                },
+                {
+                    "provider_id": "logo",
+                    "provider_name": "Best Seller",
+                    "provider_detail_url": "https://amazon.example/logo",
+                    "official_url": "https://bestseller.example",
+                    "official_domain": "bestseller.example",
+                    "status": "matched",
+                    "decision_source": "auto_matched",
+                    "confidence": "100",
+                    "source_status": "matched",
+                    "evidence_summary": "page_contains_exact_provider_name; page_contains_amazon_service_keywords; domain_exact_provider_slug; listing_logo_visual_match",
+                    "service_apis": "[]",
+                    "provider_locations": "[]",
+                },
+                {
+                    "provider_id": "safe",
+                    "provider_name": "Distinct Systems Corporation",
+                    "provider_detail_url": "https://amazon.example/safe",
+                    "official_url": "https://distinct.example",
+                    "official_domain": "distinct.example",
+                    "status": "matched",
+                    "decision_source": "auto_matched",
+                    "confidence": "100",
+                    "source_status": "matched",
+                    "evidence_summary": "page_contains_exact_provider_name; page_contains_amazon_service_keywords; domain_exact_provider_slug",
+                    "service_apis": "[]",
+                    "provider_locations": "[]",
+                },
+            ]
+            _write_test_csv(run_dir / "official_sites.csv", final_rows)
+
+            summary = build_manual_review_task(run_dir=run_dir, write_xlsx=False)
+            with (run_dir / "review_task.csv").open(newline="", encoding="utf-8") as f:
+                task_rows = {row["provider_id"]: row for row in csv.DictReader(f)}
+
+        self.assertEqual(summary["review_rows"], 2)
+        self.assertEqual(task_rows["generic"]["review_reason"], "precision_generic_identity_term_risk")
+        self.assertEqual(task_rows["slug"]["review_reason"], "precision_slug_extension_identity_risk")
+        self.assertNotIn("logo", task_rows)
+        self.assertNotIn("safe", task_rows)
+
     def test_agent_b_verification_outputs_decisions_and_clickable_workbook(self):
         with tempfile.TemporaryDirectory() as tmp:
             run_dir = Path(tmp)
@@ -1463,6 +1536,15 @@ class OperationalCommandTests(unittest.TestCase):
                     "confidence": "94",
                     "evidence_summary": "listing_logo_visual_match",
                 },
+                {
+                    "provider_id": "ambiguous",
+                    "provider_name": "AA Consulting",
+                    "provider_detail_url": "https://amazon.example/ambiguous",
+                    "official_url": "https://aaconsulting.example",
+                    "status": "matched",
+                    "confidence": "100",
+                    "evidence_summary": "page_contains_exact_provider_name; page_contains_amazon_service_keywords; domain_exact_provider_slug",
+                },
             ]
             _write_test_csv(run_dir / "official_sites.csv", final_rows)
             with patch("tools.run_agent_b_verification.fetch_text", return_value={"ok": False, "text": ""}), patch(
@@ -1472,8 +1554,8 @@ class OperationalCommandTests(unittest.TestCase):
             with (run_dir / "agent_b/check.csv").open(newline="", encoding="utf-8") as f:
                 checked_ids = [row["provider_id"] for row in csv.DictReader(f)]
 
-        self.assertEqual(summary["input_rows"], 3)
-        self.assertEqual(checked_ids, ["second", "low", "logo"])
+        self.assertEqual(summary["input_rows"], 4)
+        self.assertEqual(checked_ids, ["second", "low", "logo", "ambiguous"])
 
     def test_agent_c_recommends_and_agent_a_applies_only_safe_rules(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -1720,6 +1802,74 @@ class OperationalCommandTests(unittest.TestCase):
         self.assertEqual(summary["overall"]["auto_precision"], 0.6667)
         self.assertEqual(summary["threshold_simulations"][0]["threshold"], 85)
         self.assertEqual(summary["threshold_simulations"][0]["official_output_rows"], 3)
+
+    def test_evaluate_workflow_balance_counts_manual_review_capture(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            run_dir = root / "run"
+            baseline = root / "baseline.csv"
+            candidate = root / "candidate.csv"
+            review = root / "review.csv"
+            review_task = run_dir / "review_task.csv"
+            unresolved = run_dir / "unresolved.csv"
+            _write_test_csv(
+                baseline,
+                [
+                    {"provider_id": "p-1", "provider_name": "One", "official_url": "https://one.example", "official_domain": "one.example"},
+                    {"provider_id": "p-2", "provider_name": "Two", "official_url": "https://two.example", "official_domain": "two.example"},
+                    {"provider_id": "p-3", "provider_name": "Three", "official_url": "https://three.example", "official_domain": "three.example"},
+                    {"provider_id": "p-4", "provider_name": "Four", "official_url": "", "official_domain": ""},
+                ],
+            )
+            _write_test_csv(
+                candidate,
+                [
+                    {"provider_id": "p-1", "provider_name": "One", "official_url": "https://one.example", "official_domain": "one.example", "status": "matched", "confidence": "96"},
+                    {"provider_id": "p-2", "provider_name": "Two", "official_url": "https://two.example", "official_domain": "two.example", "status": "matched", "confidence": "91"},
+                    {"provider_id": "p-3", "provider_name": "Three", "official_url": "", "official_domain": "", "status": "unresolved", "confidence": "68"},
+                    {"provider_id": "p-4", "provider_name": "Four", "official_url": "https://four.example", "official_domain": "four.example", "status": "matched", "confidence": "86"},
+                ],
+            )
+            _write_test_csv(
+                review,
+                [
+                    {"provider_id": "p-4", "provider_name": "Four", "manual_decision": "reject", "manual_url": ""},
+                ],
+            )
+            _write_test_csv(
+                review_task,
+                [
+                    {"provider_id": "p-1", "provider_name": "One", "review_reason": "precision_second_pass_accepted_85_plus"},
+                    {"provider_id": "p-3", "provider_name": "Three", "review_reason": "recall_unresolved_near_threshold"},
+                    {"provider_id": "p-4", "provider_name": "Four", "review_reason": "identity_weak_or_conflicting"},
+                ],
+            )
+            _write_test_csv(
+                unresolved,
+                [
+                    {"provider_id": "p-3", "provider_name": "Three"},
+                ],
+            )
+
+            summary = evaluate_balance(
+                baseline_final=baseline,
+                candidate_final=candidate,
+                human_review=review,
+                run_dir=run_dir,
+            )
+
+        overall = summary["overall"]
+        self.assertEqual(overall["manual_review_rows"], 3)
+        self.assertEqual(overall["manual_review_labeled_rows"], 3)
+        self.assertEqual(overall["manual_review_false_official_rows"], 1)
+        self.assertEqual(overall["manual_review_missed_false_official_rows"], 0)
+        self.assertEqual(overall["manual_review_over_rejected_rows"], 1)
+        self.assertEqual(overall["manual_review_correct_official_rows"], 1)
+        self.assertEqual(overall["manual_review_false_official_capture_rate"], 1.0)
+        self.assertEqual(overall["manual_review_false_official_share"], 0.3333)
+        self.assertEqual(overall["unresolved_rows"], 1)
+        detail_by_id = {row["provider_id"]: row for row in summary["details"]}
+        self.assertEqual(detail_by_id["p-4"]["manual_review_reason"], "identity_weak_or_conflicting")
 
     def test_scoring_tries_www_variant_before_giving_up_on_candidate(self):
         config = load_config("config/scoring.json")

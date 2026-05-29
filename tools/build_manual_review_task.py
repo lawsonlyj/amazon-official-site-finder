@@ -129,6 +129,8 @@ def _needs_manual_review(row: dict[str, str], second_pass_row: dict[str, str], c
     evidence = (row.get("evidence_summary") or second_pass_row.get("evidence_summary") or "").casefold()
     if "identity_cap_" in evidence or "page_industry_mismatch:" in evidence:
         return True
+    if _high_confidence_ambiguous_identity_risk(row, evidence, confidence):
+        return True
     if _ambiguous_provider_name(row.get("provider_name", "")) and not _has_strong_identity_summary(evidence):
         return True
     if second_pass_row.get("accepted_for_final") == "true" and confidence < confidence_cutoff:
@@ -183,6 +185,10 @@ def _review_reason(row: dict[str, str], second_pass_row: dict[str, str]) -> str:
     evidence = (row.get("evidence_summary") or second_pass_row.get("evidence_summary") or "").casefold()
     if "identity_cap_" in evidence or "page_industry_mismatch:" in evidence:
         return "precision_identity_constraint_risk"
+    if _high_confidence_generic_identity_term_risk(row, evidence, confidence):
+        return "precision_generic_identity_term_risk"
+    if _high_confidence_slug_extension_risk(row, evidence, confidence):
+        return "precision_slug_extension_identity_risk"
     if _ambiguous_provider_name(row.get("provider_name", "")) and not _has_strong_identity_summary(evidence):
         return "precision_ambiguous_name_risk"
     if confidence < 85:
@@ -242,10 +248,12 @@ def _sort_key(row: dict[str, str]) -> tuple[int, int, str]:
         "precision_second_pass_accepted_70_84": 1,
         "precision_second_pass_accepted_85_plus": 2,
         "precision_identity_constraint_risk": 3,
-        "precision_ambiguous_name_risk": 4,
-        "precision_low_confidence_auto_match": 5,
-        "recall_unresolved_top_candidate": 6,
-        "recall_unresolved_manual_search": 7,
+        "precision_generic_identity_term_risk": 4,
+        "precision_slug_extension_identity_risk": 5,
+        "precision_ambiguous_name_risk": 6,
+        "precision_low_confidence_auto_match": 7,
+        "recall_unresolved_top_candidate": 8,
+        "recall_unresolved_manual_search": 9,
     }
     return (priority.get(row.get("review_reason", ""), 9), _to_int(row.get("confidence")), row.get("provider_name", ""))
 
@@ -293,6 +301,31 @@ def _ambiguous_provider_name(name: str) -> bool:
     }
     meaningful = [token for token in provider_tokens if token not in generic]
     return len(meaningful) <= 1 or len("".join(provider_tokens)) <= 4
+
+
+def _high_confidence_ambiguous_identity_risk(row: dict[str, str], evidence: str, confidence: int) -> bool:
+    return _high_confidence_generic_identity_term_risk(row, evidence, confidence) or _high_confidence_slug_extension_risk(
+        row, evidence, confidence
+    )
+
+
+def _high_confidence_generic_identity_term_risk(row: dict[str, str], evidence: str, confidence: int) -> bool:
+    if confidence < 85 or not _ambiguous_provider_name(row.get("provider_name", "")):
+        return False
+    return _has_generic_identity_term(row.get("provider_name", "")) and "listing_logo_visual_match" not in evidence
+
+
+def _high_confidence_slug_extension_risk(row: dict[str, str], evidence: str, confidence: int) -> bool:
+    if confidence < 85 or not _ambiguous_provider_name(row.get("provider_name", "")):
+        return False
+    if "listing_logo_visual_match" in evidence:
+        return False
+    return "domain_contains_provider_slug" in evidence and "domain_exact_provider_slug" not in evidence
+
+
+def _has_generic_identity_term(name: str) -> bool:
+    text = name.casefold()
+    return "consult" in text or "seller" in text
 
 
 def _has_strong_identity_summary(evidence: str) -> bool:

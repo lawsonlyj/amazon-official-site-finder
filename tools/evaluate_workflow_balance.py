@@ -25,6 +25,8 @@ DETAIL_FIELDS = [
     "output_domain",
     "output_url",
     "outcome",
+    "manual_review_required",
+    "manual_review_reason",
 ]
 
 
@@ -72,13 +74,19 @@ def evaluate_balance(
     labels = [_label_from_row(row, review_rows.get(_row_key(row), {})) for row in baseline_rows]
     labels = [label for label in labels if label]
     details = [_evaluate_label(label, _candidate_for_label(label, candidate_rows)) for label in labels]
+    review_task_rows = None
+    review_task_path = None
+    if run_dir:
+        review_task_path = _find_review_task(Path(run_dir))
+        if review_task_path:
+            review_task_rows = _read_rows(review_task_path)
+            details = _annotate_manual_review(details, review_task_rows)
     overall = _summarize(details)
     if run_dir:
         run_dir = Path(run_dir)
-        review_task = run_dir / "review_task.csv"
-        if review_task.exists():
-            overall["manual_review_rows"] = len(_read_rows(review_task))
-        unresolved = run_dir / "unresolved.csv"
+        if review_task_rows is not None:
+            overall.update(_summarize_manual_review_capture(details, len(review_task_rows)))
+        unresolved = _find_unresolved(run_dir)
         if unresolved.exists():
             overall["unresolved_rows"] = len(_read_rows(unresolved))
     summary = {
@@ -89,6 +97,7 @@ def evaluate_balance(
             "candidate_final": str(candidate_final),
             "human_review": str(human_review),
             "run_dir": str(run_dir) if run_dir else "",
+            "review_task": str(review_task_path) if review_task_path else "",
         },
         "details": details,
     }
@@ -242,8 +251,60 @@ def _summarize(details: list[dict[str, str]]) -> dict:
     }
 
 
+def _annotate_manual_review(details: list[dict[str, str]], review_task_rows: list[dict[str, str]]) -> list[dict[str, str]]:
+    review_index = _index_rows(review_task_rows)
+    out = []
+    for row in details:
+        review_row = review_index.get(_row_key(row), {})
+        annotated = dict(row)
+        annotated["manual_review_required"] = "yes" if review_row else ""
+        annotated["manual_review_reason"] = _first(review_row, "review_reason") if review_row else ""
+        out.append(annotated)
+    return out
+
+
+def _summarize_manual_review_capture(details: list[dict[str, str]], review_task_rows: int) -> dict:
+    reviewed = [row for row in details if row.get("manual_review_required") == "yes"]
+    false_official_total = sum(1 for row in details if row["outcome"] == "false_official")
+    over_rejected_total = sum(1 for row in details if row["outcome"] == "over_rejected")
+    false_official_reviewed = sum(1 for row in reviewed if row["outcome"] == "false_official")
+    over_rejected_reviewed = sum(1 for row in reviewed if row["outcome"] == "over_rejected")
+    correct_official_reviewed = sum(1 for row in reviewed if row["outcome"] == "correct_official")
+    correct_no_official_reviewed = sum(1 for row in reviewed if row["outcome"] == "correct_no_official")
+    return {
+        "manual_review_rows": review_task_rows,
+        "manual_review_labeled_rows": len(reviewed),
+        "manual_review_false_official_rows": false_official_reviewed,
+        "manual_review_missed_false_official_rows": false_official_total - false_official_reviewed,
+        "manual_review_over_rejected_rows": over_rejected_reviewed,
+        "manual_review_missed_over_rejected_rows": over_rejected_total - over_rejected_reviewed,
+        "manual_review_correct_official_rows": correct_official_reviewed,
+        "manual_review_correct_no_official_rows": correct_no_official_reviewed,
+        "manual_review_false_official_capture_rate": _ratio(false_official_reviewed, false_official_total),
+        "manual_review_over_rejected_capture_rate": _ratio(over_rejected_reviewed, over_rejected_total),
+        "manual_review_false_official_share": _ratio(false_official_reviewed, len(reviewed)),
+        "manual_review_correct_official_share": _ratio(correct_official_reviewed, len(reviewed)),
+    }
+
+
 def _ratio(num: int, den: int) -> float | None:
     return round(num / den, 4) if den else None
+
+
+def _find_review_task(run_dir: Path) -> Path | None:
+    for name in ("review_task.csv", "manual_official_site_review_task.csv"):
+        path = run_dir / name
+        if path.exists():
+            return path
+    return None
+
+
+def _find_unresolved(run_dir: Path) -> Path:
+    for name in ("unresolved.csv", "provider_unresolved_second_pass.csv"):
+        path = run_dir / name
+        if path.exists():
+            return path
+    return run_dir / "unresolved.csv"
 
 
 def _read_rows(path: Path) -> list[dict[str, str]]:

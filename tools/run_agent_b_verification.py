@@ -252,6 +252,8 @@ def _is_high_risk_for_agent_b(row: dict[str, str], second_pass_row: dict[str, st
         return True
     if _looks_non_independent(candidate_url):
         return True
+    if _high_confidence_ambiguous_identity_risk(row, evidence, confidence):
+        return True
     if _has_generic_or_ambiguous_name(row.get("provider_name", "")) and not _has_strong_identity_evidence(evidence):
         return True
     has_logo = "listing_logo_visual_match" in evidence or "listing_logo_visual_near_match" in evidence
@@ -507,6 +509,17 @@ def _has_generic_or_ambiguous_name(name: str) -> bool:
     }
     meaningful = [token for token in provider_tokens if token not in generic_tokens]
     return len(meaningful) <= 1 or len("".join(provider_tokens)) <= 4
+
+
+def _high_confidence_ambiguous_identity_risk(row: dict[str, str], evidence: str, confidence: int) -> bool:
+    if confidence < 85 or not _has_generic_or_ambiguous_name(row.get("provider_name", "")):
+        return False
+    if "listing_logo_visual_match" in evidence:
+        return False
+    name = row.get("provider_name", "").casefold()
+    if "consult" in name or "seller" in name:
+        return True
+    return "domain_contains_provider_slug" in evidence and "domain_exact_provider_slug" not in evidence
 
 
 def _to_int(value: object) -> int:
