@@ -27,6 +27,11 @@ DETAIL_FIELDS = [
     "outcome",
     "manual_review_required",
     "manual_review_reason",
+    "agent_b_checked",
+    "agent_b_decision",
+    "agent_b_suggested_domain",
+    "agent_b_confidence",
+    "agent_b_reason_for_unsure",
 ]
 
 
@@ -76,16 +81,24 @@ def evaluate_balance(
     details = [_evaluate_label(label, _candidate_for_label(label, candidate_rows)) for label in labels]
     review_task_rows = None
     review_task_path = None
+    agent_b_rows = None
+    agent_b_path = None
     if run_dir:
-        review_task_path = _find_review_task(Path(run_dir))
+        run_dir = Path(run_dir)
+        review_task_path = _find_review_task(run_dir)
         if review_task_path:
             review_task_rows = _read_rows(review_task_path)
             details = _annotate_manual_review(details, review_task_rows)
+        agent_b_path = _find_agent_b(run_dir)
+        if agent_b_path:
+            agent_b_rows = _read_rows(agent_b_path)
+            details = _annotate_agent_b(details, agent_b_rows)
     overall = _summarize(details)
     if run_dir:
-        run_dir = Path(run_dir)
         if review_task_rows is not None:
             overall.update(_summarize_manual_review_capture(details, len(review_task_rows)))
+        if agent_b_rows is not None:
+            overall.update(_summarize_agent_b_balance(details, agent_b_rows))
         unresolved = _find_unresolved(run_dir)
         if unresolved.exists():
             overall["unresolved_rows"] = len(_read_rows(unresolved))
@@ -98,6 +111,7 @@ def evaluate_balance(
             "human_review": str(human_review),
             "run_dir": str(run_dir) if run_dir else "",
             "review_task": str(review_task_path) if review_task_path else "",
+            "agent_b": str(agent_b_path) if agent_b_path else "",
         },
         "details": details,
     }
@@ -263,6 +277,21 @@ def _annotate_manual_review(details: list[dict[str, str]], review_task_rows: lis
     return out
 
 
+def _annotate_agent_b(details: list[dict[str, str]], agent_b_rows: list[dict[str, str]]) -> list[dict[str, str]]:
+    agent_b_index = _index_rows(agent_b_rows)
+    out = []
+    for row in details:
+        agent_b_row = agent_b_index.get(_row_key(row), {})
+        annotated = dict(row)
+        annotated["agent_b_checked"] = "yes" if agent_b_row else ""
+        annotated["agent_b_decision"] = _first(agent_b_row, "agent_b_decision", "manual_decision") if agent_b_row else ""
+        annotated["agent_b_suggested_domain"] = _agent_b_suggested_domain(agent_b_row)
+        annotated["agent_b_confidence"] = _first(agent_b_row, "confidence", "evidence_score") if agent_b_row else ""
+        annotated["agent_b_reason_for_unsure"] = _first(agent_b_row, "reason_for_unsure") if agent_b_row else ""
+        out.append(annotated)
+    return out
+
+
 def _summarize_manual_review_capture(details: list[dict[str, str]], review_task_rows: int) -> dict:
     reviewed = [row for row in details if row.get("manual_review_required") == "yes"]
     false_official_total = sum(1 for row in details if row["outcome"] == "false_official")
@@ -287,6 +316,73 @@ def _summarize_manual_review_capture(details: list[dict[str, str]], review_task_
     }
 
 
+def _summarize_agent_b_balance(details: list[dict[str, str]], agent_b_rows: list[dict[str, str]]) -> dict:
+    checked = [row for row in details if row.get("agent_b_checked") == "yes"]
+    decisions = _counts(row.get("agent_b_decision", "") for row in checked)
+    false_official = [row for row in checked if row["outcome"] == "false_official"]
+    false_official_accepted = [row for row in false_official if row.get("agent_b_decision") == "accept"]
+    false_official_caught = [row for row in false_official if row.get("agent_b_decision") and row.get("agent_b_decision") != "accept"]
+    correct_official = [row for row in checked if row["outcome"] == "correct_official"]
+    correct_official_accepted = [row for row in correct_official if row.get("agent_b_decision") == "accept"]
+    correct_no_official_expected = [row for row in checked if row["expected_kind"] == "no_official"]
+    no_official_accepted_or_replaced = [
+        row for row in correct_no_official_expected if row.get("agent_b_decision") in {"accept", "replace"}
+    ]
+    over_rejected = [row for row in checked if row["outcome"] == "over_rejected"]
+    over_rejected_correct = [
+        row for row in over_rejected if row.get("agent_b_suggested_domain") and row["agent_b_suggested_domain"] == row["expected_domain"]
+    ]
+    over_rejected_wrong = [
+        row for row in over_rejected if row.get("agent_b_suggested_domain") and row["agent_b_suggested_domain"] != row["expected_domain"]
+    ]
+    over_rejected_hold = [row for row in over_rejected if not row.get("agent_b_suggested_domain")]
+    return {
+        "agent_b_rows": len(agent_b_rows),
+        "agent_b_labeled_rows": len(checked),
+        "agent_b_accept_rows": decisions.get("accept", 0),
+        "agent_b_replace_rows": decisions.get("replace", 0),
+        "agent_b_reject_rows": decisions.get("reject", 0),
+        "agent_b_unsure_rows": decisions.get("unsure", 0),
+        "agent_b_false_official_rows": len(false_official),
+        "agent_b_false_official_caught_rows": len(false_official_caught),
+        "agent_b_false_official_accept_rows": len(false_official_accepted),
+        "agent_b_false_official_catch_rate": _ratio(len(false_official_caught), len(false_official)),
+        "agent_b_false_official_accept_rate": _ratio(len(false_official_accepted), len(false_official)),
+        "agent_b_correct_official_rows": len(correct_official),
+        "agent_b_correct_official_accept_rows": len(correct_official_accepted),
+        "agent_b_correct_official_non_accept_rows": len(correct_official) - len(correct_official_accepted),
+        "agent_b_correct_official_accept_rate": _ratio(len(correct_official_accepted), len(correct_official)),
+        "agent_b_expected_no_official_rows": len(correct_no_official_expected),
+        "agent_b_expected_no_official_accept_or_replace_rows": len(no_official_accepted_or_replaced),
+        "agent_b_expected_no_official_accept_or_replace_rate": _ratio(
+            len(no_official_accepted_or_replaced), len(correct_no_official_expected)
+        ),
+        "agent_b_over_rejected_rows": len(over_rejected),
+        "agent_b_over_rejected_correct_recovery_rows": len(over_rejected_correct),
+        "agent_b_over_rejected_wrong_recovery_rows": len(over_rejected_wrong),
+        "agent_b_over_rejected_hold_rows": len(over_rejected_hold),
+        "agent_b_over_rejected_recovery_rate": _ratio(len(over_rejected_correct), len(over_rejected)),
+    }
+
+
+def _agent_b_suggested_domain(row: dict[str, str]) -> str:
+    decision = _first(row, "agent_b_decision", "manual_decision")
+    if decision == "accept":
+        return domain_from_url(_first(row, "candidate_domain", "candidate_url"))
+    if decision == "replace":
+        return domain_from_url(_first(row, "manual_url", "replacement_url", "replacement_domain"))
+    return ""
+
+
+def _counts(values) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for value in values:
+        key = str(value or "").strip()
+        if key:
+            counts[key] = counts.get(key, 0) + 1
+    return counts
+
+
 def _ratio(num: int, den: int) -> float | None:
     return round(num / den, 4) if den else None
 
@@ -305,6 +401,14 @@ def _find_unresolved(run_dir: Path) -> Path:
         if path.exists():
             return path
     return run_dir / "unresolved.csv"
+
+
+def _find_agent_b(run_dir: Path) -> Path | None:
+    for name in ("agent_b/check.csv", "agent_b_verification_results.csv"):
+        path = run_dir / name
+        if path.exists():
+            return path
+    return None
 
 
 def _read_rows(path: Path) -> list[dict[str, str]]:

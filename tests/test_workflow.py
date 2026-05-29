@@ -1606,6 +1606,117 @@ class OperationalCommandTests(unittest.TestCase):
         self.assertEqual(rows[0]["review_reason"], "precision_generic_identity_term_risk")
         self.assertEqual(rows[0]["reason_for_unsure"], "high_risk_identity_needs_human_confirmation")
 
+    def test_agent_b_keeps_recall_unresolved_rows_as_unsure(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            run_dir = Path(tmp)
+            final_rows = [
+                {
+                    "provider_id": "p-1",
+                    "provider_name": "Recovered Brand",
+                    "provider_detail_url": "https://amazon.example/p-1",
+                    "official_url": "",
+                    "status": "unresolved",
+                    "confidence": "69",
+                    "evidence_summary": "recall candidate",
+                },
+            ]
+            manual_rows = [
+                {
+                    "provider_id": "p-1",
+                    "provider_name": "Recovered Brand",
+                    "provider_detail_url": "https://amazon.example/p-1",
+                    "official_url": "https://recovered.example",
+                    "status": "unresolved",
+                    "confidence": "69",
+                    "review_reason": "recall_unresolved_top_candidate",
+                },
+            ]
+            _write_test_csv(run_dir / "official_sites.csv", final_rows)
+            _write_test_csv(run_dir / "review_task.csv", manual_rows)
+
+            def fake_fetch(url):
+                html = """
+                <html><head><title>Recovered Brand</title>
+                <script type="application/ld+json">{"@type":"Organization"}</script></head>
+                <body>Recovered Brand LLC. About us. Contact us. Privacy policy.
+                Amazon marketplace account management ecommerce services.</body></html>
+                """
+                return {"ok": True, "status": 200, "final_url": url, "text": html}
+
+            with patch("tools.run_agent_b_verification.fetch_text", side_effect=fake_fetch), patch(
+                "tools.run_agent_b_verification.collect_candidates_for_queries", return_value=[]
+            ):
+                summary = run_agent_b_verification(run_dir=run_dir, write_xlsx=False)
+            with (run_dir / "agent_b/check.csv").open(newline="", encoding="utf-8") as f:
+                rows = list(csv.DictReader(f))
+
+        self.assertEqual(summary["decision_counts"], {"unsure": 1})
+        self.assertEqual(rows[0]["agent_b_decision"], "unsure")
+        self.assertEqual(rows[0]["reason_for_unsure"], "recall_candidate_needs_human_confirmation")
+        self.assertEqual(rows[0]["review_reason"], "recall_unresolved_top_candidate")
+
+    def test_agent_b_keeps_review_task_replacements_as_unsure(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            run_dir = Path(tmp)
+            final_rows = [
+                {
+                    "provider_id": "p-1",
+                    "provider_name": "Replace Candidate",
+                    "provider_detail_url": "https://amazon.example/p-1",
+                    "official_url": "https://wrong.example",
+                    "status": "matched",
+                    "confidence": "77",
+                    "evidence_summary": "weak candidate",
+                },
+            ]
+            manual_rows = [
+                {
+                    "provider_id": "p-1",
+                    "provider_name": "Replace Candidate",
+                    "provider_detail_url": "https://amazon.example/p-1",
+                    "official_url": "https://wrong.example",
+                    "status": "matched",
+                    "confidence": "77",
+                    "review_reason": "precision_low_confidence_auto_match",
+                },
+            ]
+            _write_test_csv(run_dir / "official_sites.csv", final_rows)
+            _write_test_csv(run_dir / "review_task.csv", manual_rows)
+
+            def fake_fetch(url):
+                if "replacement.example" in url:
+                    html = """
+                    <html><head><title>Replace Candidate</title></head>
+                    <body>Replace Candidate LLC. About us. Contact us.
+                    Amazon marketplace account management ecommerce services.</body></html>
+                    """
+                    return {"ok": True, "status": 200, "final_url": url, "text": html}
+                return {"ok": True, "status": 200, "final_url": url, "text": "<html><body>Wrong page</body></html>"}
+
+            replacement_candidates = [
+                SearchCandidate(
+                    url="https://replacement.example",
+                    title="Replace Candidate official website",
+                    snippet="Replace Candidate Amazon marketplace services contact",
+                    source="brave",
+                    query='"Replace Candidate" official website',
+                    rank=1,
+                )
+            ]
+
+            with patch("tools.run_agent_b_verification.fetch_text", side_effect=fake_fetch), patch(
+                "finder.scoring.fetch_text", side_effect=fake_fetch
+            ), patch("tools.run_agent_b_verification.collect_candidates_for_queries", return_value=replacement_candidates):
+                summary = run_agent_b_verification(run_dir=run_dir, write_xlsx=False)
+            with (run_dir / "agent_b/check.csv").open(newline="", encoding="utf-8") as f:
+                rows = list(csv.DictReader(f))
+
+        self.assertEqual(summary["decision_counts"], {"unsure": 1})
+        self.assertEqual(rows[0]["agent_b_decision"], "unsure")
+        self.assertEqual(rows[0]["replacement_domain"], "replacement.example")
+        self.assertEqual(rows[0]["manual_url"], "")
+        self.assertEqual(rows[0]["reason_for_unsure"], "replacement_candidate_needs_human_confirmation")
+
     def test_agent_c_recommends_and_agent_a_applies_only_safe_rules(self):
         with tempfile.TemporaryDirectory() as tmp:
             run_dir = Path(tmp)
@@ -1860,6 +1971,7 @@ class OperationalCommandTests(unittest.TestCase):
             candidate = root / "candidate.csv"
             review = root / "review.csv"
             review_task = run_dir / "review_task.csv"
+            agent_b = run_dir / "agent_b/check.csv"
             unresolved = run_dir / "unresolved.csv"
             _write_test_csv(
                 baseline,
@@ -1899,6 +2011,35 @@ class OperationalCommandTests(unittest.TestCase):
                     {"provider_id": "p-3", "provider_name": "Three"},
                 ],
             )
+            _write_test_csv(
+                agent_b,
+                [
+                    {
+                        "provider_id": "p-1",
+                        "provider_name": "One",
+                        "candidate_domain": "one.example",
+                        "agent_b_decision": "accept",
+                        "manual_url": "",
+                        "confidence": "90",
+                    },
+                    {
+                        "provider_id": "p-3",
+                        "provider_name": "Three",
+                        "candidate_domain": "",
+                        "agent_b_decision": "replace",
+                        "manual_url": "https://three.example",
+                        "confidence": "88",
+                    },
+                    {
+                        "provider_id": "p-4",
+                        "provider_name": "Four",
+                        "candidate_domain": "four.example",
+                        "agent_b_decision": "accept",
+                        "manual_url": "",
+                        "confidence": "86",
+                    },
+                ],
+            )
 
             summary = evaluate_balance(
                 baseline_final=baseline,
@@ -1917,8 +2058,19 @@ class OperationalCommandTests(unittest.TestCase):
         self.assertEqual(overall["manual_review_false_official_capture_rate"], 1.0)
         self.assertEqual(overall["manual_review_false_official_share"], 0.3333)
         self.assertEqual(overall["unresolved_rows"], 1)
+        self.assertEqual(overall["agent_b_rows"], 3)
+        self.assertEqual(overall["agent_b_accept_rows"], 2)
+        self.assertEqual(overall["agent_b_replace_rows"], 1)
+        self.assertEqual(overall["agent_b_false_official_rows"], 1)
+        self.assertEqual(overall["agent_b_false_official_accept_rows"], 1)
+        self.assertEqual(overall["agent_b_false_official_catch_rate"], 0.0)
+        self.assertEqual(overall["agent_b_correct_official_accept_rate"], 1.0)
+        self.assertEqual(overall["agent_b_over_rejected_correct_recovery_rows"], 1)
+        self.assertEqual(overall["agent_b_over_rejected_recovery_rate"], 1.0)
+        self.assertEqual(overall["agent_b_expected_no_official_accept_or_replace_rows"], 1)
         detail_by_id = {row["provider_id"]: row for row in summary["details"]}
         self.assertEqual(detail_by_id["p-4"]["manual_review_reason"], "identity_weak_or_conflicting")
+        self.assertEqual(detail_by_id["p-3"]["agent_b_suggested_domain"], "three.example")
 
     def test_scoring_tries_www_variant_before_giving_up_on_candidate(self):
         config = load_config("config/scoring.json")

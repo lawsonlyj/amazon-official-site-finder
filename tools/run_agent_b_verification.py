@@ -427,11 +427,19 @@ def _decide(candidate: dict, replacement: dict[str, str], review_reason: str = "
     score = int(candidate.get("score") or 0)
     counters = set(candidate.get("counter_evidence") or [])
     facts = set(candidate.get("supporting_facts") or [])
+    if _is_recall_review_reason(review_reason):
+        replacement_score = _to_int(replacement.get("score"))
+        confidence = max(score, replacement_score)
+        return "unsure", "", max(0, min(69, confidence)), "recall_candidate_needs_human_confirmation"
     if _is_precision_high_risk_reason(review_reason) and 70 <= score < 85 and "listing_logo_visual_match" not in facts:
         return "unsure", "", min(69, score), "high_risk_identity_needs_human_confirmation"
     if score >= 70 and "candidate_not_independent_official_site" not in counters:
         return "accept", "", min(100, score), ""
     if replacement.get("url"):
+        if review_reason:
+            replacement_score = _to_int(replacement.get("score"))
+            confidence = max(score, replacement_score)
+            return "unsure", "", max(0, min(69, confidence)), "replacement_candidate_needs_human_confirmation"
         confidence = max(70, min(95, int(float(replacement.get("score") or 70))))
         return "replace", replacement["url"], confidence, ""
     if score <= 20 and counters:
@@ -445,6 +453,10 @@ def _is_precision_high_risk_reason(reason: str) -> bool:
         "precision_generic_identity_term_risk",
         "precision_slug_extension_identity_risk",
     }
+
+
+def _is_recall_review_reason(reason: str) -> bool:
+    return reason.startswith("recall_unresolved")
 
 
 def _notes_for(decision: str, candidate: dict, replacement: dict[str, str]) -> str:
