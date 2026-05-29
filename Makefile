@@ -4,7 +4,7 @@ LABELS ?= tests/fixtures/golden_expected_websites.csv
 REVIEW ?=
 PYTHONPATH_VALUE ?= .vendor_eval:.
 
-.PHONY: help test install-optional pipeline second-pass review-task review-learning verify
+.PHONY: help test install-optional pipeline second-pass review-task agent-b review-learning agent-c apply-agent-optimizations verify
 
 help:
 	@echo "Targets:"
@@ -13,7 +13,10 @@ help:
 	@echo "  pipeline          Run full workflow; requires SOURCE_CSV=/path/to/input.csv"
 	@echo "  second-pass       Re-run unresolved second-pass for RUN_DIR"
 	@echo "  review-task       Rebuild simplified manual review CSV/XLSX for RUN_DIR"
+	@echo "  agent-b           Run candidate-first verification for RUN_DIR"
 	@echo "  review-learning   Apply filled REVIEW=/path/to/review.xlsx and write learning report"
+	@echo "  agent-c           Generate optimization recommendations for RUN_DIR"
+	@echo "  apply-agent-optimizations Apply safe AgentC config recommendations"
 	@echo "  verify            Verify final handoff outputs for RUN_DIR"
 	@echo ""
 	@echo "Example:"
@@ -61,6 +64,11 @@ review-task:
 	  --run-dir "$(RUN_DIR)" \
 	  --write-xlsx
 
+agent-b:
+	PYTHONPATH=$(PYTHONPATH_VALUE) python3 tools/run_agent_b_verification.py \
+	  --run-dir "$(RUN_DIR)" \
+	  --write-xlsx
+
 review-learning:
 	@if [ -z "$(REVIEW)" ]; then echo "Set REVIEW=/path/to/filled_manual_review.csv-or.xlsx"; exit 2; fi
 	PYTHONPATH=$(PYTHONPATH_VALUE) python3 tools/run_review_learning.py \
@@ -69,6 +77,15 @@ review-learning:
 	  --labels "$(LABELS)" \
 	  --write-xlsx \
 	  --update-config
+
+agent-c:
+	PYTHONPATH=$(PYTHONPATH_VALUE) python3 tools/run_agent_c_recommendations.py \
+	  --run-dir "$(RUN_DIR)"
+
+apply-agent-optimizations:
+	PYTHONPATH=$(PYTHONPATH_VALUE) python3 tools/apply_agent_optimizations.py \
+	  --run-dir "$(RUN_DIR)" \
+	  --apply
 
 verify:
 	python3 tools/verify_run_outputs.py \

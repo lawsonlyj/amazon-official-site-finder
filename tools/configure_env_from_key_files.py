@@ -73,6 +73,8 @@ def extract_key_from_file(path: str | Path | None, env_name: str) -> str:
     if not key_path.exists():
         raise FileNotFoundError(f"API key file does not exist: {key_path}")
     text = key_path.read_text(encoding="utf-8", errors="ignore").strip()
+    if _looks_like_rtf(text):
+        text = _rtf_to_text(text).strip()
     if not text:
         return ""
 
@@ -83,6 +85,10 @@ def extract_key_from_file(path: str | Path | None, env_name: str) -> str:
     named_value = _extract_named_value(text, env_name)
     if named_value:
         return named_value
+
+    secret_token = _extract_secret_token(text)
+    if secret_token:
+        return secret_token
 
     return _extract_plain_value(text)
 
@@ -178,11 +184,84 @@ def _extract_plain_value(text: str) -> str:
     return ""
 
 
+def _extract_secret_token(text: str) -> str:
+    candidates = []
+    for token in re.findall(r"[A-Za-z0-9][A-Za-z0-9_.-]{15,}", text):
+        cleaned = _clean_value(token)
+        if _is_secret_like_token(cleaned):
+            candidates.append(cleaned)
+    if not candidates:
+        return ""
+    candidates.sort(key=len, reverse=True)
+    return candidates[0]
+
+
+def _is_secret_like_token(value: str) -> bool:
+    if len(value) < 16:
+        return False
+    lowered = value.casefold()
+    blocked = {"helvetica", "courier", "times", "fonttbl", "colortbl"}
+    if lowered in blocked or lowered.startswith(("http.", "https.", "www.")):
+        return False
+    if "." in value and not any(ch.isdigit() for ch in value):
+        return False
+    return bool(re.search(r"[A-Za-z]", value)) and bool(re.search(r"[0-9]", value))
+
+
 def _clean_value(value: str) -> str:
     value = value.strip().strip(",")
     if "#" in value:
         value = value.split("#", 1)[0].strip()
     return value.strip().strip('"').strip("'").strip()
+
+
+def _looks_like_rtf(text: str) -> bool:
+    return text.lstrip().startswith("{\\rtf")
+
+
+def _rtf_to_text(text: str) -> str:
+    # API keys are ASCII; this lightweight RTF extraction avoids external tools and never prints the text.
+    hex_bytes = bytearray()
+    out: list[str] = []
+    idx = 0
+    while idx < len(text):
+        ch = text[idx]
+        if ch == "\\":
+            if idx + 3 < len(text) and text[idx + 1] == "'" and re.fullmatch(r"[0-9a-fA-F]{2}", text[idx + 2 : idx + 4]):
+                hex_bytes.append(int(text[idx + 2 : idx + 4], 16))
+                idx += 4
+                continue
+            if hex_bytes:
+                out.append(_decode_rtf_bytes(bytes(hex_bytes)))
+                hex_bytes.clear()
+            match = re.match(r"\\[a-zA-Z]+-?\d* ?", text[idx:])
+            if match:
+                idx += len(match.group(0))
+                continue
+            if idx + 1 < len(text):
+                out.append(text[idx + 1])
+                idx += 2
+                continue
+        if hex_bytes:
+            out.append(_decode_rtf_bytes(bytes(hex_bytes)))
+            hex_bytes.clear()
+        if ch in "{}":
+            idx += 1
+            continue
+        out.append(ch)
+        idx += 1
+    if hex_bytes:
+        out.append(_decode_rtf_bytes(bytes(hex_bytes)))
+    return re.sub(r"\s+", "\n", "".join(out))
+
+
+def _decode_rtf_bytes(data: bytes) -> str:
+    for encoding in ["utf-8", "gb18030", "cp1252", "latin-1"]:
+        try:
+            return data.decode(encoding)
+        except UnicodeDecodeError:
+            continue
+    return data.decode("latin-1", errors="ignore")
 
 
 if __name__ == "__main__":

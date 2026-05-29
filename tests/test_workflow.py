@@ -35,6 +35,9 @@ from tools.plan_unresolved_second_pass import build_second_pass_plan
 from tools.verify_run_outputs import verify_run_outputs
 from tools.run_unresolved_second_pass import run_unresolved_second_pass, _accepted
 from tools.configure_env_from_key_files import extract_key_from_file, main as configure_env_main
+from tools.run_agent_b_verification import run_agent_b_verification
+from tools.run_agent_c_recommendations import run_agent_c_recommendations
+from tools.apply_agent_optimizations import apply_agent_optimizations
 
 
 def _write_test_csv(path: Path, rows: list[dict[str, str]]) -> None:
@@ -85,6 +88,13 @@ class WorkflowTests(unittest.TestCase):
             key_file.write_text(json.dumps({"brave": {"api_key": "json-secret"}}), encoding="utf-8")
 
             self.assertEqual(extract_key_from_file(key_file, "BRAVE_API_KEY"), "json-secret")
+
+    def test_extract_key_from_rtf_file_without_printing_secret(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            key_file = Path(tmp) / "brave.rtf"
+            key_file.write_text(r"{\rtf1\ansi BRAVE_API_KEY=rtf-secret-key\par}", encoding="utf-8")
+
+            self.assertEqual(extract_key_from_file(key_file, "BRAVE_API_KEY"), "rtf-secret-key")
 
     def test_normalizer_merges_duplicate_provider_rows_and_skips_description_row(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -1199,6 +1209,158 @@ class OperationalCommandTests(unittest.TestCase):
         self.assertEqual(task_rows[0]["review_reason"], "precision_second_pass_accepted_lt70")
         self.assertEqual(task_rows[1]["top_candidate_url"], "https://candidate.example")
         self.assertTrue(task_xlsx_exists)
+
+    def test_agent_b_verification_outputs_decisions_and_clickable_workbook(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            run_dir = Path(tmp)
+            manual_rows = [
+                {
+                    "provider_id": "p-1",
+                    "provider_name": "Accept Agency LLC",
+                    "provider_detail_url": "https://amazon.example/p-1",
+                    "official_url": "https://acceptagency.example",
+                    "provider_locations": json.dumps(["United Kingdom"]),
+                    "confidence": "82",
+                    "status": "manual_accepted",
+                },
+                {
+                    "provider_id": "p-2",
+                    "provider_name": "Replace Agency",
+                    "provider_detail_url": "https://amazon.example/p-2",
+                    "official_url": "https://wrong.example",
+                    "provider_locations": json.dumps(["Germany"]),
+                    "confidence": "58",
+                    "status": "needs_review",
+                },
+                {
+                    "provider_id": "p-3",
+                    "provider_name": "Rejected Directory",
+                    "provider_detail_url": "https://amazon.example/p-3",
+                    "official_url": "https://linkedin.com/company/rejected-directory",
+                    "provider_locations": json.dumps(["United States"]),
+                    "confidence": "55",
+                    "status": "needs_review",
+                },
+                {
+                    "provider_id": "p-4",
+                    "provider_name": "Missing Candidate",
+                    "provider_detail_url": "https://amazon.example/p-4",
+                    "official_url": "",
+                    "provider_locations": json.dumps(["France"]),
+                    "confidence": "0",
+                    "status": "unresolved",
+                },
+            ]
+            _write_test_csv(run_dir / "manual_official_site_review_task.csv", manual_rows)
+            _write_test_csv(run_dir / "provider_final_official_websites_second_pass.csv", manual_rows)
+
+            def fake_fetch(url):
+                if "acceptagency.example" in url:
+                    html = """
+                    <html><head><title>Accept Agency LLC</title>
+                    <script type="application/ld+json">{"@type":"Organization"}</script></head>
+                    <body>Accept Agency LLC provides Amazon Seller Central marketplace
+                    account management and ecommerce advertising in the United Kingdom.
+                    Contact us privacy policy terms and conditions info@acceptagency.example.</body></html>
+                    """
+                    return {"ok": True, "status": 200, "final_url": url, "text": html}
+                if "replaceagency.com" in url:
+                    html = """
+                    <html><head><title>Replace Agency</title></head>
+                    <body>Replace Agency offers Amazon marketplace account management,
+                    seller central PPC and ecommerce services in Germany. About us. Contact us.</body></html>
+                    """
+                    return {"ok": True, "status": 200, "final_url": url, "text": html}
+                if "wrong.example" in url:
+                    return {"ok": True, "status": 200, "final_url": url, "text": "<html><body>Unrelated site</body></html>"}
+                return {"ok": False, "status": 404, "final_url": url, "text": ""}
+
+            replacement_candidates = [
+                SearchCandidate(
+                    url="https://replaceagency.com",
+                    title="Replace Agency official website",
+                    snippet="Replace Agency Amazon marketplace services contact Germany",
+                    source="brave",
+                    query='"Replace Agency" official website',
+                    rank=1,
+                )
+            ]
+
+            with patch("tools.run_agent_b_verification.fetch_text", side_effect=fake_fetch), patch(
+                "tools.run_agent_b_verification.collect_candidates_for_queries",
+                side_effect=lambda queries, per_query=2: replacement_candidates
+                if any("Replace Agency" in query for query in queries)
+                else [],
+            ):
+                summary = run_agent_b_verification(run_dir=run_dir, write_xlsx=True)
+            with (run_dir / "agent_b_verification_results.csv").open(newline="", encoding="utf-8") as f:
+                rows = {row["provider_id"]: row for row in csv.DictReader(f)}
+            xlsx_exists = (run_dir / "agent_b_verification_results.xlsx").exists()
+
+        self.assertEqual(summary["decision_counts"]["accept"], 1)
+        self.assertEqual(rows["p-1"]["manual_decision"], "accept")
+        self.assertEqual(rows["p-2"]["agent_b_decision"], "replace")
+        self.assertEqual(rows["p-2"]["manual_url"], "https://replaceagency.com/")
+        self.assertEqual(rows["p-3"]["agent_b_decision"], "reject")
+        self.assertEqual(rows["p-4"]["agent_b_decision"], "unsure")
+        self.assertTrue(xlsx_exists)
+        self.assertIn("https://amazon.example/p-1", rows["p-1"]["provider_detail_url"])
+
+    def test_agent_c_recommends_and_agent_a_applies_only_safe_rules(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            run_dir = Path(tmp)
+            agent_b_rows = [
+                {
+                    "provider_id": "p-1",
+                    "provider_name": "One",
+                    "candidate_url": "https://bad-directory.example/profile/one",
+                    "candidate_domain": "bad-directory.example",
+                    "agent_b_decision": "reject",
+                    "manual_decision": "reject",
+                    "evidence_score": "0",
+                    "independent_search_queries": "",
+                    "counter_evidence": "candidate_not_independent_official_site",
+                    "reason_for_unsure": "",
+                },
+                {
+                    "provider_id": "p-2",
+                    "provider_name": "Two",
+                    "candidate_url": "https://bad-directory.example/profile/two",
+                    "candidate_domain": "bad-directory.example",
+                    "agent_b_decision": "reject",
+                    "manual_decision": "reject",
+                    "evidence_score": "0",
+                    "independent_search_queries": "",
+                    "counter_evidence": "candidate_not_independent_official_site",
+                    "reason_for_unsure": "",
+                },
+                {
+                    "provider_id": "p-3",
+                    "provider_name": "Three",
+                    "candidate_url": "https://single-case.example",
+                    "candidate_domain": "single-case.example",
+                    "agent_b_decision": "reject",
+                    "manual_decision": "reject",
+                    "evidence_score": "0",
+                    "independent_search_queries": "",
+                    "counter_evidence": "candidate_not_independent_official_site",
+                    "reason_for_unsure": "",
+                },
+            ]
+            _write_test_csv(run_dir / "agent_b_verification_results.csv", agent_b_rows)
+            config_path = run_dir / "scoring.json"
+            config_path.write_text(json.dumps(load_config("config/scoring.json")), encoding="utf-8")
+
+            recommendations = run_agent_c_recommendations(run_dir=run_dir)
+            dry_run = apply_agent_optimizations(run_dir=run_dir, config_path=config_path, apply=False)
+            applied = apply_agent_optimizations(run_dir=run_dir, config_path=config_path, apply=True)
+            config = json.loads(config_path.read_text(encoding="utf-8"))
+
+        self.assertEqual(recommendations["overall"]["safe_config_action_count"], 1)
+        self.assertEqual(dry_run["pending_excluded_domains"], ["bad-directory.example"])
+        self.assertTrue(applied["updated"])
+        self.assertIn("bad-directory.example", config["excluded_domains"])
+        self.assertNotIn("single-case.example", config["excluded_domains"])
 
     def test_run_review_learning_applies_manual_feedback_and_writes_report(self):
         with tempfile.TemporaryDirectory() as tmp:

@@ -25,6 +25,9 @@ amazon-official-site-finder/
     apply_review.py
     build_linked_workbook.py
     build_manual_review_task.py
+    run_agent_b_verification.py
+    run_agent_c_recommendations.py
+    apply_agent_optimizations.py
     build_review_sheet.py
     configure_env_from_key_files.py
     enrich_result_links.py
@@ -144,7 +147,8 @@ run_codex_assisted.sh
         -> tools/run_unresolved_second_pass.py
            -> tools/plan_unresolved_second_pass.py
            -> tools/build_linked_workbook.py
-        -> tools/build_manual_review_task.py
+     -> tools/build_manual_review_task.py
+     -> 可选 tools/run_agent_b_verification.py
      -> tools/verify_run_outputs.py
 ```
 
@@ -161,6 +165,10 @@ Codex receives filled manual review workbook
      -> 生成 manual_review_learning_report.md
      -> 对重复出现且安全的排除域名更新 config/scoring.json
      -> tools/build_linked_workbook.py
+  -> tools/run_agent_c_recommendations.py
+     -> 汇总 AgentB 和人工复核学习报告里的重复模式
+  -> tools/apply_agent_optimizations.py --apply
+     -> 只应用安全、可解释的 excluded_domains 更新
   -> tools/verify_run_outputs.py
   -> Codex 读取 learning report 并汇报最终输出
 ```
@@ -178,7 +186,10 @@ Codex receives filled manual review workbook
 | `finder/` | 核心逻辑包。包括输入清洗、搜索 query 构建、API 搜索、网页抓取、官网评分。 |
 | `tools/run_unresolved_second_pass.py` | 对第一轮没解决的商家做二轮补漏，用 Brave/Exa 找更可能的官网。 |
 | `tools/build_manual_review_task.py` | 生成简化人工复核 CSV/XLSX，只保留工作人员需要判断和填写的列。 |
+| `tools/run_agent_b_verification.py` | AgentB 候选优先复核。先验证当前候选官网，再做少量独立搜索，输出 accept/replace/reject/unsure 和结构化证据。 |
 | `tools/run_review_learning.py` | 读取填好的复核表，合并人工反馈，输出 reviewed 结果、人工标签和优化建议。 |
+| `tools/run_agent_c_recommendations.py` | AgentC 读取 AgentB 结果和人工复核学习报告，输出可执行或需人工评估的优化建议。 |
+| `tools/apply_agent_optimizations.py` | AgentA 安全应用器，只自动写入可解释、可回滚的 excluded_domains 配置。 |
 | `tools/build_linked_workbook.py` | 生成链接可点击的 XLSX。 |
 | `tools/verify_run_outputs.py` | 检查最终 CSV、unresolved CSV、质量 JSON、XLSX 链接公式是否正常。 |
 | `tools/apply_review.py` | 人工复核后，把人工 decision 应用回已有 run。 |
@@ -196,6 +207,8 @@ outputs/my_run/provider_unresolved_second_pass.csv
 outputs/my_run/quality_gate_provider_second_pass_final.json
 outputs/my_run/manual_official_site_review_task.xlsx
 outputs/my_run/manual_official_site_review_task.csv
+outputs/my_run/agent_b_verification_results.csv
+outputs/my_run/agent_b_verification_results.xlsx
 ```
 
 人工复核填完并交给 Codex 后，最终主要看：
@@ -206,6 +219,7 @@ outputs/my_run/provider_official_websites_reviewed_with_clickable_links.xlsx
 outputs/my_run/provider_unresolved_reviewed.csv
 outputs/my_run/manual_review_learning_report.md
 outputs/my_run/manual_review_labels.csv
+outputs/my_run/agent_c_optimization_recommendations.md
 ```
 
 ## 本地生成但不提交的目录

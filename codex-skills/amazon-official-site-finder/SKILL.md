@@ -64,11 +64,13 @@ Run this from the repo root. Substitute the paths provided by the user.
   --brave-key-file "/path/to/brave_key.txt" \
   --exa-key-file "/path/to/exa_key.txt" \
   --source "/path/to/provider_details.csv" \
-  --run-dir "outputs/my_run"
+  --run-dir "outputs/my_run" \
+  --run-agent-b
 ```
 
 This command creates/updates `.env` and then runs the full workflow. The configure step prints only a boolean summary and must not print secrets.
 If the user did not provide an output directory, omit `--run-dir`; the script will create `outputs/codex_run_YYYYMMDD_HHMMSS`.
+Use `--run-agent-b` when the user asks for the AgentB/AgentC optimization loop or candidate-first verification. It does not change the legacy final CSV names.
 
 If you need to run the two steps separately:
 
@@ -100,6 +102,8 @@ outputs/my_run/unresolved_second_pass_evidence.jsonl
 outputs/my_run/quality_gate_provider_second_pass_final.json
 outputs/my_run/manual_official_site_review_task.csv
 outputs/my_run/manual_official_site_review_task.xlsx
+outputs/my_run/agent_b_verification_results.csv
+outputs/my_run/agent_b_verification_results.xlsx
 outputs/my_run/manifest.json
 ```
 
@@ -163,6 +167,7 @@ When the user provides a filled review file, Codex should run this from the repo
 ```
 
 This calls `tools/run_review_learning.py`, which merges the filled manual decisions with existing second-pass decisions, writes reviewed final outputs, creates `manual_review_labels.csv`, reruns the quality gate, writes `manual_review_learning_report.md`, and applies only safe repeated excluded-domain config additions.
+It also writes AgentC recommendations and, with `--update-config`, applies only safe AgentC excluded-domain recommendations.
 
 Expected reviewed outputs:
 
@@ -172,6 +177,8 @@ outputs/my_run/provider_official_websites_reviewed_with_clickable_links.xlsx
 outputs/my_run/provider_unresolved_reviewed.csv
 outputs/my_run/manual_review_learning_report.md
 outputs/my_run/manual_review_labels.csv
+outputs/my_run/agent_c_optimization_recommendations.md
+outputs/my_run/agent_a_applied_optimizations_summary.json
 ```
 
 After running review learning, inspect `manual_review_learning_report.md` and `manual_review_learning_summary.json`. Only make workflow/config changes when the report shows repeated safe patterns, such as repeated rejected directory/platform domains. Then run tests and rerun the relevant workflow step.

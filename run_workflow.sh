@@ -1,14 +1,41 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-if [[ $# -lt 2 || $# -gt 3 ]]; then
-  echo "Usage: ./run_workflow.sh /path/to/input.csv outputs/run_dir [labels.csv]" >&2
+if [[ $# -lt 2 ]]; then
+  echo "Usage: ./run_workflow.sh /path/to/input.csv outputs/run_dir [labels.csv] [--run-agent-b] [--agent-b-limit N]" >&2
   exit 2
 fi
 
 SOURCE_CSV="$1"
 RUN_DIR="$2"
-LABELS_CSV="${3:-}"
+LABELS_CSV=""
+RUN_AGENT_B=0
+AGENT_B_LIMIT=0
+shift 2
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --run-agent-b)
+      RUN_AGENT_B=1
+      ;;
+    --agent-b-limit)
+      AGENT_B_LIMIT="${2:-0}"
+      shift
+      ;;
+    -*)
+      echo "Unknown option: $1" >&2
+      exit 2
+      ;;
+    *)
+      if [[ -n "$LABELS_CSV" ]]; then
+        echo "Only one labels CSV can be provided." >&2
+        exit 2
+      fi
+      LABELS_CSV="$1"
+      ;;
+  esac
+  shift
+done
 
 cd "$(dirname "$0")"
 
@@ -55,8 +82,20 @@ python3 tools/verify_run_outputs.py \
   --quality quality_gate_provider_second_pass_final.json \
   --xlsx "$RUN_DIR/provider_official_websites_second_pass_with_clickable_links.xlsx"
 
+if [[ "$RUN_AGENT_B" == "1" ]]; then
+  AGENT_B_ARGS=(--run-dir "$RUN_DIR" --write-xlsx)
+  if [[ "$AGENT_B_LIMIT" != "0" ]]; then
+    AGENT_B_ARGS+=(--limit "$AGENT_B_LIMIT")
+  fi
+  PYTHONPATH=.vendor_eval:. python3 tools/run_agent_b_verification.py "${AGENT_B_ARGS[@]}"
+fi
+
 echo "Done."
 echo "Final CSV: $RUN_DIR/provider_final_official_websites_second_pass.csv"
 echo "Clickable XLSX: $RUN_DIR/provider_official_websites_second_pass_with_clickable_links.xlsx"
 echo "Manual review CSV: $RUN_DIR/manual_official_site_review_task.csv"
 echo "Manual review XLSX: $RUN_DIR/manual_official_site_review_task.xlsx"
+if [[ "$RUN_AGENT_B" == "1" ]]; then
+  echo "AgentB verification CSV: $RUN_DIR/agent_b_verification_results.csv"
+  echo "AgentB verification XLSX: $RUN_DIR/agent_b_verification_results.xlsx"
+fi

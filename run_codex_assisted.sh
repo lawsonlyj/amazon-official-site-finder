@@ -12,6 +12,8 @@ Usage:
 Optional:
   --run-dir outputs/my_run
   --labels /path/to/golden_expected_websites.csv
+  --run-agent-b
+  --agent-b-limit N
 USAGE
 }
 
@@ -20,6 +22,8 @@ EXA_KEY_FILE=""
 SOURCE_CSV=""
 RUN_DIR=""
 LABELS_CSV=""
+RUN_AGENT_B=0
+AGENT_B_LIMIT=0
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -41,6 +45,14 @@ while [[ $# -gt 0 ]]; do
       ;;
     --labels)
       LABELS_CSV="${2:-}"
+      shift 2
+      ;;
+    --run-agent-b)
+      RUN_AGENT_B=1
+      shift
+      ;;
+    --agent-b-limit)
+      AGENT_B_LIMIT="${2:-0}"
       shift 2
       ;;
     -h|--help)
@@ -73,8 +85,14 @@ fi
 
 python3 tools/configure_env_from_key_files.py "${CONFIGURE_ARGS[@]}"
 
+WORKFLOW_ARGS=("$SOURCE_CSV" "$RUN_DIR")
 if [[ -n "$LABELS_CSV" ]]; then
-  ./run_workflow.sh "$SOURCE_CSV" "$RUN_DIR" "$LABELS_CSV"
-else
-  ./run_workflow.sh "$SOURCE_CSV" "$RUN_DIR"
+  WORKFLOW_ARGS+=("$LABELS_CSV")
 fi
+if [[ "$RUN_AGENT_B" == "1" ]]; then
+  WORKFLOW_ARGS+=(--run-agent-b)
+  if [[ "$AGENT_B_LIMIT" != "0" ]]; then
+    WORKFLOW_ARGS+=(--agent-b-limit "$AGENT_B_LIMIT")
+  fi
+fi
+./run_workflow.sh "${WORKFLOW_ARGS[@]}"

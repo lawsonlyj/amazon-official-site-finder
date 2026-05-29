@@ -19,8 +19,11 @@ Use the Codex-assisted script when API keys are stored in local key files:
   --brave-key-file "/path/to/brave_key.txt" \
   --exa-key-file "/path/to/exa_key.txt" \
   --source "/path/to/provider_details.csv" \
-  --run-dir "outputs/my_run"
+  --run-dir "outputs/my_run" \
+  --run-agent-b
 ```
+
+`--run-agent-b` is optional. It adds a candidate-first verification pass after the standard second-pass outputs are verified.
 
 If using Codex, ask:
 
@@ -84,9 +87,14 @@ That command runs the workflow in this order:
 8. `tools/verify_run_outputs.py`
    Verifies the final CSV, unresolved CSV, quality JSON, and XLSX hyperlink formulas.
 
+9. Optional `tools/run_agent_b_verification.py`
+   Re-checks the existing official/top-candidate URL first, inspects company pages and lightweight independent search corroboration, and writes structured `accept`/`replace`/`reject`/`unsure` evidence while preserving `manual_decision`, `manual_url`, and `notes`.
+
 For Codex-assisted usage, `run_codex_assisted.sh` runs first. It calls `tools/configure_env_from_key_files.py` to create `.env` from local key files without printing secrets, then hands off to `run_workflow.sh`.
 
 After manual review, the user gives the filled workbook to Codex. Codex calls `run_review_cycle.sh` internally, which runs `tools/run_review_learning.py`, merges the filled review with the second-pass decisions, writes reviewed final outputs, creates manual labels, runs the quality gate again, and writes a learning report. In Codex mode, Codex also enables safe config optimization for repeated rejected directory/platform patterns and reports whether anything changed.
+
+The review cycle also runs `tools/run_agent_c_recommendations.py`. AgentC reads AgentB verification and manual-review learning reports, then writes recommendation files. When `--update-config` is enabled, `tools/apply_agent_optimizations.py` applies only safe, explainable excluded-domain additions; query, threshold, and identity-constraint ideas remain recommendations and labels until a maintainer implements them with tests.
 
 ## Main Outputs
 
@@ -99,6 +107,8 @@ outputs/my_run/provider_unresolved_second_pass.csv
 outputs/my_run/quality_gate_provider_second_pass_final.json
 outputs/my_run/manual_official_site_review_task.xlsx
 outputs/my_run/manual_official_site_review_task.csv
+outputs/my_run/agent_b_verification_results.csv
+outputs/my_run/agent_b_verification_results.xlsx
 ```
 
 Use the XLSX for manual browsing and the CSV for downstream processing.
@@ -111,6 +121,7 @@ outputs/my_run/provider_official_websites_reviewed_with_clickable_links.xlsx
 outputs/my_run/provider_unresolved_reviewed.csv
 outputs/my_run/manual_review_learning_report.md
 outputs/my_run/manual_review_labels.csv
+outputs/my_run/agent_c_optimization_recommendations.md
 ```
 
 ## Project Directory
@@ -157,7 +168,10 @@ make install-optional
 make pipeline SOURCE_CSV=/path/to/provider_details.csv RUN_DIR=outputs/my_run
 make second-pass RUN_DIR=outputs/my_run
 make review-task RUN_DIR=outputs/my_run
+make agent-b RUN_DIR=outputs/my_run
 make review-learning RUN_DIR=outputs/my_run REVIEW=/path/to/filled_review.xlsx
+make agent-c RUN_DIR=outputs/my_run
+make apply-agent-optimizations RUN_DIR=outputs/my_run
 make verify RUN_DIR=outputs/my_run
 ```
 
