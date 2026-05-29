@@ -1382,6 +1382,20 @@ class OperationalCommandTests(unittest.TestCase):
                     "service_apis": "[]",
                     "provider_locations": "[]",
                 },
+                {
+                    "provider_id": "broad",
+                    "provider_name": "Global Commerce",
+                    "provider_detail_url": "https://amazon.example/broad",
+                    "official_url": "https://globalcommerce.example",
+                    "official_domain": "globalcommerce.example",
+                    "status": "matched",
+                    "decision_source": "auto_matched",
+                    "confidence": "100",
+                    "source_status": "matched",
+                    "evidence_summary": "page_contains_exact_provider_name; domain_exact_provider_slug",
+                    "service_apis": "[]",
+                    "provider_locations": "[]",
+                },
             ]
             _write_test_csv(run_dir / "official_sites.csv", final_rows)
 
@@ -1394,6 +1408,50 @@ class OperationalCommandTests(unittest.TestCase):
         self.assertEqual(task_rows["slug"]["review_reason"], "precision_slug_extension_identity_risk")
         self.assertNotIn("logo", task_rows)
         self.assertNotIn("safe", task_rows)
+        self.assertNotIn("broad", task_rows)
+
+    def test_build_manual_review_task_skips_high_confidence_second_pass_accepts(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            run_dir = Path(tmp)
+            final_rows = [
+                {
+                    "provider_id": "high",
+                    "provider_name": "High Second Pass",
+                    "provider_detail_url": "https://amazon.example/high",
+                    "official_url": "https://high.example",
+                    "official_domain": "high.example",
+                    "status": "manual_accepted",
+                    "decision_source": "manual_replace",
+                    "confidence": "90",
+                    "source_status": "matched",
+                    "evidence_summary": "second pass high confidence",
+                    "service_apis": "[]",
+                    "provider_locations": "[]",
+                },
+                {
+                    "provider_id": "low",
+                    "provider_name": "Low Second Pass",
+                    "provider_detail_url": "https://amazon.example/low",
+                    "official_url": "https://low.example",
+                    "official_domain": "low.example",
+                    "status": "manual_accepted",
+                    "decision_source": "manual_replace",
+                    "confidence": "84",
+                    "source_status": "matched",
+                    "evidence_summary": "second pass low confidence",
+                    "service_apis": "[]",
+                    "provider_locations": "[]",
+                },
+            ]
+            _write_test_csv(run_dir / "official_sites.csv", final_rows)
+
+            summary = build_manual_review_task(run_dir=run_dir, write_xlsx=False)
+            with (run_dir / "review_task.csv").open(newline="", encoding="utf-8") as f:
+                task_rows = {row["provider_id"]: row for row in csv.DictReader(f)}
+
+        self.assertEqual(summary["review_rows"], 1)
+        self.assertNotIn("high", task_rows)
+        self.assertEqual(task_rows["low"]["review_reason"], "precision_second_pass_accepted_70_84")
 
     def test_agent_b_verification_outputs_decisions_and_clickable_workbook(self):
         with tempfile.TemporaryDirectory() as tmp:

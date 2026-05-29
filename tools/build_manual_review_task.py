@@ -121,7 +121,7 @@ def _needs_manual_review(row: dict[str, str], second_pass_row: dict[str, str], c
     if not row.get("official_url"):
         return True
     if status == "manual_accepted":
-        return True
+        return confidence < 85
     if status != "matched":
         return True
     if confidence < confidence_cutoff:
@@ -130,8 +130,6 @@ def _needs_manual_review(row: dict[str, str], second_pass_row: dict[str, str], c
     if "identity_cap_" in evidence or "page_industry_mismatch:" in evidence:
         return True
     if _high_confidence_ambiguous_identity_risk(row, evidence, confidence):
-        return True
-    if _ambiguous_provider_name(row.get("provider_name", "")) and not _has_strong_identity_summary(evidence):
         return True
     if second_pass_row.get("accepted_for_final") == "true" and confidence < confidence_cutoff:
         return True
@@ -189,8 +187,6 @@ def _review_reason(row: dict[str, str], second_pass_row: dict[str, str]) -> str:
         return "precision_generic_identity_term_risk"
     if _high_confidence_slug_extension_risk(row, evidence, confidence):
         return "precision_slug_extension_identity_risk"
-    if _ambiguous_provider_name(row.get("provider_name", "")) and not _has_strong_identity_summary(evidence):
-        return "precision_ambiguous_name_risk"
     if confidence < 85:
         return "precision_low_confidence_auto_match"
     return "spot_check_non_matched_status"
