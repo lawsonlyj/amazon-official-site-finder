@@ -2730,6 +2730,7 @@ class OperationalCommandTests(unittest.TestCase):
                 agent_b_csv=agent_b,
                 output_csv=output_csv,
                 max_rows=2,
+                max_per_pattern=1,
                 pattern_jsons=[patterns],
             )
             with output_csv.open(newline="", encoding="utf-8") as f:
@@ -2739,7 +2740,80 @@ class OperationalCommandTests(unittest.TestCase):
         self.assertEqual(rows[0]["sample_reason"], "pattern_candidate_validation")
         self.assertEqual(rows[0]["pattern_scope"], "recall")
         self.assertIn("schema_org_organization_seen", rows[0]["pattern_match"])
+        self.assertEqual(summary["max_per_pattern"], 1)
         self.assertEqual(summary["pattern_match_counts"][rows[0]["pattern_match"]], 1)
+
+    def test_build_calibration_review_sample_balances_repeated_pattern_matches(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            review = root / "review.csv"
+            agent_b = root / "agent_b.csv"
+            patterns = root / "patterns.json"
+            output_csv = root / "sample.csv"
+            review_rows = []
+            agent_rows = []
+            for idx in range(1, 5):
+                provider_id = f"p-{idx}"
+                review_rows.append(
+                    {
+                        "provider_id": provider_id,
+                        "provider_name": f"Repeat {idx}",
+                        "provider_detail_url": f"https://amazon.example/{provider_id}",
+                        "official_url": "",
+                        "official_domain": "",
+                        "top_candidate_url": f"https://repeat{idx}.example",
+                        "top_candidate_domain": f"repeat{idx}.example",
+                        "review_reason": "recall_unresolved_top_candidate",
+                    }
+                )
+                agent_rows.append(
+                    {
+                        "provider_id": provider_id,
+                        "provider_name": f"Repeat {idx}",
+                        "candidate_url": f"https://repeat{idx}.example",
+                        "candidate_domain": f"repeat{idx}.example",
+                        "agent_b_decision": "unsure",
+                        "confidence": "69",
+                        "evidence_score": "31",
+                        "supporting_facts": "candidate_pages_fetch_ok; schema_org_organization_seen"
+                        if idx < 4
+                        else "candidate_pages_fetch_ok",
+                        "counter_evidence": "",
+                        "reason_for_unsure": "recall_candidate_needs_human_confirmation",
+                    }
+                )
+            _write_test_csv(review, review_rows)
+            _write_test_csv(agent_b, agent_rows)
+            patterns.write_text(
+                json.dumps(
+                    {
+                        "summary": {"scope": "recall"},
+                        "durable_safe_patterns": [
+                            {
+                                "pattern": "agent_b_score<45 AND has:schema_org_organization_seen",
+                                "features": ["agent_b_score<45", "has:schema_org_organization_seen"],
+                                "correct_recovery_rows": 3,
+                                "wrong_release_rows": 0,
+                            }
+                        ],
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            summary = build_calibration_review_sample(
+                review_csv=review,
+                agent_b_csv=agent_b,
+                output_csv=output_csv,
+                max_rows=2,
+                max_per_pattern=1,
+                pattern_jsons=[patterns],
+            )
+
+        self.assertEqual(summary["sample_rows"], 2)
+        self.assertEqual(
+            summary["pattern_match_counts"]["agent_b_score<45 AND has:schema_org_organization_seen"], 1
+        )
 
     def test_evaluate_calibration_review_sample_turns_labels_into_rule_guidance(self):
         with tempfile.TemporaryDirectory() as tmp:

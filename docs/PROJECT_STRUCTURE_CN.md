@@ -201,7 +201,7 @@ Codex receives filled manual review workbook
 | `tools/evaluate_workflow_balance.py` | 调参评估工具。用基线结果、候选结果和人工标黄复核表计算 false official、over-reject、precision、recall、manual review rows，并模拟 AgentB unresolved recall 候选在不同证据阈值下自动放行会恢复多少正确官网、放出多少错误官网。 |
 | `tools/build_balance_report.py` | 汇总 100 条有标签评估和 300/全量无标签 AgentB 分布，生成可重复的阈值、review lane、AgentB recall 是否只能人工处理的建议报告。 |
 | `tools/mine_evidence_patterns.py` | 证据组合挖掘工具。读取有标签 balance JSON 和 AgentB 证据，找出零错误但仍需更多标签验证的候选规则，以及会释放错误官网的危险组合。 |
-| `tools/build_calibration_review_sample.py` | 从大批量 review task 和 AgentB 输出里抽取高价值人工标注样本，优先覆盖 timeout、AgentB reject、风险 lane accept、recall unresolved 和 unsure 行；也可通过 `--pattern-json` 优先抽取证据组合候选规则的验证样本。 |
+| `tools/build_calibration_review_sample.py` | 从大批量 review task 和 AgentB 输出里抽取高价值人工标注样本，优先覆盖 timeout、AgentB reject、风险 lane accept、recall unresolved 和 unsure 行；也可通过 `--pattern-json` 优先抽取证据组合候选规则的验证样本，并用 `--max-per-pattern` 避免单个 pattern 过度占用审核量。 |
 | `tools/evaluate_calibration_review_sample.py` | 读取填好的校准样本 CSV/XLSX，按 sample reason、review lane、AgentB decision 和 `pattern_match` 汇总人工标签，并输出保留、收窄、放宽、拒绝候选 pattern 或继续人工复核的建议。 |
 | `tools/apply_review.py` | 人工复核后，把人工 decision 应用回已有 run。 |
 | `tests/` | 自动化测试，确保精简或改代码后 workflow 没坏。 |

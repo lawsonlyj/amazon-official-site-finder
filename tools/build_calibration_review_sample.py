@@ -56,6 +56,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--max-rows", type=int, default=50)
     parser.add_argument("--max-per-reason", type=int, default=10)
     parser.add_argument(
+        "--max-per-pattern",
+        type=int,
+        default=0,
+        help="Maximum rows per pattern_match when --pattern-json is used. Default 0 means auto-select.",
+    )
+    parser.add_argument(
         "--pattern-json",
         action="append",
         default=[],
@@ -70,6 +76,7 @@ def main(argv: list[str] | None = None) -> int:
         output_xlsx=args.output_xlsx,
         max_rows=args.max_rows,
         max_per_reason=args.max_per_reason,
+        max_per_pattern=args.max_per_pattern,
         pattern_jsons=args.pattern_json,
     )
     print(json.dumps(summary, ensure_ascii=False, indent=2))
@@ -84,6 +91,7 @@ def build_calibration_review_sample(
     output_xlsx: str | Path | None = None,
     max_rows: int = 50,
     max_per_reason: int = 10,
+    max_per_pattern: int = 0,
     pattern_jsons: list[str | Path] | None = None,
 ) -> dict:
     review_rows = _read_rows(Path(review_csv))
@@ -91,7 +99,13 @@ def build_calibration_review_sample(
     patterns = _load_patterns(pattern_jsons or [])
     candidates = [_sample_row(row, agent_rows.get(_row_key(row), {}), patterns) for row in review_rows]
     candidates = sorted(candidates, key=_sort_key)
-    selected = _select_balanced(candidates, max_rows=max_rows, max_per_reason=max_per_reason)
+    effective_max_per_pattern = max_per_pattern if max_per_pattern > 0 else (5 if patterns else 0)
+    selected = _select_balanced(
+        candidates,
+        max_rows=max_rows,
+        max_per_reason=max_per_reason,
+        max_per_pattern=effective_max_per_pattern,
+    )
     _write_rows(Path(output_csv), selected, SAMPLE_FIELDS)
     xlsx_summary = {}
     if output_xlsx:
@@ -105,6 +119,7 @@ def build_calibration_review_sample(
         "reason_counts": dict(Counter(row["review_reason"] for row in selected)),
         "sample_reason_counts": dict(Counter(row["sample_reason"] for row in selected)),
         "pattern_match_counts": dict(Counter(row["pattern_match"] for row in selected if row.get("pattern_match"))),
+        "max_per_pattern": effective_max_per_pattern,
         "agent_b_decision_counts": dict(Counter(row["agent_b_decision"] for row in selected)),
         "xlsx": xlsx_summary,
     }
@@ -229,19 +244,45 @@ def _pattern_features(pattern: str) -> list[str]:
     return [part.strip() for part in str(pattern or "").split(" AND ") if part.strip()]
 
 
-def _select_balanced(rows: list[dict[str, str]], *, max_rows: int, max_per_reason: int) -> list[dict[str, str]]:
+def _select_balanced(
+    rows: list[dict[str, str]],
+    *,
+    max_rows: int,
+    max_per_reason: int,
+    max_per_pattern: int = 0,
+) -> list[dict[str, str]]:
     selected: list[dict[str, str]] = []
     selected_keys: set[str] = set()
     reason_counts: Counter[str] = Counter()
+    pattern_counts: Counter[str] = Counter()
     for row in rows:
         if len(selected) >= max_rows:
             break
         reason = row.get("review_reason", "")
         if reason_counts[reason] >= max_per_reason:
             continue
+        pattern = row.get("pattern_match", "")
+        if max_per_pattern > 0 and pattern and pattern_counts[pattern] >= max_per_pattern:
+            continue
         selected.append(row)
         selected_keys.add(_row_key(row))
         reason_counts[reason] += 1
+        if pattern:
+            pattern_counts[pattern] += 1
+    if len(selected) < max_rows:
+        for row in rows:
+            if len(selected) >= max_rows:
+                break
+            key = _row_key(row)
+            pattern = row.get("pattern_match", "")
+            if key in selected_keys:
+                continue
+            if max_per_pattern > 0 and pattern and pattern_counts[pattern] >= max_per_pattern:
+                continue
+            selected.append(row)
+            selected_keys.add(key)
+            if pattern:
+                pattern_counts[pattern] += 1
     if len(selected) < max_rows:
         for row in rows:
             if len(selected) >= max_rows:
