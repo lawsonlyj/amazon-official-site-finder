@@ -1869,8 +1869,6 @@ class OperationalCommandTests(unittest.TestCase):
         self.assertEqual(len(jsonl_lines), 2)
 
     def test_agent_b_row_timeout_records_unsure_and_keeps_output(self):
-        if not hasattr(__import__("signal"), "SIGALRM"):
-            self.skipTest("SIGALRM unavailable")
         with tempfile.TemporaryDirectory() as tmp:
             run_dir = Path(tmp)
             final_rows = [
@@ -1907,6 +1905,7 @@ class OperationalCommandTests(unittest.TestCase):
                 rows = list(csv.DictReader(f))
 
         self.assertEqual(summary["output_rows"], 1)
+        self.assertEqual(summary["timeout_rows"], 1)
         self.assertEqual(rows[0]["agent_b_decision"], "unsure")
         self.assertEqual(rows[0]["reason_for_unsure"], "agent_b_row_timeout")
         self.assertIn("agent_b_row_timeout", rows[0]["counter_evidence"])

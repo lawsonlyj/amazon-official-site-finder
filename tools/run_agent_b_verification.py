@@ -3,9 +3,10 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+import multiprocessing as mp
 import os
 import re
-import signal
+import queue
 import sys
 from pathlib import Path
 from urllib.parse import urlparse
@@ -153,6 +154,7 @@ def run_agent_b_verification(
         "output_rows": len(result_rows),
         "processed_rows": processed_rows,
         "resumed_rows": resumed_rows,
+        "timeout_rows": sum(1 for row in result_rows if row.get("reason_for_unsure") == "agent_b_row_timeout"),
         "decision_counts": _counts(result_rows, "agent_b_decision"),
         "outputs": {
             "csv": str(output_csv_path),
@@ -230,26 +232,54 @@ def verify_row(row: dict[str, str], *, config: dict, per_query: int = 2) -> dict
 
 
 def _verify_row_with_timeout(row: dict[str, str], *, config: dict, per_query: int, row_timeout: int) -> dict:
-    if row_timeout <= 0 or not hasattr(signal, "SIGALRM"):
+    if row_timeout <= 0:
         return verify_row(row, config=config, per_query=per_query)
-
-    def _raise_timeout(signum, frame):
-        raise TimeoutError("agent_b_row_timeout")
-
-    previous_handler = signal.getsignal(signal.SIGALRM)
-    try:
-        signal.signal(signal.SIGALRM, _raise_timeout)
-        signal.setitimer(signal.ITIMER_REAL, row_timeout)
+    context = _process_timeout_context()
+    if context is None:
         return verify_row(row, config=config, per_query=per_query)
-    except TimeoutError:
+    output_queue = context.Queue(maxsize=1)
+    process = context.Process(target=_verify_row_worker, args=(output_queue, row, config, per_query))
+    process.daemon = True
+    process.start()
+    process.join(row_timeout)
+    if process.is_alive():
+        process.terminate()
+        process.join(2)
+        if process.is_alive():
+            process.kill()
+            process.join(1)
         print(f"warning: AgentB row timed out after {row_timeout}s: {row.get('provider_name', '')}", file=sys.stderr)
         return _timeout_result(row, row_timeout)
-    finally:
-        signal.setitimer(signal.ITIMER_REAL, 0)
-        signal.signal(signal.SIGALRM, previous_handler)
+    try:
+        message = output_queue.get(timeout=1)
+    except queue.Empty:
+        return _timeout_result(row, row_timeout, reason="agent_b_row_no_result")
+    if message.get("ok"):
+        return message["result"]
+    print(
+        f"warning: AgentB row failed: {message.get('error_type', 'error')}: {message.get('error', '')}",
+        file=sys.stderr,
+    )
+    return _timeout_result(row, row_timeout, reason=f"agent_b_row_error:{message.get('error_type', 'error')}")
 
 
-def _timeout_result(row: dict[str, str], row_timeout: int) -> dict:
+def _verify_row_worker(output_queue, row: dict[str, str], config: dict, per_query: int) -> None:
+    try:
+        output_queue.put({"ok": True, "result": verify_row(row, config=config, per_query=per_query)})
+    except Exception as exc:
+        output_queue.put({"ok": False, "error_type": type(exc).__name__, "error": str(exc)})
+
+
+def _process_timeout_context():
+    try:
+        if "fork" in mp.get_all_start_methods():
+            return mp.get_context("fork")
+        return mp.get_context()
+    except (RuntimeError, ValueError):
+        return None
+
+
+def _timeout_result(row: dict[str, str], row_timeout: int, *, reason: str = "agent_b_row_timeout") -> dict:
     candidate_url = _candidate_url(row)
     search_queries = _independent_queries(row.get("provider_name", ""), _parse_locations(row.get("provider_locations", "")))
     out_row = {
@@ -265,9 +295,9 @@ def _timeout_result(row: dict[str, str], row_timeout: int) -> dict:
         "evidence_score": "0",
         "evidence_urls": "",
         "supporting_facts": "",
-        "counter_evidence": "agent_b_row_timeout",
-        "reason_for_unsure": "agent_b_row_timeout",
-        "notes": f"AgentB unsure: row timed out after {row_timeout}s",
+        "counter_evidence": reason,
+        "reason_for_unsure": reason,
+        "notes": f"AgentB unsure: row timed out after {row_timeout}s" if reason == "agent_b_row_timeout" else f"AgentB unsure: {reason}",
         "independent_search_queries": "; ".join(search_queries),
         "replacement_url": "",
         "replacement_domain": "",
@@ -286,7 +316,7 @@ def _timeout_result(row: dict[str, str], row_timeout: int) -> dict:
                 "score": 0,
                 "evidence_urls": [],
                 "supporting_facts": [],
-                "counter_evidence": ["agent_b_row_timeout"],
+                "counter_evidence": [reason],
             },
             "replacement": {},
             "search_queries": search_queries,
