@@ -42,6 +42,7 @@ from tools.run_agent_c_recommendations import run_agent_c_recommendations
 from tools.apply_agent_optimizations import apply_agent_optimizations
 from tools.evaluate_workflow_balance import evaluate_balance
 from tools.build_balance_report import build_balance_report
+from tools.build_calibration_review_sample import build_calibration_review_sample
 from tools.output_layout import DEFAULT_SECOND_PASS_ACCEPT_THRESHOLD, WORKFLOW_VERSION
 
 
@@ -2327,6 +2328,122 @@ class OperationalCommandTests(unittest.TestCase):
         self.assertEqual(report["summary"]["batch_agent_b_timeout_rows"], 1)
         self.assertIn("Keep auto-accept threshold at 75", md_text)
         self.assertTrue(json_exists)
+
+    def test_build_calibration_review_sample_prioritizes_high_value_rows(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            review = root / "review.csv"
+            agent_b = root / "agent_b.csv"
+            output_csv = root / "sample.csv"
+            output_xlsx = root / "sample.xlsx"
+            _write_test_csv(
+                review,
+                [
+                    {
+                        "provider_id": "timeout",
+                        "provider_name": "Timeout Row",
+                        "provider_detail_url": "https://amazon.example/timeout",
+                        "official_url": "https://timeout.example",
+                        "official_domain": "timeout.example",
+                        "top_candidate_url": "",
+                        "top_candidate_domain": "",
+                        "review_reason": "precision_low_confidence_auto_match",
+                    },
+                    {
+                        "provider_id": "accept",
+                        "provider_name": "Risky Accept",
+                        "provider_detail_url": "https://amazon.example/accept",
+                        "official_url": "https://accept.example",
+                        "official_domain": "accept.example",
+                        "top_candidate_url": "",
+                        "top_candidate_domain": "",
+                        "review_reason": "precision_generic_identity_term_risk",
+                    },
+                    {
+                        "provider_id": "recall",
+                        "provider_name": "Recall Row",
+                        "provider_detail_url": "https://amazon.example/recall",
+                        "official_url": "",
+                        "official_domain": "",
+                        "top_candidate_url": "https://recall.example",
+                        "top_candidate_domain": "recall.example",
+                        "review_reason": "recall_unresolved_top_candidate",
+                    },
+                    {
+                        "provider_id": "low",
+                        "provider_name": "Low Priority",
+                        "provider_detail_url": "https://amazon.example/low",
+                        "official_url": "https://low.example",
+                        "official_domain": "low.example",
+                        "top_candidate_url": "",
+                        "top_candidate_domain": "",
+                        "review_reason": "precision_low_confidence_auto_match",
+                    },
+                ],
+            )
+            _write_test_csv(
+                agent_b,
+                [
+                    {
+                        "provider_id": "timeout",
+                        "provider_name": "Timeout Row",
+                        "candidate_url": "https://timeout.example",
+                        "candidate_domain": "timeout.example",
+                        "agent_b_decision": "unsure",
+                        "confidence": "0",
+                        "evidence_score": "0",
+                        "reason_for_unsure": "agent_b_row_timeout",
+                    },
+                    {
+                        "provider_id": "accept",
+                        "provider_name": "Risky Accept",
+                        "candidate_url": "https://accept.example",
+                        "candidate_domain": "accept.example",
+                        "agent_b_decision": "accept",
+                        "confidence": "88",
+                        "evidence_score": "88",
+                        "reason_for_unsure": "",
+                    },
+                    {
+                        "provider_id": "recall",
+                        "provider_name": "Recall Row",
+                        "candidate_url": "https://recall.example",
+                        "candidate_domain": "recall.example",
+                        "agent_b_decision": "unsure",
+                        "confidence": "69",
+                        "evidence_score": "45",
+                        "reason_for_unsure": "recall_candidate_needs_human_confirmation",
+                    },
+                    {
+                        "provider_id": "low",
+                        "provider_name": "Low Priority",
+                        "candidate_url": "https://low.example",
+                        "candidate_domain": "low.example",
+                        "agent_b_decision": "unsure",
+                        "confidence": "69",
+                        "evidence_score": "65",
+                        "reason_for_unsure": "",
+                    },
+                ],
+            )
+
+            summary = build_calibration_review_sample(
+                review_csv=review,
+                agent_b_csv=agent_b,
+                output_csv=output_csv,
+                output_xlsx=output_xlsx,
+                max_rows=3,
+                max_per_reason=2,
+            )
+            with output_csv.open(newline="", encoding="utf-8") as f:
+                rows = list(csv.DictReader(f))
+            xlsx_exists = output_xlsx.exists()
+
+        self.assertEqual(summary["sample_rows"], 3)
+        self.assertEqual(rows[0]["provider_id"], "timeout")
+        self.assertIn("agent_b_accept_risky_lane", {row["sample_reason"] for row in rows})
+        self.assertIn("recall_candidate_label", {row["sample_reason"] for row in rows})
+        self.assertTrue(xlsx_exists)
 
     def test_scoring_tries_www_variant_before_giving_up_on_candidate(self):
         config = load_config("config/scoring.json")

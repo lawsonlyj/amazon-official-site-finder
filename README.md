@@ -102,6 +102,8 @@ The review cycle also runs `tools/run_agent_b_recommendations.py`. B reads Agent
 
 For threshold/rule tuning, use `tools/evaluate_workflow_balance.py` with a baseline final CSV, a candidate final CSV, and the filled yellow-row review workbook. It reports false official URLs, over-rejected correct sites, automatic precision, official-site recall, unresolved rows, and manual-review workload under the same assumptions used for the 100-row calibration set. Then use `tools/build_balance_report.py` to combine the labeled balance JSON with larger unlabeled review/AgentB batches and write a repeatable threshold/review-lane recommendation report.
 
+To collect the next small set of high-value human labels from a larger batch, use `tools/build_calibration_review_sample.py` with the batch `review_task.csv` and `agent_b/check.csv`. It prioritizes timeout rows, AgentB rejects, risky-lane accepts, unresolved recall candidates, and AgentB unsure rows so new labels are useful for deciding whether to tighten, relax, or keep the current rules.
+
 ## Main Outputs
 
 After a successful run, the most important files are:

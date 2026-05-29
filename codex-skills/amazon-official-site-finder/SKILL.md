@@ -172,6 +172,8 @@ It also writes AgentB suggestions and, with `--update-config`, applies only safe
 
 For calibration work, run `tools/evaluate_workflow_balance.py` against the baseline final CSV, candidate final CSV, and filled yellow-row review workbook to compare false official URLs, over-rejected correct sites, precision, recall, unresolved rows, and manual-review workload before deciding whether a threshold/rule change is better. Then run `tools/build_balance_report.py` with the labeled balance JSON plus larger unlabeled review/AgentB batches to create a repeatable recommendation report.
 
+When more labels are needed, run `tools/build_calibration_review_sample.py` with the batch `review_task.csv` and `agent_b/check.csv` to produce a small high-value XLSX. Ask the worker to fill `manual_decision`, `manual_url`, and `notes`; these labels should be used for the next balance evaluation before changing thresholds or widening/narrowing review lanes.
+
 Expected reviewed outputs:
 
 ```text
