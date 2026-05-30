@@ -5019,9 +5019,16 @@ class OperationalCommandTests(unittest.TestCase):
                 "candidate_1_query": '"Example Agency LLC" official website',
                 "candidate_1_reasons": "domain_exact_provider_slug",
             }
-            _write_test_csv(run_dir / "providers_normalized.csv", [provider])
+            extra_provider = dict(provider)
+            extra_provider["provider_id"] = "p-2"
+            extra_provider["provider_name"] = "Outside Limit LLC"
+            _write_test_csv(run_dir / "providers_normalized.csv", [provider, extra_provider])
             _write_test_csv(run_dir / "provider_official_websites_enriched.csv", [result])
             _write_test_csv(run_dir / "provider_review_sheet_enhanced.csv", [review])
+            (run_dir / "manifest.json").write_text(
+                json.dumps({"parameters": {"total_to_run": 1}, "summary": {}, "outputs": {}}),
+                encoding="utf-8",
+            )
 
             def fake_fetch(url):
                 html = """
@@ -5037,11 +5044,17 @@ class OperationalCommandTests(unittest.TestCase):
             with (run_dir / "official_sites.csv").open(newline="", encoding="utf-8") as f:
                 final_rows = list(csv.DictReader(f))
             legacy_final_exists = (run_dir / "provider_final_official_websites_second_pass.csv").exists()
+            manifest = json.loads((run_dir / "manifest.json").read_text(encoding="utf-8"))
 
         self.assertEqual(summary["accepted_rows"], 1)
         self.assertEqual(summary["finalize"]["official_url_rows"], 1)
+        self.assertTrue(summary["quality_overall"]["passed"])
+        self.assertNotIn("row_count_mismatch", ";".join(summary["quality_overall"]["failures"]))
         self.assertEqual(final_rows[0]["status"], "manual_accepted")
         self.assertTrue(legacy_final_exists)
+        self.assertTrue(manifest["summary"]["quality_passed"])
+        self.assertEqual(manifest["summary"]["official_url_rows"], 1)
+        self.assertEqual(manifest["summary"]["unresolved_rows"], 0)
 
     def test_second_pass_acceptance_threshold_is_75(self):
         config = load_config()

@@ -194,7 +194,7 @@ def run_unresolved_second_pass(
         results_csv=paths["final"],
         config=config,
         labels=read_csv_rows(labels_csv) if labels_csv else None,
-        expected_rows=len(providers),
+        expected_rows=_expected_quality_rows(run_dir, final_summary),
         min_domain_accuracy=min_domain_accuracy,
         min_auto_precision=min_auto_precision,
         min_official_url_rate=min_official_url_rate,
@@ -236,6 +236,25 @@ def run_unresolved_second_pass(
 
 def second_pass_paths(run_dir: str | Path) -> dict[str, Path]:
     return canonical_second_pass_paths(run_dir)
+
+
+def _expected_quality_rows(run_dir: Path, final_summary: dict) -> int | None:
+    manifest_path = run_dir / "manifest.json"
+    if manifest_path.exists():
+        try:
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError:
+            manifest = {}
+        total_to_run = (manifest.get("parameters") or {}).get("total_to_run")
+        try:
+            if total_to_run:
+                return int(total_to_run)
+        except (TypeError, ValueError):
+            pass
+    try:
+        return int(final_summary.get("final_rows") or 0) or None
+    except (TypeError, ValueError):
+        return None
 
 
 def _run_one(
@@ -755,6 +774,10 @@ def _update_manifest(path: Path, summary: dict) -> None:
             "second_pass_accepted_rows": summary["accepted_rows"],
             "second_pass_quality_passed": summary["quality_overall"]["passed"],
             "second_pass_unresolved_rows": summary["finalize"]["unresolved_rows"],
+            "quality_passed": summary["quality_overall"]["passed"],
+            "quality_failures": summary["quality_overall"].get("failures", []),
+            "official_url_rows": summary["finalize"]["official_url_rows"],
+            "unresolved_rows": summary["finalize"]["unresolved_rows"],
         }
     )
     manifest.setdefault("outputs", {}).update(
