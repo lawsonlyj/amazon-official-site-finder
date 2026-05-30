@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import csv
 import json
 import sys
 from pathlib import Path
@@ -31,7 +32,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--max-per-pattern", type=int, default=5)
     parser.add_argument("--min-support", type=int, default=2)
     parser.add_argument("--max-pattern-size", type=int, default=3)
-    parser.add_argument("--filled-sample", help="Optional filled calibration sample CSV/XLSX to evaluate in the same cycle.")
+    parser.add_argument(
+        "--filled-sample",
+        action="append",
+        default=[],
+        help="Optional filled calibration sample CSV/XLSX to evaluate in the same cycle. Repeatable.",
+    )
     parser.add_argument(
         "--pattern-release-json",
         action="append",
@@ -79,7 +85,7 @@ def run_calibration_cycle(
     max_per_pattern: int = 5,
     min_support: int = 2,
     max_pattern_size: int = 3,
-    filled_sample: str | Path | None = None,
+    filled_sample: str | Path | list[str | Path] | None = None,
     pattern_release_jsons: list[str | Path] | None = None,
     policy_report_json: str | Path | None = None,
 ) -> dict:
@@ -104,6 +110,7 @@ def run_calibration_cycle(
     filled_eval_json = out_dir / f"{sample_prefix}_eval_filled.json"
     filled_eval_md = out_dir / f"{sample_prefix}_eval_filled.md"
     filled_eval_csv = out_dir / f"{sample_prefix}_eval_filled_details.csv"
+    filled_samples_merged_csv = out_dir / f"{sample_prefix}_filled_samples_merged.csv"
     rule_candidates_json = out_dir / "pattern_rule_candidates.json"
     rule_candidates_md = out_dir / "pattern_rule_candidates.md"
     label_gap_csv = out_dir / "label_gap_task.csv"
@@ -174,10 +181,12 @@ def run_calibration_cycle(
         output_md=eval_md,
         output_csv=eval_csv,
     )
+    filled_sample_paths = _filled_sample_paths(filled_sample)
+    filled_eval_sample = _filled_eval_sample_path(filled_sample_paths, filled_samples_merged_csv)
     filled_eval = {}
-    if filled_sample:
+    if filled_eval_sample:
         filled_eval = evaluate_calibration_review_sample(
-            sample=filled_sample,
+            sample=filled_eval_sample,
             output_json=filled_eval_json,
             output_md=filled_eval_md,
             output_csv=filled_eval_csv,
@@ -260,7 +269,8 @@ def run_calibration_cycle(
             "batch_total_rows": str(batch_total_rows),
             "pattern_release_jsons": [str(path) for path in (pattern_release_jsons or [])],
             "preferred_pattern_release_json": str(preferred_pattern_release),
-            "filled_sample": str(filled_sample or ""),
+            "filled_sample": str(filled_sample_paths[0]) if len(filled_sample_paths) == 1 else "",
+            "filled_samples": [str(path) for path in filled_sample_paths],
             "policy_report_json": str(policy_report_json or ""),
         },
         "outputs": {
@@ -279,11 +289,12 @@ def run_calibration_cycle(
             "eval_json": str(eval_json),
             "eval_md": str(eval_md),
             "eval_csv": str(eval_csv),
-            "filled_eval_json": str(filled_eval_json) if filled_sample else "",
-            "filled_eval_md": str(filled_eval_md) if filled_sample else "",
-            "filled_eval_csv": str(filled_eval_csv) if filled_sample else "",
-            "rule_candidates_json": str(rule_candidates_json) if filled_sample else "",
-            "rule_candidates_md": str(rule_candidates_md) if filled_sample else "",
+            "filled_samples_merged_csv": str(filled_samples_merged_csv) if len(filled_sample_paths) > 1 else "",
+            "filled_eval_json": str(filled_eval_json) if filled_eval_sample else "",
+            "filled_eval_md": str(filled_eval_md) if filled_eval_sample else "",
+            "filled_eval_csv": str(filled_eval_csv) if filled_eval_sample else "",
+            "rule_candidates_json": str(rule_candidates_json) if filled_eval_sample else "",
+            "rule_candidates_md": str(rule_candidates_md) if filled_eval_sample else "",
             "label_gap_csv": str(label_gap_csv),
             "label_gap_xlsx": str(label_gap_xlsx),
             "summary_json": str(summary_json),
@@ -312,14 +323,14 @@ def run_calibration_cycle(
         calibration_cycle_json=summary_json,
         balance_report_json=balance_report_json,
         threshold_boundary_json=threshold_boundary_json,
-        sample_eval_json=filled_eval_json if filled_sample else eval_json,
+        sample_eval_json=filled_eval_json if filled_eval_sample else eval_json,
         output_json=status_json,
         output_md=status_md,
     )
     label_gap_task = build_calibration_label_gap_task(
         status_json=status_json,
         sample_csv=sample_csv,
-        filled_sample=filled_sample,
+        filled_sample=filled_eval_sample,
         output_csv=label_gap_csv,
         output_xlsx=label_gap_xlsx,
     )
@@ -566,6 +577,74 @@ def _lane_recommendation_counts(filled_eval: dict) -> dict[str, int]:
         if recommendation:
             counts[recommendation] = counts.get(recommendation, 0) + 1
     return counts
+
+
+def _filled_sample_paths(filled_sample: str | Path | list[str | Path] | None) -> list[Path]:
+    if not filled_sample:
+        return []
+    if isinstance(filled_sample, (str, Path)):
+        return [Path(filled_sample)]
+    return [Path(path) for path in filled_sample if str(path)]
+
+
+def _filled_eval_sample_path(paths: list[Path], merged_output: Path) -> Path | None:
+    existing = [path for path in paths if path.exists()]
+    if not existing:
+        return None
+    if len(existing) == 1:
+        return existing[0]
+    rows = []
+    fields: list[str] = []
+    for path in existing:
+        for row in _read_table(path):
+            rows.append(row)
+            for field in row:
+                if field not in fields:
+                    fields.append(field)
+    _write_rows(merged_output, rows, fields)
+    return merged_output
+
+
+def _read_table(path: Path) -> list[dict[str, str]]:
+    if path.suffix.casefold() == ".xlsx":
+        return _read_xlsx(path)
+    return _read_rows(path)
+
+
+def _read_xlsx(path: Path) -> list[dict[str, str]]:
+    try:
+        from openpyxl import load_workbook
+    except ImportError:
+        return []
+    workbook = load_workbook(path, data_only=False, read_only=True)
+    sheet = workbook.active
+    rows = list(sheet.iter_rows())
+    if not rows:
+        return []
+    headers = [_cell_text(cell.value) for cell in rows[0]]
+    out = []
+    for cells in rows[1:]:
+        row = {headers[idx]: _cell_text(cells[idx].value) for idx in range(len(headers)) if headers[idx]}
+        if any(row.values()):
+            out.append(row)
+    return out
+
+
+def _read_rows(path: Path) -> list[dict[str, str]]:
+    with path.open(newline="", encoding="utf-8-sig") as f:
+        return list(csv.DictReader(f))
+
+
+def _write_rows(path: Path, rows: list[dict[str, str]], fields: list[str]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=fields, extrasaction="ignore")
+        writer.writeheader()
+        writer.writerows(rows)
+
+
+def _cell_text(value: object) -> str:
+    return str(value or "").strip()
 
 
 def _preferred_pattern_release_json(generated: Path, extras: list[str | Path]) -> Path:

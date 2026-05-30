@@ -4720,6 +4720,139 @@ class OperationalCommandTests(unittest.TestCase):
         self.assertIn("Filled Candidate Rule Export", summary_text)
         self.assertEqual(report["calibration_status"]["summary"]["workflow_status"], "partially_converged_keep_review_lanes")
 
+    def test_run_calibration_cycle_merges_multiple_filled_samples(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            balance_json = root / "balance.json"
+            labeled_agent_b = root / "labeled_agent_b.csv"
+            review = root / "review.csv"
+            batch_agent_b = root / "batch_agent_b.csv"
+            filled_one = root / "filled_one.csv"
+            filled_two = root / "filled_two.csv"
+            output_dir = root / "calibration"
+            balance_json.write_text(
+                json.dumps(
+                    {
+                        "details": [
+                            {
+                                "provider_id": "p-good",
+                                "provider_name": "Good",
+                                "expected_kind": "official",
+                                "expected_domain": "good.example",
+                                "manual_review_reason": "recall_unresolved_top_candidate",
+                            }
+                        ]
+                    }
+                ),
+                encoding="utf-8",
+            )
+            _write_test_csv(
+                labeled_agent_b,
+                [
+                    {
+                        "provider_id": "p-good",
+                        "provider_name": "Good",
+                        "candidate_domain": "good.example",
+                        "candidate_url": "https://good.example",
+                        "agent_b_decision": "unsure",
+                        "evidence_score": "31",
+                        "supporting_facts": "candidate_pages_fetch_ok; schema_org_organization_seen",
+                        "counter_evidence": "",
+                        "reason_for_unsure": "recall_candidate_needs_human_confirmation",
+                    }
+                ],
+            )
+            _write_test_csv(
+                review,
+                [
+                    {
+                        "provider_id": "batch-recall",
+                        "provider_name": "Batch Recall",
+                        "provider_detail_url": "https://amazon.example/batch-recall",
+                        "official_url": "",
+                        "official_domain": "",
+                        "top_candidate_url": "https://batchrecall.example",
+                        "top_candidate_domain": "batchrecall.example",
+                        "review_reason": "recall_unresolved_top_candidate",
+                    }
+                ],
+            )
+            _write_test_csv(
+                batch_agent_b,
+                [
+                    {
+                        "provider_id": "batch-recall",
+                        "provider_name": "Batch Recall",
+                        "candidate_domain": "batchrecall.example",
+                        "candidate_url": "https://batchrecall.example",
+                        "agent_b_decision": "unsure",
+                        "confidence": "69",
+                        "evidence_score": "31",
+                        "supporting_facts": "candidate_pages_fetch_ok; schema_org_organization_seen",
+                        "counter_evidence": "",
+                        "reason_for_unsure": "recall_candidate_needs_human_confirmation",
+                    }
+                ],
+            )
+            _write_test_csv(
+                filled_one,
+                [
+                    {
+                        "provider_id": "filled-good",
+                        "provider_name": "Filled Good",
+                        "sample_reason": "pattern_candidate_validation",
+                        "pattern_scope": "recall",
+                        "pattern_match": "agent_b_score<45 AND has:schema_org_organization_seen",
+                        "review_reason": "recall_unresolved_top_candidate",
+                        "agent_b_decision": "unsure",
+                        "official_url": "",
+                        "candidate_url": "https://filledgood.example",
+                        "manual_decision": "accept",
+                        "manual_url": "",
+                        "notes": "",
+                    }
+                ],
+            )
+            _write_test_csv(
+                filled_two,
+                [
+                    {
+                        "provider_id": "filled-bad",
+                        "provider_name": "Filled Bad",
+                        "sample_reason": "pattern_candidate_validation",
+                        "pattern_scope": "recall",
+                        "pattern_match": "agent_b_score<45 AND has:schema_org_organization_seen",
+                        "review_reason": "recall_unresolved_top_candidate",
+                        "agent_b_decision": "unsure",
+                        "official_url": "",
+                        "candidate_url": "https://filledbad.example",
+                        "manual_decision": "reject",
+                        "manual_url": "",
+                        "notes": "wrong candidate",
+                    }
+                ],
+            )
+
+            report = run_calibration_cycle(
+                labeled_eval_json=balance_json,
+                labeled_agent_b_csv=labeled_agent_b,
+                review_csv=review,
+                batch_agent_b_csv=batch_agent_b,
+                output_dir=output_dir,
+                max_rows=1,
+                filled_sample=[filled_one, filled_two],
+            )
+            merged_exists = (output_dir / "pattern_validation_sample_50_filled_samples_merged.csv").exists()
+
+        self.assertTrue(merged_exists)
+        self.assertEqual(report["summary"]["filled_eval_labeled_rows"], 2)
+        self.assertEqual(report["summary"]["filled_eval_decisive_rows"], 2)
+        self.assertEqual(report["inputs"]["filled_samples"], [str(filled_one), str(filled_two)])
+        self.assertEqual(
+            report["outputs"]["filled_samples_merged_csv"],
+            str(output_dir / "pattern_validation_sample_50_filled_samples_merged.csv"),
+        )
+
     def test_evaluate_calibration_review_sample_turns_labels_into_rule_guidance(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
