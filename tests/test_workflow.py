@@ -65,6 +65,7 @@ from tools.verify_protected_lane_review_task import verify_protected_lane_review
 from tools.reuse_historical_labels_for_task import reuse_historical_labels_for_task
 from tools.apply_calibration_regression_cases import apply_calibration_regression_cases
 from tools.build_policy_validation_task import build_policy_validation_task
+from tools.evaluate_policy_validation_task import evaluate_policy_validation_task
 from tools.output_layout import (
     DEFAULT_MATCHED_REVIEW_CONFIDENCE_CUTOFF,
     DEFAULT_SECOND_PASS_ACCEPT_THRESHOLD,
@@ -8153,6 +8154,105 @@ class OperationalCommandTests(unittest.TestCase):
         self.assertEqual(saved["summary"]["known_label_counts"], {"unlabeled": 2})
         self.assertIn("Policy Validation Task", md_text)
         self.assertIn("HYPERLINK", sheet_text)
+
+    def test_evaluate_policy_validation_task_summarizes_support_and_blockers(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            task_csv = root / "policy_validation.csv"
+            task_xlsx = root / "policy_validation.xlsx"
+            output_json = root / "policy_eval.json"
+            output_md = root / "policy_eval.md"
+            output_csv = root / "policy_eval_details.csv"
+            _write_test_csv(
+                task_csv,
+                [
+                    {
+                        "provider_id": "p-release-good",
+                        "provider_name": "Release Good",
+                        "provider_detail_url": "https://amazon.example/good",
+                        "candidate_policy_action": "release",
+                        "candidate_policy_pattern": "review_reason:recall_unresolved_top_candidate AND has:page_contains_exact_provider_name",
+                        "candidate_policy_source": "release_pattern",
+                        "candidate_url": "https://releasegood.example/",
+                        "review_reason": "recall_unresolved_top_candidate",
+                        "agent_b_decision": "unsure",
+                        "known_label_status": "unlabeled",
+                        "manual_decision": "accept",
+                        "manual_url": "",
+                        "notes": "Correct official site.",
+                    },
+                    {
+                        "provider_id": "p-hold-good",
+                        "provider_name": "Hold Good",
+                        "provider_detail_url": "https://amazon.example/hold-good",
+                        "candidate_policy_action": "holdout",
+                        "candidate_policy_pattern": "review_reason:precision_low_confidence_auto_match AND has:candidate_pages_fetch_ok",
+                        "candidate_policy_source": "hold_pattern",
+                        "candidate_url": "https://holdgood.example/",
+                        "review_reason": "precision_low_confidence_auto_match",
+                        "agent_b_decision": "unsure",
+                        "known_label_status": "unlabeled",
+                        "manual_decision": "reject",
+                        "manual_url": "",
+                        "notes": "Wrong current official site.",
+                    },
+                    {
+                        "provider_id": "p-release-bad",
+                        "provider_name": "Release Bad",
+                        "provider_detail_url": "https://amazon.example/bad",
+                        "candidate_policy_action": "release",
+                        "candidate_policy_pattern": "review_reason:recall_unresolved_top_candidate AND has:schema_org_organization_seen",
+                        "candidate_policy_source": "release_pattern",
+                        "candidate_url": "https://wrong.example/",
+                        "review_reason": "recall_unresolved_top_candidate",
+                        "agent_b_decision": "unsure",
+                        "known_label_status": "unlabeled",
+                        "manual_decision": "replace",
+                        "manual_url": "https://right.example/",
+                        "notes": "Different true official site.",
+                    },
+                    {
+                        "provider_id": "p-invalid",
+                        "provider_name": "Invalid",
+                        "provider_detail_url": "https://amazon.example/invalid",
+                        "candidate_policy_action": "release",
+                        "candidate_policy_pattern": "review_reason:recall_unresolved_top_candidate AND has:contact_email_found",
+                        "candidate_policy_source": "release_pattern",
+                        "candidate_url": "https://invalid.example/",
+                        "review_reason": "recall_unresolved_top_candidate",
+                        "agent_b_decision": "unsure",
+                        "known_label_status": "unlabeled",
+                        "manual_decision": "maybe",
+                        "manual_url": "",
+                        "notes": "",
+                    },
+                ],
+            )
+            build_workbook([("Policy", task_csv)], task_xlsx)
+
+            report = evaluate_policy_validation_task(
+                task=task_xlsx,
+                output_json=output_json,
+                output_md=output_md,
+                output_csv=output_csv,
+            )
+            saved = json.loads(output_json.read_text(encoding="utf-8"))
+            md_text = output_md.read_text(encoding="utf-8")
+            with output_csv.open(newline="", encoding="utf-8-sig") as f:
+                rows = {row["provider_id"]: row for row in csv.DictReader(f)}
+
+        self.assertEqual(report["summary"]["task_rows"], 4)
+        self.assertEqual(report["summary"]["labeled_rows"], 3)
+        self.assertEqual(report["summary"]["decisive_rows"], 3)
+        self.assertEqual(report["summary"]["support_rows"], 2)
+        self.assertEqual(report["summary"]["blocking_rows"], 1)
+        self.assertEqual(report["summary"]["invalid_manual_decision_rows"], 1)
+        self.assertEqual(saved["summary"]["reject_pattern_rows"], 1)
+        self.assertEqual(rows["p-release-good"]["policy_outcome"], "release_supported")
+        self.assertEqual(rows["p-hold-good"]["policy_outcome"], "holdout_supported")
+        self.assertEqual(rows["p-release-bad"]["policy_outcome"], "release_blocked")
+        self.assertEqual(rows["p-invalid"]["decision_quality_issue"], "invalid_manual_decision")
+        self.assertIn("Policy Validation Evaluation", md_text)
 
     def test_verify_protected_lane_review_task_checks_links_summary_and_manual_blanks(self):
         with tempfile.TemporaryDirectory() as tmp:

@@ -30,6 +30,7 @@ amazon-official-site-finder/
     apply_agent_optimizations.py
     apply_pattern_release_to_run.py
     build_policy_validation_task.py
+    evaluate_policy_validation_task.py
     build_review_sheet.py
     configure_env_from_key_files.py
     enrich_result_links.py
@@ -223,6 +224,7 @@ Codex receives filled manual review workbook
 | `tools/apply_pattern_release_experiment.py` | 规则放行实验应用器。不会修改默认 workflow，只复制 `official_sites.csv` 并对匹配候选 pattern 的 unresolved 行填入 AgentB candidate，优先使用 selected actionable pattern set，输出实验版 CSV/XLSX，用于再跑有标签评估；同时阻断 docs/help/support/api/app/login 类非官网主页子域。 |
 | `tools/apply_pattern_release_to_run.py` | 校准规则正式应用器。读取已验证的 pattern-release JSON 和本次 run 的 `agent_b/check.csv`，只对匹配 selected actionable pattern set 的 unresolved 行写入官网，刷新 `official_sites.csv/xlsx`、`unresolved.csv`、`quality.json`、`review_task.*` 和 manifest，并把释放行保留为 `precision_calibrated_pattern_release` 抽查项；同样阻断 docs/help/support/api/app/login 类子域。 |
 | `tools/build_policy_validation_task.py` | 候选策略验证表生成器。读取 review-lane holdout pattern、pattern-release JSON 和 AgentB 证据，只抽出被候选规则影响且还没有决定性人工标签的行，生成带 `manual_decision`、`manual_url`、`notes` 的可点击 XLSX，用于在真正改默认规则前补最少量高价值标签。 |
+| `tools/evaluate_policy_validation_task.py` | 候选策略验证表评估器。读取填好的 policy validation CSV/XLSX，区分 holdout/release 被人工支持还是阻断，并按 exact pattern 输出 `candidate_for_rule`、`needs_more_labels`、`reject_pattern`，供 A 决定是否加回归测试并吸收规则。 |
 | `tools/build_calibration_review_sample.py` | 从大批量 review task 和 AgentB 输出里抽取高价值人工标注样本，优先覆盖 timeout、AgentB reject、风险 lane accept、recall unresolved 和 unsure 行；也可通过 `--pattern-json` 优先抽取证据组合候选规则的验证样本，并用 `--max-per-pattern` 避免单个 pattern 过度占用审核量。 |
 | `tools/evaluate_calibration_review_sample.py` | 读取填好的校准样本 CSV/XLSX，按 sample reason、`review_reason` lane、AgentB decision 和 `pattern_match` 汇总人工标签；输出 lane 级保留/降级/继续采样建议，并生成结构化 `pattern_rule_candidates`，供 A 在加回归测试后再决定是否吸收规则。 |
 | `tools/apply_review.py` | 人工复核后，把人工 decision 应用回已有 run。 |
