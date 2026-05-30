@@ -49,8 +49,8 @@ def build_calibration_status_report(
 
     artifacts = _sample_artifacts(cycle, sample_eval_json)
     threshold_status = _threshold_status(cycle_summary, threshold_summary)
-    pattern_status = _pattern_release_status(cycle_summary, balance_summary, threshold_summary)
     label_targets = _label_targets(cycle, balance, sample_eval, artifacts)
+    pattern_status = _pattern_release_status(cycle_summary, balance_summary, threshold_summary, label_targets)
     lane_status = _lane_status(cycle_summary, balance_summary, sample_summary, label_targets)
     lane_change_candidates = _lane_change_candidates(label_targets, lane_status)
     regression_gate_status = _regression_gate_status(cycle_summary)
@@ -208,7 +208,12 @@ def _threshold_status(cycle_summary: dict, threshold_summary: dict) -> dict:
     }
 
 
-def _pattern_release_status(cycle_summary: dict, balance_summary: dict, threshold_summary: dict) -> dict:
+def _pattern_release_status(
+    cycle_summary: dict,
+    balance_summary: dict,
+    threshold_summary: dict,
+    label_targets: list[dict] | None = None,
+) -> dict:
     recommendation = _first_present(
         cycle_summary.get("recommended_pattern_release"),
         balance_summary.get("recommended_pattern_release"),
@@ -239,6 +244,18 @@ def _pattern_release_status(cycle_summary: dict, balance_summary: dict, threshol
     )
     if recommendation == "narrow_pattern_release_candidate" and correct > 0 and wrong == 0:
         if source_kind == "supplied_prior":
+            spot_check = _pattern_release_spot_check_status(label_targets or [], correct)
+            if spot_check.get("validated"):
+                return {
+                    "status": "current_guarded_candidate",
+                    "reason": "The supplied prior pattern release passed current-batch spot-check labels with zero blockers.",
+                    "correct_rows": correct,
+                    "wrong_rows": wrong,
+                    "source_kind": source_kind,
+                    "source_path": source_path,
+                    "spot_check_labeled_rows": spot_check.get("labeled_rows"),
+                    "spot_check_blocking_rows": spot_check.get("blocking_rows"),
+                }
             return {
                 "status": "historical_guarded_candidate",
                 "reason": "A supplied prior pattern release has clean historical labels but still needs current-batch spot-check labels before widening automation.",
@@ -272,6 +289,20 @@ def _pattern_release_status(cycle_summary: dict, balance_summary: dict, threshol
         "source_kind": source_kind,
         "source_path": source_path,
     }
+
+
+def _pattern_release_spot_check_status(label_targets: list[dict], correct_rows: int) -> dict:
+    for target in label_targets:
+        if target.get("review_reason") != "precision_calibrated_pattern_release":
+            continue
+        labeled = _to_int(target.get("decisive_rows"))
+        blocking = _to_int(target.get("blocking_rows"))
+        return {
+            "validated": labeled >= min(correct_rows, _to_int(target.get("rows"))) and blocking == 0,
+            "labeled_rows": labeled,
+            "blocking_rows": blocking,
+        }
+    return {"validated": False, "labeled_rows": 0, "blocking_rows": 0}
 
 
 def _lane_status(cycle_summary: dict, balance_summary: dict, sample_summary: dict, label_targets: list[dict] | None = None) -> dict:

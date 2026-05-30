@@ -5869,6 +5869,89 @@ class OperationalCommandTests(unittest.TestCase):
         self.assertEqual(report["summary"]["review_lane_status"], "candidate_for_downgrade")
         self.assertIn("lane_downgrade_candidate", {item["id"] for item in report["open_requirements"]})
 
+    def test_historical_pattern_release_becomes_guarded_after_current_spot_checks(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            cycle = root / "cycle.json"
+            balance = root / "balance.json"
+            sample_eval = root / "sample_eval.json"
+            sample_csv = root / "sample.csv"
+            cycle.write_text(
+                json.dumps(
+                    {
+                        "summary": {
+                            "recommended_global_accept_threshold": 75,
+                            "recommended_second_pass_threshold": 75,
+                            "filled_eval_labeled_rows": 4,
+                            "filled_eval_decisive_rows": 4,
+                            "recommended_pattern_release": "narrow_pattern_release_candidate",
+                            "recommended_pattern_release_source_kind": "supplied_prior",
+                            "recommended_pattern_release_source_path": "prior/pattern_release.json",
+                            "pattern_release_correct_rows": 4,
+                            "pattern_release_wrong_rows": 0,
+                        },
+                        "outputs": {"sample_csv": str(sample_csv)},
+                    }
+                ),
+                encoding="utf-8",
+            )
+            balance.write_text(
+                json.dumps(
+                    {
+                        "summary": {
+                            "recommended_pattern_release": "narrow_pattern_release_candidate",
+                            "pattern_release_source_kind": "supplied_prior",
+                            "pattern_release_source_path": "prior/pattern_release.json",
+                            "pattern_release_correct_rows": 4,
+                            "pattern_release_wrong_rows": 0,
+                        }
+                    }
+                ),
+                encoding="utf-8",
+            )
+            sample_eval.write_text(
+                json.dumps(
+                    {
+                        "summary": {"labeled_rows": 4, "decisive_rows": 4},
+                        "by_review_reason": {
+                            "precision_calibrated_pattern_release": {
+                                "rows": 4,
+                                "labeled_rows": 4,
+                                "decisive_rows": 4,
+                            }
+                        },
+                        "lane_recommendations": [
+                            {
+                                "review_reason": "precision_calibrated_pattern_release",
+                                "recommendation": "needs_more_labels",
+                                "support_rows": 4,
+                                "blocking_rows": 0,
+                            }
+                        ],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            _write_test_csv(
+                sample_csv,
+                [
+                    {"provider_id": "p-1", "review_reason": "precision_calibrated_pattern_release"},
+                    {"provider_id": "p-2", "review_reason": "precision_calibrated_pattern_release"},
+                    {"provider_id": "p-3", "review_reason": "precision_calibrated_pattern_release"},
+                    {"provider_id": "p-4", "review_reason": "precision_calibrated_pattern_release"},
+                ],
+            )
+
+            report = build_calibration_status_report(
+                calibration_cycle_json=cycle,
+                balance_report_json=balance,
+                sample_eval_json=sample_eval,
+            )
+
+        self.assertEqual(report["summary"]["pattern_release_status"], "current_guarded_candidate")
+        self.assertNotIn("validate_historical_pattern_release", {item["id"] for item in report["open_requirements"]})
+        self.assertIn("guarded_pattern_release", {item["id"] for item in report["open_requirements"]})
+
     def test_build_calibration_status_report_blocks_on_regression_gate_failures(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
