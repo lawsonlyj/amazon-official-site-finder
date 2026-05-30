@@ -5572,6 +5572,7 @@ class OperationalCommandTests(unittest.TestCase):
         self.assertEqual(report["summary"]["high_priority_decisive_rows_needed"], 5)
         self.assertEqual(report["summary"]["label_gap_task_rows"], 7)
         self.assertEqual(report["summary"]["label_gap_high_priority_task_rows"], 5)
+        self.assertEqual(report["summary"]["regression_gate_status"], "not_needed")
         by_reason = {item["review_reason"]: item for item in report["label_targets"]}
         self.assertEqual(by_reason["precision_calibrated_pattern_release"]["target_decisive_rows"], 3)
         self.assertEqual(by_reason["precision_low_confidence_auto_match"]["target_decisive_rows"], 3)
@@ -5629,6 +5630,100 @@ class OperationalCommandTests(unittest.TestCase):
         self.assertEqual(report["summary"]["pattern_release_status"], "current_guarded_candidate")
         self.assertEqual(report["summary"]["review_lane_status"], "candidate_for_downgrade")
         self.assertIn("lane_downgrade_candidate", {item["id"] for item in report["open_requirements"]})
+
+    def test_build_calibration_status_report_blocks_on_regression_gate_failures(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            cycle = root / "cycle.json"
+            sample_eval = root / "sample_eval.json"
+            cycle.write_text(
+                json.dumps(
+                    {
+                        "summary": {
+                            "recommended_global_accept_threshold": 75,
+                            "recommended_second_pass_threshold": 75,
+                            "filled_eval_labeled_rows": 8,
+                            "filled_eval_decisive_rows": 8,
+                            "filled_regression_case_rows": 3,
+                            "regression_gate_status": "fail",
+                            "regression_gate_fail_rows": 1,
+                            "regression_gate_unverified_rows": 1,
+                        },
+                        "outputs": {
+                            "regression_cases_csv": "calibration_regression_cases.csv",
+                            "regression_gate_md": "calibration_regression_gate.md",
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+            sample_eval.write_text(
+                json.dumps(
+                    {
+                        "summary": {
+                            "labeled_rows": 8,
+                            "decisive_rows": 8,
+                            "lane_candidate_for_change_rows": 1,
+                            "lane_keep_review_rows": 0,
+                            "lane_needs_more_label_rows": 0,
+                        }
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            report = build_calibration_status_report(calibration_cycle_json=cycle, sample_eval_json=sample_eval)
+
+        self.assertEqual(report["summary"]["workflow_status"], "not_converged_regression_gate_failed")
+        self.assertEqual(report["summary"]["regression_gate_status"], "failed")
+        self.assertEqual(report["summary"]["regression_gate_fail_rows"], 1)
+        self.assertEqual(report["summary"]["regression_gate_unverified_rows"], 1)
+        self.assertEqual(report["artifacts"]["regression_gate_md"], "calibration_regression_gate.md")
+        self.assertIn("fix_regression_gate_failures", {item["id"] for item in report["open_requirements"]})
+        self.assertIn("Fix candidate workflow changes", report["next_actions"][0])
+
+    def test_build_calibration_status_report_marks_candidate_changes_after_gate_pass(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            cycle = root / "cycle.json"
+            sample_eval = root / "sample_eval.json"
+            cycle.write_text(
+                json.dumps(
+                    {
+                        "summary": {
+                            "recommended_global_accept_threshold": 75,
+                            "recommended_second_pass_threshold": 75,
+                            "filled_eval_labeled_rows": 8,
+                            "filled_eval_decisive_rows": 8,
+                            "filled_regression_case_rows": 5,
+                            "regression_gate_status": "pass",
+                            "regression_gate_fail_rows": 0,
+                            "regression_gate_unverified_rows": 0,
+                        }
+                    }
+                ),
+                encoding="utf-8",
+            )
+            sample_eval.write_text(
+                json.dumps(
+                    {
+                        "summary": {
+                            "labeled_rows": 8,
+                            "decisive_rows": 8,
+                            "lane_candidate_for_change_rows": 1,
+                            "lane_keep_review_rows": 0,
+                            "lane_needs_more_label_rows": 0,
+                        }
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            report = build_calibration_status_report(calibration_cycle_json=cycle, sample_eval_json=sample_eval)
+
+        self.assertEqual(report["summary"]["workflow_status"], "candidate_changes_regression_passed")
+        self.assertEqual(report["summary"]["regression_gate_status"], "pass")
+        self.assertIn("Regression gate passed", report["next_actions"][0])
 
     def test_build_calibration_status_report_blocks_on_fill_quality_issues(self):
         with tempfile.TemporaryDirectory() as tmp:

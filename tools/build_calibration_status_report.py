@@ -53,9 +53,24 @@ def build_calibration_status_report(
     label_targets = _label_targets(cycle, balance, sample_eval, artifacts)
     lane_status = _lane_status(cycle_summary, balance_summary, sample_summary, label_targets)
     lane_change_candidates = _lane_change_candidates(label_targets, lane_status)
+    regression_gate_status = _regression_gate_status(cycle_summary)
     labeling_instructions = _labeling_instructions()
-    workflow_status = _workflow_status(cycle_summary, sample_summary, threshold_status, pattern_status, lane_status)
-    open_requirements = _open_requirements(cycle_summary, sample_summary, threshold_status, pattern_status, lane_status)
+    workflow_status = _workflow_status(
+        cycle_summary,
+        sample_summary,
+        threshold_status,
+        pattern_status,
+        lane_status,
+        regression_gate_status,
+    )
+    open_requirements = _open_requirements(
+        cycle_summary,
+        sample_summary,
+        threshold_status,
+        pattern_status,
+        lane_status,
+        regression_gate_status,
+    )
     next_actions = _next_actions(workflow_status, open_requirements, lane_status, artifacts, label_targets)
 
     report = {
@@ -131,10 +146,14 @@ def build_calibration_status_report(
             ),
             "label_gap_task_rows": _to_int(cycle_summary.get("label_gap_task_rows")),
             "label_gap_high_priority_task_rows": _to_int(cycle_summary.get("label_gap_high_priority_task_rows")),
+            "regression_gate_status": regression_gate_status["status"],
+            "regression_gate_fail_rows": regression_gate_status["fail_rows"],
+            "regression_gate_unverified_rows": regression_gate_status["unverified_rows"],
         },
         "threshold": threshold_status,
         "pattern_release": pattern_status,
         "review_lanes": lane_status,
+        "regression_gate": regression_gate_status,
         "artifacts": artifacts,
         "label_targets": label_targets,
         "lane_change_candidates": lane_change_candidates,
@@ -335,12 +354,40 @@ def _lane_change_candidates(label_targets: list[dict], lane_status: dict) -> lis
     return out
 
 
+def _regression_gate_status(cycle_summary: dict) -> dict:
+    case_rows = _to_int(cycle_summary.get("filled_regression_case_rows"))
+    raw_status = str(cycle_summary.get("regression_gate_status") or "").strip()
+    fail_rows = _to_int(cycle_summary.get("regression_gate_fail_rows"))
+    unverified_rows = _to_int(cycle_summary.get("regression_gate_unverified_rows"))
+    if not case_rows:
+        status = "not_needed"
+        reason = "No filled regression cases are available yet."
+    elif raw_status == "pass" and fail_rows == 0 and unverified_rows == 0:
+        status = "pass"
+        reason = "Candidate output passed all filled calibration regression cases."
+    elif raw_status or fail_rows or unverified_rows:
+        status = "failed"
+        reason = f"Regression gate has fail_rows={fail_rows}, unverified_rows={unverified_rows}."
+    else:
+        status = "not_run"
+        reason = "Filled regression cases exist, but no candidate output has been checked by the regression gate."
+    return {
+        "status": status,
+        "raw_status": raw_status,
+        "case_rows": case_rows,
+        "fail_rows": fail_rows,
+        "unverified_rows": unverified_rows,
+        "reason": reason,
+    }
+
+
 def _workflow_status(
     cycle_summary: dict,
     sample_summary: dict,
     threshold_status: dict,
     pattern_status: dict,
     lane_status: dict,
+    regression_gate_status: dict,
 ) -> str:
     if _to_int(sample_summary.get("decision_quality_issue_rows")):
         return "not_converged_fix_fill_quality"
@@ -352,6 +399,8 @@ def _workflow_status(
     )
     if not labeled:
         return "not_converged_needs_human_labels"
+    if regression_gate_status["status"] == "failed":
+        return "not_converged_regression_gate_failed"
     if threshold_status["status"] != "stable_keep_current":
         return "not_converged_threshold_review_needed"
     if lane_status["status"] in {"protected_by_filled_labels", "needs_more_labels"}:
@@ -360,6 +409,8 @@ def _workflow_status(
         "current_guarded_candidate",
         "historical_guarded_candidate",
     }:
+        if regression_gate_status["status"] == "pass":
+            return "candidate_changes_regression_passed"
         return "candidate_changes_require_regression"
     return "converged_current_rules"
 
@@ -370,6 +421,7 @@ def _open_requirements(
     threshold_status: dict,
     pattern_status: dict,
     lane_status: dict,
+    regression_gate_status: dict,
 ) -> list[dict]:
     out = []
     quality_issue_rows = _to_int(sample_summary.get("decision_quality_issue_rows"))
@@ -406,6 +458,24 @@ def _open_requirements(
                 "status": "open",
                 "reason": threshold_status["reason"],
                 "action": "Inspect threshold boundary and add regression tests before changing score thresholds.",
+            }
+        )
+    if regression_gate_status["status"] == "failed":
+        out.append(
+            {
+                "id": "fix_regression_gate_failures",
+                "status": "open",
+                "reason": regression_gate_status["reason"],
+                "action": "Fix candidate workflow changes until calibration_regression_gate has zero failed and zero unverified rows.",
+            }
+        )
+    elif regression_gate_status["status"] == "not_run":
+        out.append(
+            {
+                "id": "run_regression_gate",
+                "status": "candidate",
+                "reason": regression_gate_status["reason"],
+                "action": "Run tools/run_calibration_regression_gate.py against the candidate official_sites.csv before applying threshold or routing changes.",
             }
         )
     if pattern_status["status"] == "current_guarded_candidate":
@@ -478,6 +548,9 @@ def _sample_artifacts(cycle: dict, sample_eval_json: str | Path | None) -> dict:
         "label_gap_high_priority_xlsx": str(outputs.get("label_gap_high_priority_xlsx") or ""),
         "sample_eval_json": str(outputs.get("eval_json") or sample_eval_json or ""),
         "filled_eval_json": str(outputs.get("filled_eval_json") or ""),
+        "regression_cases_csv": str(outputs.get("regression_cases_csv") or ""),
+        "regression_gate_json": str(outputs.get("regression_gate_json") or ""),
+        "regression_gate_md": str(outputs.get("regression_gate_md") or ""),
     }
 
 
@@ -690,6 +763,9 @@ def _next_actions(
     if workflow_status == "not_converged_fix_fill_quality":
         fix_actions = [item["action"] for item in open_requirements if item.get("id") == "fix_calibration_fill_quality"]
         return fix_actions or ["Fix calibration fill-quality issues before changing thresholds or review-lane routing."]
+    if workflow_status == "not_converged_regression_gate_failed":
+        gate_actions = [item["action"] for item in open_requirements if item.get("id") == "fix_regression_gate_failures"]
+        return gate_actions or ["Fix regression gate failures before applying threshold or review-lane routing changes."]
     sample_xlsx = artifacts.get("sample_xlsx") or "the latest calibration XLSX"
     label_gap_xlsx = artifacts.get("label_gap_xlsx") or sample_xlsx
     high_priority_xlsx = artifacts.get("label_gap_high_priority_xlsx") or label_gap_xlsx
@@ -711,6 +787,11 @@ def _next_actions(
         return [
             "Add focused regression tests for each candidate rule or lane downgrade.",
             "Apply only narrow guarded rules; keep global threshold unchanged.",
+        ]
+    if workflow_status == "candidate_changes_regression_passed":
+        return [
+            "Regression gate passed; review the candidate rule/lane change and keep it narrow.",
+            "Do not change the global threshold unless the threshold boundary report also recommends it.",
         ]
     if workflow_status == "partially_converged_keep_review_lanes":
         return [
@@ -747,6 +828,8 @@ def _render_markdown(report: dict) -> str:
         f"- Label targets: {summary['label_target_count']} total, {summary['high_priority_label_target_count']} high priority",
         f"- Decisive labels still needed: {summary['decisive_rows_needed']} total, {summary['high_priority_decisive_rows_needed']} high priority",
         f"- Label-gap task rows: {summary['label_gap_task_rows']} total, {summary['label_gap_high_priority_task_rows']} high priority",
+        f"- Regression gate status: {summary['regression_gate_status']}",
+        f"- Regression gate fail/unverified rows: {summary['regression_gate_fail_rows']}/{summary['regression_gate_unverified_rows']}",
         "",
         "## Artifacts",
         "",
@@ -754,6 +837,8 @@ def _render_markdown(report: dict) -> str:
         f"- Sample CSV: {report['artifacts'].get('sample_csv') or 'not recorded'}",
         f"- Label-gap XLSX: {report['artifacts'].get('label_gap_xlsx') or 'not recorded'}",
         f"- High-priority label-gap XLSX: {report['artifacts'].get('label_gap_high_priority_xlsx') or 'not recorded'}",
+        f"- Regression cases CSV: {report['artifacts'].get('regression_cases_csv') or 'not recorded'}",
+        f"- Regression gate report: {report['artifacts'].get('regression_gate_md') or 'not recorded'}",
         "",
         "## Label Targets",
         "",
