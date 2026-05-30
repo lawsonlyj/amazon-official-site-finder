@@ -603,7 +603,9 @@ def _filled_eval_sample_path(paths: list[Path], merged_output: Path) -> Path | N
             if key:
                 if key not in rows_by_key:
                     ordered_keys.append(key)
-                rows_by_key[key] = row
+                    rows_by_key[key] = row
+                elif _should_replace_filled_row(rows_by_key[key], row):
+                    rows_by_key[key] = row
             else:
                 unkeyed_rows.append(row)
             for field in row:
@@ -621,6 +623,24 @@ def _filled_row_key(row: dict[str, str]) -> tuple[str, str]:
     if not provider_id or not review_reason:
         return ("", "")
     return (provider_id, review_reason)
+
+
+def _should_replace_filled_row(existing: dict[str, str], incoming: dict[str, str]) -> bool:
+    if _has_manual_decision(incoming):
+        return True
+    if _has_manual_decision(existing):
+        return False
+    return True
+
+
+def _has_manual_decision(row: dict[str, str]) -> bool:
+    decision = str(
+        row.get("manual_decision")
+        or row.get("your_decision")
+        or row.get("decision")
+        or ""
+    ).strip()
+    return bool(decision)
 
 
 def _read_table(path: Path) -> list[dict[str, str]]:

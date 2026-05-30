@@ -4824,6 +4824,20 @@ class OperationalCommandTests(unittest.TestCase):
                         "manual_decision": "accept",
                         "manual_url": "",
                         "notes": "old decision",
+                    },
+                    {
+                        "provider_id": "filled-blank-overwrite",
+                        "provider_name": "Filled Blank Overwrite",
+                        "sample_reason": "pattern_candidate_validation",
+                        "pattern_scope": "recall",
+                        "pattern_match": "agent_b_score<45 AND has:schema_org_organization_seen",
+                        "review_reason": "recall_unresolved_top_candidate",
+                        "agent_b_decision": "unsure",
+                        "official_url": "",
+                        "candidate_url": "https://blank-overwrite.example",
+                        "manual_decision": "accept",
+                        "manual_url": "",
+                        "notes": "filled old",
                     }
                 ],
             )
@@ -4857,6 +4871,20 @@ class OperationalCommandTests(unittest.TestCase):
                         "manual_decision": "reject",
                         "manual_url": "",
                         "notes": "new decision",
+                    },
+                    {
+                        "provider_id": "filled-blank-overwrite",
+                        "provider_name": "Filled Blank Overwrite",
+                        "sample_reason": "pattern_candidate_validation",
+                        "pattern_scope": "recall",
+                        "pattern_match": "agent_b_score<45 AND has:schema_org_organization_seen",
+                        "review_reason": "recall_unresolved_top_candidate",
+                        "agent_b_decision": "unsure",
+                        "official_url": "",
+                        "candidate_url": "https://blank-overwrite.example",
+                        "manual_decision": "",
+                        "manual_url": "",
+                        "notes": "blank later",
                     }
                 ],
             )
@@ -4876,10 +4904,13 @@ class OperationalCommandTests(unittest.TestCase):
             ) as f:
                 merged_rows = list(csv.DictReader(f))
             duplicate_rows = [row for row in merged_rows if row["provider_id"] == "filled-dup"]
+            blank_overwrite_rows = [
+                row for row in merged_rows if row["provider_id"] == "filled-blank-overwrite"
+            ]
 
         self.assertTrue(merged_exists)
-        self.assertEqual(report["summary"]["filled_eval_labeled_rows"], 3)
-        self.assertEqual(report["summary"]["filled_eval_decisive_rows"], 3)
+        self.assertEqual(report["summary"]["filled_eval_labeled_rows"], 4)
+        self.assertEqual(report["summary"]["filled_eval_decisive_rows"], 4)
         self.assertEqual(report["inputs"]["filled_samples"], [str(filled_one), str(filled_two)])
         self.assertEqual(
             report["outputs"]["filled_samples_merged_csv"],
@@ -4888,6 +4919,9 @@ class OperationalCommandTests(unittest.TestCase):
         self.assertEqual(len(duplicate_rows), 1)
         self.assertEqual(duplicate_rows[0]["manual_decision"], "reject")
         self.assertEqual(duplicate_rows[0]["notes"], "new decision")
+        self.assertEqual(len(blank_overwrite_rows), 1)
+        self.assertEqual(blank_overwrite_rows[0]["manual_decision"], "accept")
+        self.assertEqual(blank_overwrite_rows[0]["notes"], "filled old")
 
     def test_evaluate_calibration_review_sample_turns_labels_into_rule_guidance(self):
         with tempfile.TemporaryDirectory() as tmp:
