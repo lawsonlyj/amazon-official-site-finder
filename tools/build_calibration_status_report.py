@@ -516,6 +516,7 @@ def _label_targets(cycle: dict, balance: dict, sample_eval: dict, artifacts: dic
         decisive_rows = _to_int(stats.get("decisive_rows"))
         lane_eval = lane_recommendations.get(reason, {})
         target_decisive_rows = _target_decisive_rows(reason, recommendation, rows, protected, needs_more, spot_check)
+        scenario_actions = _label_target_scenario_actions(reason, recommendation, protected, needs_more, spot_check)
         targets.append(
             {
                 "review_reason": reason,
@@ -533,6 +534,9 @@ def _label_targets(cycle: dict, balance: dict, sample_eval: dict, artifacts: dic
                 "decisive_rows_needed": max(0, target_decisive_rows - decisive_rows),
                 "recommendation": recommendation,
                 "label_goal": _label_goal(reason, recommendation, protected, needs_more, spot_check),
+                "if_clean_action": scenario_actions["if_clean_action"],
+                "if_blocked_action": scenario_actions["if_blocked_action"],
+                "if_unsure_action": scenario_actions["if_unsure_action"],
             }
         )
     priority_order = {"high": 0, "medium": 1, "normal": 2, "low": 3}
@@ -608,6 +612,50 @@ def _label_goal(reason: str, recommendation: str, protected: set[str], needs_mor
     if recommendation == "candidate_for_review_downgrade":
         return "Validate with regression cases before reducing manual review for this exact lane."
     return "Fill decisive labels so the lane can be classified."
+
+
+def _label_target_scenario_actions(
+    reason: str,
+    recommendation: str,
+    protected: set[str],
+    needs_more: set[str],
+    spot_check: set[str],
+) -> dict[str, str]:
+    if reason == "precision_second_pass_accepted_lt70" or reason in needs_more:
+        return {
+            "if_clean_action": "Queue a narrow review-lane downgrade candidate for this exact sub-70 second-pass evidence lane; require regression tests before applying.",
+            "if_blocked_action": "Keep sub-70 second-pass accepts manual-only and add the wrong rows as regression fixtures.",
+            "if_unsure_action": "Keep this lane in high-priority label gaps until enough decisive accept/reject/replace labels exist.",
+        }
+    if reason == "precision_calibrated_pattern_release" or reason in spot_check or recommendation == "spot_check_candidate":
+        return {
+            "if_clean_action": "Keep the calibrated pattern as a guarded release candidate and continue current-batch spot checks before widening automation.",
+            "if_blocked_action": "Block wider pattern release and add the wrong rows as pattern regression fixtures.",
+            "if_unsure_action": "Keep pattern release guarded; collect more spot-check labels before widening automation.",
+        }
+    if reason == "recall_unresolved_top_candidate":
+        return {
+            "if_clean_action": "Use accept/replace rows to mine exact recall patterns; do not lower global thresholds from this lane alone.",
+            "if_blocked_action": "Keep unresolved top candidates manual-only and add bad candidate features to AgentB/risky URL checks.",
+            "if_unsure_action": "Keep unresolved recall rows manual-only and refine evidence fields for future review.",
+        }
+    if reason in protected or recommendation == "keep_review_lane":
+        return {
+            "if_clean_action": "Consider a narrow routing downgrade only for this exact protected lane after regression tests and no remaining label gaps.",
+            "if_blocked_action": "Keep this lane protected and add the wrong rows as regression fixtures for AgentA scoring/risk rules.",
+            "if_unsure_action": "Keep this lane protected; unsure labels are not decisive enough to reduce manual review.",
+        }
+    if recommendation == "candidate_for_review_downgrade":
+        return {
+            "if_clean_action": "Proceed to focused regression tests, then downgrade only this exact evidence lane.",
+            "if_blocked_action": "Cancel the downgrade candidate and keep the lane protected.",
+            "if_unsure_action": "Defer the downgrade candidate until decisive labels replace unsure rows.",
+        }
+    return {
+        "if_clean_action": "Treat clean labels as evidence for a narrow future rule, not a global threshold change.",
+        "if_blocked_action": "Keep matching rows in review and add wrong rows to regression coverage.",
+        "if_unsure_action": "Collect more decisive labels before changing thresholds or routing.",
+    }
 
 
 def _labeling_instructions() -> dict:

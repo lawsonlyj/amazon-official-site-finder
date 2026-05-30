@@ -20,6 +20,9 @@ LABEL_GAP_PREFIX_FIELDS = [
     "label_question",
     "label_decision_hint",
     "label_decision_impact",
+    "label_if_clean_action",
+    "label_if_blocked_action",
+    "label_if_unsure_action",
     "label_evidence_source_kind",
     "label_evidence_source_path",
 ]
@@ -129,6 +132,10 @@ def _label_gap_row(row: dict[str, str], target: dict, status_summary: dict) -> d
     out["label_question"] = _label_question(review_reason)
     out["label_decision_hint"] = _label_decision_hint(review_reason)
     out["label_decision_impact"] = _label_decision_impact(review_reason, target)
+    scenario_actions = _scenario_actions(review_reason, target)
+    out["label_if_clean_action"] = scenario_actions["if_clean_action"]
+    out["label_if_blocked_action"] = scenario_actions["if_blocked_action"]
+    out["label_if_unsure_action"] = scenario_actions["if_unsure_action"]
     out["label_evidence_source_kind"] = _label_evidence_source_kind(review_reason, status_summary)
     out["label_evidence_source_path"] = _label_evidence_source_path(review_reason, status_summary)
     return out
@@ -193,6 +200,47 @@ def _label_decision_impact(review_reason: str, target: dict) -> str:
     return (
         "This label updates calibration evidence. Decisive accept/replace/reject decisions affect reports; unsure preserves manual review until stronger evidence exists."
     )
+
+
+def _scenario_actions(review_reason: str, target: dict) -> dict[str, str]:
+    clean = str(target.get("if_clean_action") or "").strip()
+    blocked = str(target.get("if_blocked_action") or "").strip()
+    unsure = str(target.get("if_unsure_action") or "").strip()
+    if clean or blocked or unsure:
+        return {
+            "if_clean_action": clean,
+            "if_blocked_action": blocked,
+            "if_unsure_action": unsure,
+        }
+    if review_reason == "precision_second_pass_accepted_lt70":
+        return {
+            "if_clean_action": "Queue a narrow review-lane downgrade candidate for this exact sub-70 second-pass evidence lane; require regression tests before applying.",
+            "if_blocked_action": "Keep sub-70 second-pass accepts manual-only and add the wrong rows as regression fixtures.",
+            "if_unsure_action": "Keep this lane in high-priority label gaps until enough decisive accept/reject/replace labels exist.",
+        }
+    if review_reason == "precision_calibrated_pattern_release":
+        return {
+            "if_clean_action": "Keep the calibrated pattern as a guarded release candidate and continue current-batch spot checks before widening automation.",
+            "if_blocked_action": "Block wider pattern release and add the wrong rows as pattern regression fixtures.",
+            "if_unsure_action": "Keep pattern release guarded; collect more spot-check labels before widening automation.",
+        }
+    if review_reason == "recall_unresolved_top_candidate":
+        return {
+            "if_clean_action": "Use accept/replace rows to mine exact recall patterns; do not lower global thresholds from this lane alone.",
+            "if_blocked_action": "Keep unresolved top candidates manual-only and add bad candidate features to AgentB/risky URL checks.",
+            "if_unsure_action": "Keep unresolved recall rows manual-only and refine evidence fields for future review.",
+        }
+    if review_reason.startswith("precision_"):
+        return {
+            "if_clean_action": "Consider a narrow routing downgrade only for this exact protected lane after regression tests and no remaining label gaps.",
+            "if_blocked_action": "Keep this lane protected and add the wrong rows as regression fixtures for AgentA scoring/risk rules.",
+            "if_unsure_action": "Keep this lane protected; unsure labels are not decisive enough to reduce manual review.",
+        }
+    return {
+        "if_clean_action": "Treat clean labels as evidence for a narrow future rule, not a global threshold change.",
+        "if_blocked_action": "Keep matching rows in review and add wrong rows to regression coverage.",
+        "if_unsure_action": "Collect more decisive labels before changing thresholds or routing.",
+    }
 
 
 def _label_evidence_source_kind(review_reason: str, status_summary: dict) -> str:
