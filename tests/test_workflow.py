@@ -17,7 +17,7 @@ from finder.doctor import doctor
 from finder.finalize import finalize_results, finalize_rows
 from finder.input_normalizer import normalize_provider_rows
 from finder.query_builder import build_queries
-from finder.scoring import choose_best, is_excluded_domain, load_config, _extract_page, _text_similarity
+from finder.scoring import choose_best, is_excluded_domain, load_config, _extract_page, _text_similarity, _urls_to_fetch
 from finder import search_sources
 from finder.search_sources import SearchCandidate
 from finder.text import url_like_candidates
@@ -536,6 +536,7 @@ class WorkflowTests(unittest.TestCase):
     def test_text_similarity_handles_normalized_legal_suffixes(self):
         self.assertGreaterEqual(_text_similarity("9THSIGHT PRIVATE LIMITED", "9thsight"), 90)
         self.assertGreaterEqual(_text_similarity("A2Z-ECOM", "a2z-ecom"), 90)
+        self.assertGreaterEqual(_text_similarity("Arara ApS", "Arara"), 90)
 
 
 class SearchSourceTests(unittest.TestCase):
@@ -6441,6 +6442,7 @@ class OperationalCommandTests(unittest.TestCase):
     def test_indiamart_is_evidence_only_not_official_url(self):
         config = load_config("config/scoring.json")
         self.assertTrue(is_excluded_domain("https://www.indiamart.com/company/252021821/", config))
+        self.assertTrue(is_excluded_domain("https://new.myteamz.co.uk/", config))
         platform_result = {
             "official_url": "https://www.indiamart.com/company/252021821/",
             "status": "matched",
@@ -6455,6 +6457,112 @@ class OperationalCommandTests(unittest.TestCase):
             "evidence_summary": "identity_cap_industry_mismatch_without_service",
         }
         self.assertFalse(_accepted(capped_result, config, 75))
+
+    def test_generic_only_identity_requires_location_corroboration(self):
+        config = load_config("config/scoring.json")
+        provider = {
+            "provider_name": "Global Sellers",
+            "provider_locations": ["Poland"],
+            "service_apis": ["Account Management", "Advertising Optimization"],
+        }
+        candidate = SearchCandidate(
+            url="https://www.globalsellers.net/",
+            title="Global Sellers Association",
+            snippet="Global Sellers offers Amazon and ecommerce seller services.",
+            source="brave",
+            query='"Global Sellers" official website',
+            rank=1,
+        )
+
+        def fake_fetch_without_location(url):
+            return {
+                "ok": True,
+                "status": 200,
+                "final_url": url,
+                "text": "<html><title>Global Sellers Association</title><body>Global Sellers provides Amazon ecommerce seller support and account management.</body></html>",
+            }
+
+        def fake_fetch_with_location(url):
+            return {
+                "ok": True,
+                "status": 200,
+                "final_url": url,
+                "text": "<html><title>Global Sellers</title><body>Global Sellers sp. z o.o. Polska provides Amazon account management and advertising services.</body></html>",
+            }
+
+        with patch("finder.scoring.fetch_text", side_effect=fake_fetch_without_location):
+            capped = choose_best(provider, [candidate], config)
+        with patch("finder.scoring.fetch_text", side_effect=fake_fetch_with_location):
+            accepted = choose_best(provider, [candidate], config)
+
+        self.assertEqual(capped["status"], "needs_review")
+        self.assertIn("identity_cap_generic_name_requires_location", capped["evidence_summary"])
+        self.assertEqual(accepted["status"], "matched")
+
+    def test_fetch_selection_keeps_search_candidate_when_domain_guesses_lead(self):
+        preliminary = [
+            {
+                "url": "https://www.araraaps.com/",
+                "score": 35,
+                "reject": False,
+                "source": "second_pass_domain_variant",
+            },
+            {
+                "url": "https://www.araraaps.net/",
+                "score": 35,
+                "reject": False,
+                "source": "second_pass_domain_variant",
+            },
+            {
+                "url": "https://arara-partners.com/en/about-us.html",
+                "score": 34,
+                "reject": False,
+                "source": "exa",
+            },
+        ]
+
+        urls = _urls_to_fetch(preliminary, 2)
+
+        self.assertIn("https://arara-partners.com/en/about-us.html", urls)
+        self.assertEqual(len(urls), 2)
+
+    def test_legal_suffix_identity_can_accept_country_service_match(self):
+        config = load_config("config/scoring.json")
+        provider = {
+            "provider_name": "Arara ApS",
+            "provider_locations": ["Denmark"],
+            "service_apis": ["Account Management", "Advertising Optimization"],
+        }
+        candidate = SearchCandidate(
+            url="https://arara-partners.com/en/about-us.html",
+            title="Arara Partners | Amazon agency in Denmark",
+            snippet="Arara helps brands with Amazon account management, advertising, and marketplace services in Denmark.",
+            source="exa",
+            query='"Arara ApS" official website',
+            rank=1,
+        )
+
+        def fake_fetch(url):
+            return {
+                "ok": True,
+                "status": 200,
+                "final_url": "https://arara-partners.com/",
+                "text": """
+                    <html><head><title>Arara Partners</title></head>
+                    <body>
+                    Arara is an Amazon agency based in Denmark. We support Amazon account management,
+                    marketplace advertising and ecommerce services for brands.
+                    Contact us. About us. Privacy policy.
+                    </body></html>
+                """,
+            }
+
+        with patch("finder.scoring.fetch_text", side_effect=fake_fetch):
+            result = choose_best(provider, [candidate], config)
+
+        self.assertEqual(result["official_url"], "https://arara-partners.com/")
+        self.assertEqual(result["status"], "matched")
+        self.assertIn("page_contains_exact_provider_name", result["evidence_summary"])
 
     def test_logo_similarity_is_positive_identity_evidence(self):
         config = load_config("config/scoring.json")

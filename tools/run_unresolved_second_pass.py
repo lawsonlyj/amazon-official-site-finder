@@ -523,6 +523,7 @@ def _has_blocking_identity_cap(result: dict) -> bool:
         "identity_cap_country_conflict_without_service",
         "identity_cap_country_conflict_needs_review",
         "identity_cap_ambiguous_name_requires_page_and_service",
+        "identity_cap_generic_name_requires_location",
         "identity_cap_logo_only_evidence",
         "identity_cap_missing_service_country_corroboration",
     }

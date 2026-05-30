@@ -4,7 +4,9 @@ from urllib.parse import urlparse
 
 
 LEGAL_SUFFIX_RE = re.compile(
-    r"\b(private limited|pvt ltd|pvt\. ltd\.|limited|ltd|llc|llp|inc|corp|corporation|gmbh|srl|sl|sas|ag|bv|plc|co\.?|company)\b",
+    r"\b(private limited|pvt ltd|pvt\. ltd\.|pte ltd|pte\. ltd\.|"
+    r"sp\.?\s*z\s*o\.?\s*o\.?|s\.?\s*r\.?\s*l\.?|"
+    r"limited|ltd|llc|llp|inc|corp|corporation|gmbh|sarl|aps|srl|sl|sas|ag|bv|plc|oy|ab|co\.?|company)\b",
     re.I,
 )
 

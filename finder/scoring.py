@@ -472,7 +472,9 @@ def _apply_identity_caps(score: int, reasons: list[str], provider: dict) -> tupl
     )
     country_conflict = "domain_tld_conflicts_provider_country" in reasons
     industry_mismatch = any(reason.startswith("page_industry_mismatch:") for reason in reasons)
-    ambiguous_name = _ambiguous_provider_name(provider.get("provider_name", ""))
+    provider_name = provider.get("provider_name", "")
+    ambiguous_name = _ambiguous_provider_name(provider_name)
+    generic_only_name = _generic_only_provider_name(provider_name)
     logo_identity = _has_any_reason(reasons, {"listing_logo_visual_match", "listing_logo_visual_near_match"})
     weak_page_service = _has_any_reason(
         reasons,
@@ -500,6 +502,8 @@ def _apply_identity_caps(score: int, reasons: list[str], provider: dict) -> tupl
         caps.append((74, "identity_cap_country_conflict_needs_review"))
     if ambiguous_name and not (((page_identity or logo_identity) and service_identity) or strong_ambiguous_identity):
         caps.append((69, "identity_cap_ambiguous_name_requires_page_and_service"))
+    if generic_only_name and not country_identity:
+        caps.append((69, "identity_cap_generic_name_requires_location"))
     if logo_identity and not (page_identity or service_identity):
         caps.append((69, "identity_cap_logo_only_evidence"))
     if score >= 75 and not service_identity and not country_identity and not (page_identity and search_identity):
@@ -520,6 +524,18 @@ def _ambiguous_provider_name(name: str) -> bool:
     provider_tokens = tokens(name)
     if not provider_tokens:
         return False
+    meaningful = _meaningful_identity_tokens(provider_tokens)
+    return len(meaningful) <= 1 or len("".join(provider_tokens)) <= 4
+
+
+def _generic_only_provider_name(name: str) -> bool:
+    provider_tokens = tokens(name)
+    if len(provider_tokens) < 2:
+        return False
+    return not _meaningful_identity_tokens(provider_tokens)
+
+
+def _meaningful_identity_tokens(provider_tokens: list[str]) -> list[str]:
     generic = {
         "amazon",
         "account",
@@ -535,6 +551,7 @@ def _ambiguous_provider_name(name: str) -> bool:
         "marketplace",
         "media",
         "seller",
+        "sellers",
         "service",
         "services",
         "solution",
@@ -542,8 +559,7 @@ def _ambiguous_provider_name(name: str) -> bool:
         "brand",
         "brands",
     }
-    meaningful = [token for token in provider_tokens if token not in generic]
-    return len(meaningful) <= 1 or len("".join(provider_tokens)) <= 4
+    return [token for token in provider_tokens if token not in generic]
 
 
 def choose_best(provider: dict, candidates: list[SearchCandidate], config: dict) -> dict:
@@ -597,7 +613,18 @@ def choose_best(provider: dict, candidates: list[SearchCandidate], config: dict)
 def _urls_to_fetch(preliminary: list[dict], max_fetch_candidates: int) -> set[str]:
     viable = [item for item in preliminary if not item.get("reject")]
     viable.sort(key=lambda x: x["score"], reverse=True)
-    return {item["url"].rstrip("/") for item in viable[:max_fetch_candidates]}
+    selected = viable[:max_fetch_candidates]
+    if max_fetch_candidates > 1 and not any(_is_search_evidence_source(item.get("source", "")) for item in selected):
+        search_viable = [item for item in viable if _is_search_evidence_source(item.get("source", ""))]
+        if search_viable:
+            selected = [*selected[: max_fetch_candidates - 1], search_viable[0]]
+    return {item["url"].rstrip("/") for item in selected}
+
+
+def _is_search_evidence_source(source: str) -> bool:
+    if source.endswith("_snippet_url"):
+        source = source[: -len("_snippet_url")]
+    return source not in {"domain_guess", "second_pass_domain_variant", ""}
 
 
 def _summary_reasons(reasons: list[str]) -> list[str]:
@@ -625,6 +652,7 @@ def _summary_reasons(reasons: list[str]) -> list[str]:
             "identity_cap_country_conflict_without_service",
             "identity_cap_country_conflict_needs_review",
             "identity_cap_ambiguous_name_requires_page_and_service",
+            "identity_cap_generic_name_requires_location",
             "identity_cap_logo_only_evidence",
             "identity_cap_missing_service_country_corroboration",
         }
