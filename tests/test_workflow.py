@@ -4810,6 +4810,20 @@ class OperationalCommandTests(unittest.TestCase):
                         "manual_decision": "accept",
                         "manual_url": "",
                         "notes": "",
+                    },
+                    {
+                        "provider_id": "filled-dup",
+                        "provider_name": "Filled Duplicate",
+                        "sample_reason": "pattern_candidate_validation",
+                        "pattern_scope": "recall",
+                        "pattern_match": "agent_b_score<45 AND has:schema_org_organization_seen",
+                        "review_reason": "recall_unresolved_top_candidate",
+                        "agent_b_decision": "unsure",
+                        "official_url": "",
+                        "candidate_url": "https://duplicate.example",
+                        "manual_decision": "accept",
+                        "manual_url": "",
+                        "notes": "old decision",
                     }
                 ],
             )
@@ -4829,6 +4843,20 @@ class OperationalCommandTests(unittest.TestCase):
                         "manual_decision": "reject",
                         "manual_url": "",
                         "notes": "wrong candidate",
+                    },
+                    {
+                        "provider_id": "filled-dup",
+                        "provider_name": "Filled Duplicate",
+                        "sample_reason": "pattern_candidate_validation",
+                        "pattern_scope": "recall",
+                        "pattern_match": "agent_b_score<45 AND has:schema_org_organization_seen",
+                        "review_reason": "recall_unresolved_top_candidate",
+                        "agent_b_decision": "unsure",
+                        "official_url": "",
+                        "candidate_url": "https://duplicate.example",
+                        "manual_decision": "reject",
+                        "manual_url": "",
+                        "notes": "new decision",
                     }
                 ],
             )
@@ -4843,15 +4871,23 @@ class OperationalCommandTests(unittest.TestCase):
                 filled_sample=[filled_one, filled_two],
             )
             merged_exists = (output_dir / "pattern_validation_sample_50_filled_samples_merged.csv").exists()
+            with (output_dir / "pattern_validation_sample_50_filled_samples_merged.csv").open(
+                newline="", encoding="utf-8"
+            ) as f:
+                merged_rows = list(csv.DictReader(f))
+            duplicate_rows = [row for row in merged_rows if row["provider_id"] == "filled-dup"]
 
         self.assertTrue(merged_exists)
-        self.assertEqual(report["summary"]["filled_eval_labeled_rows"], 2)
-        self.assertEqual(report["summary"]["filled_eval_decisive_rows"], 2)
+        self.assertEqual(report["summary"]["filled_eval_labeled_rows"], 3)
+        self.assertEqual(report["summary"]["filled_eval_decisive_rows"], 3)
         self.assertEqual(report["inputs"]["filled_samples"], [str(filled_one), str(filled_two)])
         self.assertEqual(
             report["outputs"]["filled_samples_merged_csv"],
             str(output_dir / "pattern_validation_sample_50_filled_samples_merged.csv"),
         )
+        self.assertEqual(len(duplicate_rows), 1)
+        self.assertEqual(duplicate_rows[0]["manual_decision"], "reject")
+        self.assertEqual(duplicate_rows[0]["notes"], "new decision")
 
     def test_evaluate_calibration_review_sample_turns_labels_into_rule_guidance(self):
         with tempfile.TemporaryDirectory() as tmp:

@@ -593,16 +593,34 @@ def _filled_eval_sample_path(paths: list[Path], merged_output: Path) -> Path | N
         return None
     if len(existing) == 1:
         return existing[0]
-    rows = []
+    rows_by_key: dict[tuple[str, str], dict[str, str]] = {}
+    ordered_keys: list[tuple[str, str]] = []
+    unkeyed_rows = []
     fields: list[str] = []
     for path in existing:
         for row in _read_table(path):
-            rows.append(row)
+            key = _filled_row_key(row)
+            if key:
+                if key not in rows_by_key:
+                    ordered_keys.append(key)
+                rows_by_key[key] = row
+            else:
+                unkeyed_rows.append(row)
             for field in row:
                 if field not in fields:
                     fields.append(field)
+    rows = [rows_by_key[key] for key in ordered_keys if key in rows_by_key]
+    rows.extend(unkeyed_rows)
     _write_rows(merged_output, rows, fields)
     return merged_output
+
+
+def _filled_row_key(row: dict[str, str]) -> tuple[str, str]:
+    provider_id = str(row.get("provider_id") or "").strip()
+    review_reason = str(row.get("review_reason") or "").strip()
+    if not provider_id or not review_reason:
+        return ("", "")
+    return (provider_id, review_reason)
 
 
 def _read_table(path: Path) -> list[dict[str, str]]:
