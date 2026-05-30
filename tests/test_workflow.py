@@ -5245,6 +5245,100 @@ class OperationalCommandTests(unittest.TestCase):
         self.assertIn("review_sheet", saved["outputs"])
         self.assertFalse((run_dir / "providers_normalized.csv").exists())
 
+    def test_run_pipeline_manifest_records_review_cutoffs(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            source = Path(tmp) / "source.csv"
+            run_dir = Path(tmp) / "run"
+            rows = [
+                {
+                    "provider_id": "p-1",
+                    "provider_name": "Example Agency LLC",
+                    "service_api": "Account Management",
+                    "detail_url": "https://sellercentral-europe.amazon.com/gspn/provider-details/p-1",
+                    "listing_logo_url": "",
+                    "about_listing_text": "Amazon account management.",
+                    "service_description": "",
+                    "service_types_json": "[]",
+                    "provider_locations_json": json.dumps(["United Kingdom"]),
+                    "provider_languages_json": json.dumps(["English"]),
+                }
+            ]
+            with source.open("w", newline="", encoding="utf-8") as f:
+                writer = csv.DictWriter(f, fieldnames=rows[0].keys())
+                writer.writeheader()
+                writer.writerows(rows)
+
+            def fake_run_workflow(providers, output_csv, evidence_jsonl, config, **kwargs):
+                del config, kwargs
+                output_path = Path(output_csv)
+                evidence_path = Path(evidence_jsonl)
+                output_path.parent.mkdir(parents=True, exist_ok=True)
+                evidence_path.parent.mkdir(parents=True, exist_ok=True)
+                result_rows = [
+                    {
+                        "provider_id": providers[0]["provider_id"],
+                        "provider_name": providers[0]["provider_name"],
+                        "official_url": "https://www.exampleagency.com",
+                        "official_domain": "exampleagency.com",
+                        "confidence": str(DEFAULT_MATCHED_REVIEW_CONFIDENCE_CUTOFF - 1),
+                        "status": "matched",
+                        "evidence_summary": "name_match; service_match; country_match",
+                        "candidate_count": "1",
+                        "scored_candidate_count": "1",
+                        "service_apis": json.dumps(["Account Management"]),
+                        "provider_locations": json.dumps(["United Kingdom"]),
+                    }
+                ]
+                with output_path.open("w", newline="", encoding="utf-8") as f:
+                    writer = csv.DictWriter(f, fieldnames=list(result_rows[0].keys()))
+                    writer.writeheader()
+                    writer.writerows(result_rows)
+                evidence_path.write_text(
+                    json.dumps(
+                        {
+                            "provider_id": "p-1",
+                            "provider_name": "Example Agency LLC",
+                            "candidate_count": 1,
+                            "scored_candidate_count": 1,
+                            "candidates": [],
+                        }
+                    )
+                    + "\n",
+                    encoding="utf-8",
+                )
+
+            with patch("tools.run_pipeline.doctor", return_value={"production_ready": True, "configured_sources": []}):
+                with patch("tools.run_pipeline.run_workflow", side_effect=fake_run_workflow):
+                    manifest = run_pipeline(
+                        source_csv=source,
+                        run_dir=run_dir,
+                        limit=1,
+                        batch_size=1,
+                        per_query=2,
+                        max_candidates=5,
+                        min_auto_precision=0,
+                    )
+            saved = json.loads((run_dir / "manifest.json").read_text(encoding="utf-8"))
+
+        self.assertEqual(manifest["summary"]["manual_review_rows"], 1)
+        self.assertEqual(
+            manifest["summary"]["matched_review_confidence_below"],
+            DEFAULT_MATCHED_REVIEW_CONFIDENCE_CUTOFF,
+        )
+        self.assertEqual(
+            manifest["summary"]["second_pass_review_confidence_below"],
+            DEFAULT_SECOND_PASS_REVIEW_CONFIDENCE_CUTOFF,
+        )
+        self.assertEqual(
+            manifest["manual_review_task"]["matched_review_confidence_below"],
+            DEFAULT_MATCHED_REVIEW_CONFIDENCE_CUTOFF,
+        )
+        self.assertEqual(
+            manifest["manual_review_task"]["second_pass_review_confidence_below"],
+            DEFAULT_SECOND_PASS_REVIEW_CONFIDENCE_CUTOFF,
+        )
+        self.assertEqual(saved["summary"], manifest["summary"])
+
     def test_run_pipeline_stops_without_production_source_unless_allowed(self):
         with tempfile.TemporaryDirectory() as tmp, patch.dict(os.environ, {}, clear=True):
             source = Path(tmp) / "source.csv"
