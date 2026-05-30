@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import csv
 import json
 from pathlib import Path
 
@@ -49,9 +50,12 @@ def build_calibration_status_report(
     threshold_status = _threshold_status(cycle_summary, threshold_summary)
     pattern_status = _pattern_release_status(cycle_summary, balance_summary, threshold_summary)
     lane_status = _lane_status(cycle_summary, balance_summary, sample_summary)
+    artifacts = _sample_artifacts(cycle, sample_eval_json)
+    label_targets = _label_targets(cycle, balance, sample_eval, artifacts)
+    labeling_instructions = _labeling_instructions()
     workflow_status = _workflow_status(cycle_summary, sample_summary, threshold_status, pattern_status, lane_status)
     open_requirements = _open_requirements(cycle_summary, sample_summary, threshold_status, pattern_status, lane_status)
-    next_actions = _next_actions(workflow_status, open_requirements, lane_status)
+    next_actions = _next_actions(workflow_status, open_requirements, lane_status, artifacts, label_targets)
 
     report = {
         "summary": {
@@ -98,10 +102,15 @@ def build_calibration_status_report(
                 )
             ),
             "open_requirement_count": len(open_requirements),
+            "label_target_count": len(label_targets),
+            "high_priority_label_target_count": sum(1 for target in label_targets if target.get("priority") == "high"),
         },
         "threshold": threshold_status,
         "pattern_release": pattern_status,
         "review_lanes": lane_status,
+        "artifacts": artifacts,
+        "label_targets": label_targets,
+        "labeling_instructions": labeling_instructions,
         "open_requirements": open_requirements,
         "next_actions": next_actions,
         "inputs": {
@@ -317,11 +326,144 @@ def _open_requirements(
     return out
 
 
-def _next_actions(workflow_status: str, open_requirements: list[dict], lane_status: dict) -> list[str]:
+def _sample_artifacts(cycle: dict, sample_eval_json: str | Path | None) -> dict:
+    outputs = cycle.get("outputs", {})
+    return {
+        "sample_csv": str(outputs.get("sample_csv") or ""),
+        "sample_xlsx": str(outputs.get("sample_xlsx") or ""),
+        "sample_eval_json": str(outputs.get("eval_json") or sample_eval_json or ""),
+        "filled_eval_json": str(outputs.get("filled_eval_json") or ""),
+    }
+
+
+def _label_targets(cycle: dict, balance: dict, sample_eval: dict, artifacts: dict) -> list[dict]:
+    by_review = dict(sample_eval.get("by_review_reason") or {})
+    for reason, rows in _sample_review_reason_counts(artifacts.get("sample_csv")).items():
+        by_review.setdefault(reason, {"rows": rows, "labeled_rows": 0, "decisive_rows": 0})
+
+    lane_recommendations = {
+        row.get("review_reason", ""): row for row in sample_eval.get("lane_recommendations", []) if row.get("review_reason")
+    }
+    cycle_summary = cycle.get("summary", {})
+    balance_summary = balance.get("summary", {})
+    protected = set(
+        _as_list(_first_present(cycle_summary.get("protected_review_lanes"), balance_summary.get("protected_review_lanes")))
+    )
+    needs_more = set(
+        _as_list(_first_present(cycle_summary.get("more_label_review_lanes"), balance_summary.get("more_label_review_lanes")))
+    )
+    spot_check = set(
+        _as_list(_first_present(cycle_summary.get("spot_check_candidate_lanes"), balance_summary.get("spot_check_candidate_lanes")))
+    )
+
+    targets = []
+    for reason, stats in by_review.items():
+        if not reason:
+            continue
+        recommendation = lane_recommendations.get(reason, {}).get("recommendation") or _default_lane_recommendation(
+            reason, protected, needs_more, spot_check
+        )
+        targets.append(
+            {
+                "review_reason": reason,
+                "priority": _label_priority(reason, recommendation, protected, needs_more, spot_check),
+                "rows": _to_int(stats.get("rows")),
+                "labeled_rows": _to_int(stats.get("labeled_rows")),
+                "decisive_rows": _to_int(stats.get("decisive_rows")),
+                "recommendation": recommendation,
+                "label_goal": _label_goal(reason, recommendation, protected, needs_more, spot_check),
+            }
+        )
+    priority_order = {"high": 0, "medium": 1, "normal": 2, "low": 3}
+    targets.sort(key=lambda row: (priority_order.get(row["priority"], 9), row["review_reason"]))
+    return targets
+
+
+def _sample_review_reason_counts(path_value: str | Path | None) -> dict[str, int]:
+    if not path_value:
+        return {}
+    path = Path(path_value)
+    if not path.exists():
+        return {}
+    counts: dict[str, int] = {}
+    with path.open(newline="", encoding="utf-8-sig") as f:
+        for row in csv.DictReader(f):
+            reason = str(row.get("review_reason") or "").strip()
+            if reason:
+                counts[reason] = counts.get(reason, 0) + 1
+    return counts
+
+
+def _default_lane_recommendation(reason: str, protected: set[str], needs_more: set[str], spot_check: set[str]) -> str:
+    if reason in needs_more:
+        return "needs_more_labels"
+    if reason in spot_check:
+        return "spot_check_candidate"
+    if reason in protected:
+        return "keep_review_lane"
+    return "needs_more_labels"
+
+
+def _label_priority(reason: str, recommendation: str, protected: set[str], needs_more: set[str], spot_check: set[str]) -> str:
+    if reason in needs_more or recommendation == "candidate_for_review_downgrade":
+        return "high"
+    if reason in spot_check or reason in protected or recommendation in {"spot_check_candidate", "keep_review_lane"}:
+        return "medium"
+    if recommendation == "needs_more_labels":
+        return "normal"
+    return "normal"
+
+
+def _label_goal(reason: str, recommendation: str, protected: set[str], needs_more: set[str], spot_check: set[str]) -> str:
+    if reason in needs_more:
+        return "Fill every sampled row; this lane is the current evidence bottleneck before routing can change."
+    if reason in spot_check or recommendation == "spot_check_candidate":
+        return "Spot-check released rows; any reject/replace blocks wider automatic release for this pattern."
+    if reason in protected or recommendation == "keep_review_lane":
+        return "Confirm whether this risky lane still captures wrong candidates or over-rejected correct sites."
+    if recommendation == "needs_more_labels":
+        return "Fill enough decisive labels to classify whether this lane stays manual or can be narrowed."
+    if recommendation == "candidate_for_review_downgrade":
+        return "Validate with regression cases before reducing manual review for this exact lane."
+    return "Fill decisive labels so the lane can be classified."
+
+
+def _labeling_instructions() -> dict:
+    return {
+        "fields_to_fill": ["manual_decision", "manual_url", "notes"],
+        "manual_decision_values": {
+            "accept": "The shown official_url/candidate_url is the correct independent official site.",
+            "replace": "The shown URL is wrong or missing, and manual_url contains the correct official site.",
+            "reject": "No trustworthy official site is proven by the shown URL/candidate evidence.",
+            "unsure": "Evidence is insufficient or conflicts remain after review.",
+        },
+        "manual_url_required_when": ["replace"],
+        "notes_guidance": "Use short reasons such as wrong_company, service_mismatch, country_mismatch, platform_page, unreachable, or correct_country_language_site.",
+    }
+
+
+def _as_list(value: object) -> list[str]:
+    if isinstance(value, (list, tuple)):
+        return [str(item) for item in value if str(item)]
+    return []
+
+
+def _next_actions(
+    workflow_status: str,
+    open_requirements: list[dict],
+    lane_status: dict,
+    artifacts: dict | None = None,
+    label_targets: list[dict] | None = None,
+) -> list[str]:
+    artifacts = artifacts or {}
+    label_targets = label_targets or []
+    sample_xlsx = artifacts.get("sample_xlsx") or "the latest calibration XLSX"
+    high_priority = [target["review_reason"] for target in label_targets if target.get("priority") == "high"]
     if workflow_status == "not_converged_needs_human_labels":
+        focus = ", ".join(high_priority[:3]) if high_priority else "needs_more_labels lanes"
         return [
-            "Fill the latest calibration XLSX before changing thresholds or review-lane routing.",
-            "Focus labels on lanes reported as needs_more_labels, especially second-pass low-score accepts.",
+            f"Fill {sample_xlsx} before changing thresholds or review-lane routing.",
+            f"Prioritize high-value labels for: {focus}.",
         ]
     if workflow_status == "candidate_changes_require_regression":
         return [
@@ -354,10 +496,36 @@ def _render_markdown(report: dict) -> str:
         f"- Protected review lanes: {summary['protected_review_lane_count']}",
         f"- Lane needs-more-label rows: {summary['lane_needs_more_label_rows']}",
         f"- Pattern release correct/wrong rows: {summary['pattern_release_correct_rows']}/{summary['pattern_release_wrong_rows']}",
+        f"- Label targets: {summary['label_target_count']} total, {summary['high_priority_label_target_count']} high priority",
         "",
-        "## Open Requirements",
+        "## Artifacts",
+        "",
+        f"- Sample XLSX: {report['artifacts'].get('sample_xlsx') or 'not recorded'}",
+        f"- Sample CSV: {report['artifacts'].get('sample_csv') or 'not recorded'}",
+        "",
+        "## Label Targets",
         "",
     ]
+    if report["label_targets"]:
+        for target in report["label_targets"]:
+            lines.append(
+                "- {review_reason} ({priority}, rows={rows}, labeled={labeled_rows}, "
+                "recommendation={recommendation}): {label_goal}".format(**target)
+            )
+    else:
+        lines.append("- None")
+    lines.extend(
+        [
+            "",
+            "## Labeling Instructions",
+            "",
+            "- Fill only manual_decision, manual_url, and notes.",
+            "- Use accept when the shown URL is correct, replace with manual_url when another official site is correct, reject when the candidate is wrong or unproven, and unsure when evidence conflicts.",
+            "",
+            "## Open Requirements",
+            "",
+        ]
+    )
     if report["open_requirements"]:
         for item in report["open_requirements"]:
             lines.append(f"- {item['id']} ({item['status']}): {item['action']}")

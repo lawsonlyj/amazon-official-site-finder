@@ -4937,6 +4937,8 @@ class OperationalCommandTests(unittest.TestCase):
             balance = root / "balance.json"
             threshold = root / "threshold.json"
             sample_eval = root / "sample_eval.json"
+            sample_csv = root / "pattern_validation_sample_50.csv"
+            sample_xlsx = root / "pattern_validation_sample_50.xlsx"
             out_md = root / "status.md"
             cycle.write_text(
                 json.dumps(
@@ -4948,8 +4950,14 @@ class OperationalCommandTests(unittest.TestCase):
                             "pattern_release_correct_rows": 4,
                             "pattern_release_wrong_rows": 0,
                             "protected_review_lane_count": 5,
+                            "more_label_review_lanes": ["precision_second_pass_accepted_lt70"],
+                            "spot_check_candidate_lanes": ["precision_calibrated_pattern_release"],
                             "filled_eval_labeled_rows": None,
-                        }
+                        },
+                        "outputs": {
+                            "sample_csv": str(sample_csv),
+                            "sample_xlsx": str(sample_xlsx),
+                        },
                     }
                 ),
                 encoding="utf-8",
@@ -4962,6 +4970,7 @@ class OperationalCommandTests(unittest.TestCase):
                             "recommended_pattern_release": "narrow_pattern_release_candidate",
                             "pattern_release_correct_rows": 4,
                             "pattern_release_wrong_rows": 0,
+                            "protected_review_lanes": ["precision_low_confidence_auto_match"],
                         }
                     }
                 ),
@@ -4989,10 +4998,25 @@ class OperationalCommandTests(unittest.TestCase):
                             "labeled_rows": 0,
                             "decisive_rows": 0,
                             "lane_needs_more_label_rows": 7,
+                        },
+                        "by_review_reason": {
+                            "precision_second_pass_accepted_lt70": {
+                                "rows": 8,
+                                "labeled_rows": 0,
+                                "decisive_rows": 0,
+                            }
                         }
                     }
                 ),
                 encoding="utf-8",
+            )
+            _write_test_csv(
+                sample_csv,
+                [
+                    {"provider_id": "p-low", "review_reason": "precision_second_pass_accepted_lt70"},
+                    {"provider_id": "p-release", "review_reason": "precision_calibrated_pattern_release"},
+                    {"provider_id": "p-protected", "review_reason": "precision_low_confidence_auto_match"},
+                ],
             )
 
             report = build_calibration_status_report(
@@ -5009,7 +5033,14 @@ class OperationalCommandTests(unittest.TestCase):
         self.assertEqual(report["summary"]["pattern_release_status"], "guarded_candidate")
         self.assertEqual(report["summary"]["review_lane_status"], "needs_human_labels")
         self.assertIn("fill_calibration_sample", {item["id"] for item in report["open_requirements"]})
-        self.assertIn("Fill the latest calibration XLSX", md_text)
+        self.assertEqual(report["artifacts"]["sample_xlsx"], str(sample_xlsx))
+        self.assertEqual(report["labeling_instructions"]["fields_to_fill"], ["manual_decision", "manual_url", "notes"])
+        self.assertIn("precision_second_pass_accepted_lt70", {item["review_reason"] for item in report["label_targets"]})
+        high_priority = [item for item in report["label_targets"] if item["priority"] == "high"]
+        self.assertEqual(high_priority[0]["review_reason"], "precision_second_pass_accepted_lt70")
+        self.assertIn(str(sample_xlsx), report["next_actions"][0])
+        self.assertIn(str(sample_xlsx), md_text)
+        self.assertIn("precision_second_pass_accepted_lt70", md_text)
 
     def test_build_calibration_status_report_flags_candidate_changes_after_labels(self):
         with tempfile.TemporaryDirectory() as tmp:
