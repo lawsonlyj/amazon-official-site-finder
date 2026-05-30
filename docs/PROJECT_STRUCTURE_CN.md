@@ -205,6 +205,7 @@ Codex receives filled manual review workbook
 | `tools/build_threshold_boundary_report.py` | 汇总阈值模拟、AgentB recall 模拟和 pattern-release 结果，明确全局接受阈值、precision watch 复核分数段，以及哪些放宽只能进入人工/AgentB 证据而不能直接自动接受。 |
 | `tools/build_calibration_status_report.py` | 汇总 calibration cycle、balance report、threshold boundary 和填表评估，输出顶层收敛状态：是否仍需人工标签、阈值是否保持、pattern release 是否只可 guarded 启用、候选 lane/rule 改动是否必须先加回归测试；同时列出校准样本路径、各 `review_reason` 标注目标、优先级和还缺多少 decisive 标签。 |
 | `tools/check_calibration_application_gate.py` | 读取 `calibration_status.json` 中的 `application_gates`，在 A 应用阈值、review lane 或 pattern-release 改动前给出可执行放行/阻断结果；默认只有 `can_apply_now=true` 才成功，`--allow-candidate` 只允许无 blocker 的 candidate gate。 |
+| `tools/apply_calibration_regression_cases.py` | 读取人工校准生成的 `calibration_regression_cases.csv` 和候选 `official_sites.csv`，只按精确 provider/URL 人工样例应用覆盖：阻断已知错误 URL、恢复已知正确 URL、生成 corrected CSV/XLSX 和 gate 报告；这是安全的人类标签覆盖层，不是泛化评分规则。 |
 | `tools/build_calibration_label_gap_task.py` | 读取 `calibration_status.json` 和校准样本，按各 lane 的 decisive-label 缺口生成更小的人工审核 CSV/XLSX，只包含继续判断收敛所需的行；支持按 priority 过滤，并在输出前置列写入审核问题、填写提示和 pattern-release 来源。 |
 | `tools/build_protected_lane_review_task.py` | 读取 `calibration_status.json`、校准样本和已填标签，生成下一轮 protected-lane 小审核 CSV/XLSX；用于 decisive 缺口已关闭但风险 lane 仍需继续抽检的阶段，会排除已填过的 provider，并默认跳过已验证的 guarded pattern-release 行。 |
 | `tools/build_protected_lane_priority_task.py` | 从 full protected-lane 审核表里自动抽取更小的均衡优先审核包，覆盖低置信 accept、unresolved recall、同名/通用名、slug extension、国家/语言、logo-only/near-match、页面不可达和缺 provider name 等边界；用于人工容量有限时先拿最有决策价值的标签。 |

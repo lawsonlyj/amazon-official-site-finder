@@ -62,6 +62,7 @@ from tools.build_release_policy_report import build_release_policy_report
 from tools.build_threshold_boundary_report import build_threshold_boundary_report
 from tools.verify_protected_lane_review_task import verify_protected_lane_review_task
 from tools.reuse_historical_labels_for_task import reuse_historical_labels_for_task
+from tools.apply_calibration_regression_cases import apply_calibration_regression_cases
 from tools.output_layout import (
     DEFAULT_MATCHED_REVIEW_CONFIDENCE_CUTOFF,
     DEFAULT_SECOND_PASS_ACCEPT_THRESHOLD,
@@ -5702,6 +5703,143 @@ class OperationalCommandTests(unittest.TestCase):
         self.assertEqual(by_id["good-overrejected"]["failure_reason"], "positive_fixture_over_rejected")
         self.assertEqual(by_id["good-www"]["gate_result"], "pass")
         self.assertIn("Gate status: fail", md_text)
+
+    def test_apply_calibration_regression_cases_fixes_exact_human_fixtures(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            cases = root / "cases.csv"
+            candidate = root / "official_sites.csv"
+            output_csv = root / "official_sites_overlay.csv"
+            output_xlsx = root / "official_sites_overlay.xlsx"
+            output_json = root / "overlay.json"
+            output_md = root / "overlay.md"
+            gate_json = root / "gate.json"
+            gate_md = root / "gate.md"
+            gate_csv = root / "gate.csv"
+            _write_test_csv(
+                cases,
+                [
+                    {
+                        "case_type": "precision_blocking_fixture",
+                        "provider_id": "bad-reject",
+                        "provider_name": "Bad Reject",
+                        "review_reason": "precision_generic_identity_term_risk",
+                        "candidate_url": "https://wrong.example",
+                        "official_url": "https://wrong.example",
+                        "expected_url": "",
+                        "assertion": "candidate_url_or_official_url_must_not_auto_accept",
+                    },
+                    {
+                        "case_type": "precision_blocking_fixture",
+                        "provider_id": "bad-replace",
+                        "provider_name": "Bad Replace",
+                        "review_reason": "precision_low_confidence_auto_match",
+                        "candidate_url": "https://wrong2.example",
+                        "official_url": "https://wrong2.example",
+                        "expected_url": "https://right2.example",
+                        "assertion": "candidate_url_or_official_url_must_not_auto_accept",
+                    },
+                    {
+                        "case_type": "recall_positive_fixture",
+                        "provider_id": "good-recall",
+                        "provider_name": "Good Recall",
+                        "review_reason": "recall_unresolved_top_candidate",
+                        "candidate_url": "https://good.example",
+                        "official_url": "https://good.example",
+                        "expected_url": "https://good.example",
+                        "assertion": "candidate_can_seed_recall_pattern_only_with_same_evidence",
+                    },
+                ],
+            )
+            _write_test_csv(
+                candidate,
+                [
+                    {
+                        "provider_id": "bad-reject",
+                        "provider_name": "Bad Reject",
+                        "provider_detail_url": "https://amazon.example/bad-reject",
+                        "listing_logo_url": "",
+                        "official_url": "https://wrong.example/",
+                        "official_domain": "wrong.example",
+                        "status": "matched",
+                        "decision_source": "auto_matched",
+                        "confidence": "100",
+                        "source_status": "matched",
+                        "evidence_summary": "",
+                        "candidate_count": "1",
+                        "scored_candidate_count": "1",
+                        "service_apis": "",
+                        "provider_locations": "",
+                        "notes": "",
+                    },
+                    {
+                        "provider_id": "bad-replace",
+                        "provider_name": "Bad Replace",
+                        "provider_detail_url": "https://amazon.example/bad-replace",
+                        "listing_logo_url": "",
+                        "official_url": "https://wrong2.example/",
+                        "official_domain": "wrong2.example",
+                        "status": "matched",
+                        "decision_source": "auto_matched",
+                        "confidence": "82",
+                        "source_status": "matched",
+                        "evidence_summary": "",
+                        "candidate_count": "1",
+                        "scored_candidate_count": "1",
+                        "service_apis": "",
+                        "provider_locations": "",
+                        "notes": "",
+                    },
+                    {
+                        "provider_id": "good-recall",
+                        "provider_name": "Good Recall",
+                        "provider_detail_url": "https://amazon.example/good-recall",
+                        "listing_logo_url": "",
+                        "official_url": "",
+                        "official_domain": "",
+                        "status": "unresolved",
+                        "decision_source": "pending_review",
+                        "confidence": "68",
+                        "source_status": "unresolved",
+                        "evidence_summary": "",
+                        "candidate_count": "1",
+                        "scored_candidate_count": "1",
+                        "service_apis": "",
+                        "provider_locations": "",
+                        "notes": "",
+                    },
+                ],
+            )
+
+            report = apply_calibration_regression_cases(
+                cases_csv=cases,
+                candidate_final_csv=candidate,
+                output_csv=output_csv,
+                output_xlsx=output_xlsx,
+                output_json=output_json,
+                output_md=output_md,
+                gate_json=gate_json,
+                gate_md=gate_md,
+                gate_csv=gate_csv,
+            )
+            with output_csv.open(newline="", encoding="utf-8") as f:
+                rows = list(csv.DictReader(f))
+            md_text = output_md.read_text(encoding="utf-8")
+            saved = json.loads(output_json.read_text(encoding="utf-8"))
+            output_xlsx_exists = output_xlsx.exists()
+
+        by_id = {row["provider_id"]: row for row in rows}
+        self.assertEqual(report["summary"]["changed_rows"], 3)
+        self.assertEqual(report["summary"]["regression_gate_status"], "pass")
+        self.assertEqual(saved["summary"]["regression_gate_fail_rows"], 0)
+        self.assertEqual(by_id["bad-reject"]["official_url"], "")
+        self.assertEqual(by_id["bad-reject"]["decision_source"], "calibration_regression_block")
+        self.assertEqual(by_id["bad-replace"]["official_domain"], "right2.example")
+        self.assertEqual(by_id["bad-replace"]["decision_source"], "calibration_regression_replace")
+        self.assertEqual(by_id["good-recall"]["official_domain"], "good.example")
+        self.assertEqual(by_id["good-recall"]["decision_source"], "calibration_regression_positive")
+        self.assertTrue(output_xlsx_exists)
+        self.assertIn("Regression gate: pass", md_text)
 
     def test_evaluate_calibration_review_sample_rejects_pattern_when_label_blocks_it(self):
         with tempfile.TemporaryDirectory() as tmp:
