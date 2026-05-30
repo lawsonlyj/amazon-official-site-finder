@@ -157,6 +157,12 @@ def _build_decision(
             "protected_lanes_next_review_task_xlsx": (report.get("outputs") or {}).get(
                 "protected_lanes_next_review_task_xlsx", ""
             ),
+            "protected_lanes_next_review_task_verification_json": (report.get("outputs") or {}).get(
+                "protected_lanes_next_review_task_verification_json", ""
+            ),
+            "protected_lanes_next_review_task_verification_md": (report.get("outputs") or {}).get(
+                "protected_lanes_next_review_task_verification_md", ""
+            ),
             "regression_cases_csv": (report.get("outputs") or {}).get("regression_cases_csv", ""),
             "regression_gate_json": (report.get("outputs") or {}).get("regression_gate_json", ""),
         },

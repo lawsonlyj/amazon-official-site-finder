@@ -696,6 +696,12 @@ def _sample_artifacts(cycle: dict, sample_eval_json: str | Path | None) -> dict:
         "protected_lanes_next_review_task_summary_json": str(
             outputs.get("protected_lanes_next_review_task_summary_json") or ""
         ),
+        "protected_lanes_next_review_task_verification_json": str(
+            outputs.get("protected_lanes_next_review_task_verification_json") or ""
+        ),
+        "protected_lanes_next_review_task_verification_md": str(
+            outputs.get("protected_lanes_next_review_task_verification_md") or ""
+        ),
         "sample_eval_json": str(outputs.get("eval_json") or sample_eval_json or ""),
         "filled_eval_json": str(outputs.get("filled_eval_json") or ""),
         "regression_cases_csv": str(outputs.get("regression_cases_csv") or ""),

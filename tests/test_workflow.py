@@ -59,6 +59,7 @@ from tools.apply_pattern_release_experiment import apply_pattern_release_experim
 from tools.apply_pattern_release_to_run import apply_pattern_release_to_run
 from tools.build_release_policy_report import build_release_policy_report
 from tools.build_threshold_boundary_report import build_threshold_boundary_report
+from tools.verify_protected_lane_review_task import verify_protected_lane_review_task
 from tools.output_layout import (
     DEFAULT_MATCHED_REVIEW_CONFIDENCE_CUTOFF,
     DEFAULT_SECOND_PASS_ACCEPT_THRESHOLD,
@@ -4614,6 +4615,8 @@ class OperationalCommandTests(unittest.TestCase):
                 "protected_lane_csv": (output_dir / "protected_lanes_next_review_task.csv").exists(),
                 "protected_lane_xlsx": (output_dir / "protected_lanes_next_review_task.xlsx").exists(),
                 "protected_lane_json": (output_dir / "protected_lanes_next_review_task_summary.json").exists(),
+                "protected_lane_verify_json": (output_dir / "protected_lanes_next_review_task_verification.json").exists(),
+                "protected_lane_verify_md": (output_dir / "protected_lanes_next_review_task_verification.md").exists(),
                 "convergence_audit_json": (output_dir / "convergence_audit.json").exists(),
                 "convergence_audit_md": (output_dir / "convergence_audit.md").exists(),
             }
@@ -4624,6 +4627,9 @@ class OperationalCommandTests(unittest.TestCase):
             status_data = json.loads((output_dir / "calibration_status.json").read_text(encoding="utf-8"))
             gate_data = json.loads((output_dir / "calibration_application_gates.json").read_text(encoding="utf-8"))
             convergence_data = json.loads((output_dir / "convergence_audit.json").read_text(encoding="utf-8"))
+            protected_verify = json.loads(
+                (output_dir / "protected_lanes_next_review_task_verification.json").read_text(encoding="utf-8")
+            )
 
         self.assertEqual(report["summary"]["sample_rows"], 2)
         self.assertTrue(output_exists["recall_json"])
@@ -4647,6 +4653,8 @@ class OperationalCommandTests(unittest.TestCase):
         self.assertTrue(output_exists["protected_lane_csv"])
         self.assertTrue(output_exists["protected_lane_xlsx"])
         self.assertTrue(output_exists["protected_lane_json"])
+        self.assertTrue(output_exists["protected_lane_verify_json"])
+        self.assertTrue(output_exists["protected_lane_verify_md"])
         self.assertTrue(output_exists["convergence_audit_json"])
         self.assertTrue(output_exists["convergence_audit_md"])
         self.assertEqual(report["summary"]["empty_eval_labeled_rows"], 0)
@@ -4655,14 +4663,18 @@ class OperationalCommandTests(unittest.TestCase):
         self.assertIn("protected_lanes_next_review_task_rows", report["summary"])
         self.assertIn("convergence_state", report["summary"])
         self.assertIn("threshold_decision", report["summary"])
+        self.assertTrue(report["summary"]["protected_lanes_next_review_task_verification_passed"])
         self.assertIn("label_gap_task", report)
         self.assertIn("label_gap_high_priority_task", report)
         self.assertIn("protected_lanes_next_review_task", report)
+        self.assertIn("protected_lanes_next_review_task_verification", report)
         self.assertIn("convergence_audit", report)
         self.assertEqual(report["summary"]["label_gap_high_priority_task_rows"], 0)
         self.assertEqual(report["summary"]["protected_lanes_next_review_task_rows"], 2)
         self.assertEqual({row["provider_id"] for row in protected_lane_rows}, {"batch-recall", "batch-precision"})
         self.assertIn("provider_detail_url", protected_lane_rows[0])
+        self.assertTrue(protected_verify["summary"]["passed"])
+        self.assertEqual(protected_verify["summary"]["row_count"], 2)
         self.assertEqual(status_data["summary"]["label_gap_task_rows"], report["summary"]["label_gap_task_rows"])
         self.assertEqual(status_data["summary"]["label_gap_high_priority_task_rows"], 0)
         self.assertIn("protected_lanes_next_review_task_xlsx", status_data["artifacts"])
@@ -4855,6 +4867,8 @@ class OperationalCommandTests(unittest.TestCase):
         self.assertIn("application_gate_checks", decision)
         self.assertIn("convergence_audit_json", decision["outputs"])
         self.assertIn("protected_lanes_next_review_task_xlsx", decision["outputs"])
+        self.assertIn("protected_lanes_next_review_task_verification_json", decision["outputs"])
+        self.assertIn("protected_lanes_next_review_task_verification_md", decision["outputs"])
         self.assertIn("Threshold decision", decision_md)
         self.assertIn("Next Actions", decision_md)
 
@@ -7063,6 +7077,89 @@ class OperationalCommandTests(unittest.TestCase):
         self.assertEqual(saved["summary"]["threshold_decision"], "keep_current_75_75")
         self.assertIn("Convergence Audit", md_text)
         self.assertIn("75/75", md_text)
+
+    def test_verify_protected_lane_review_task_checks_links_summary_and_manual_blanks(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            task_csv = root / "protected.csv"
+            task_xlsx = root / "protected.xlsx"
+            summary_json = root / "summary.json"
+            output_json = root / "verification.json"
+            rows = [
+                {
+                    "provider_id": "p1",
+                    "provider_name": "Provider One",
+                    "provider_detail_url": "https://amazon.example/p1",
+                    "review_reason": "precision_low_confidence_auto_match",
+                    "candidate_url": "https://providerone.example",
+                    "official_url": "https://providerone.example",
+                    "manual_decision": "",
+                    "manual_url": "",
+                    "notes": "",
+                    "review_instruction": "Fill manual_decision.",
+                    "optimization_use": "Use as precision fixture.",
+                },
+                {
+                    "provider_id": "p2",
+                    "provider_name": "Provider Two",
+                    "provider_detail_url": "https://amazon.example/p2",
+                    "review_reason": "recall_unresolved_top_candidate",
+                    "candidate_url": "https://providertwo.example",
+                    "official_url": "",
+                    "manual_decision": "",
+                    "manual_url": "",
+                    "notes": "",
+                    "review_instruction": "Fill manual_decision.",
+                    "optimization_use": "Use as recall evidence.",
+                },
+            ]
+            _write_test_csv(task_csv, rows)
+            build_workbook([("Protected", task_csv)], task_xlsx)
+            summary_json.write_text(
+                json.dumps(
+                    {
+                        "task_rows": 2,
+                        "reason_counts": {
+                            "precision_low_confidence_auto_match": 1,
+                            "recall_unresolved_top_candidate": 1,
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            report = verify_protected_lane_review_task(
+                csv_path=task_csv,
+                summary_json=summary_json,
+                xlsx_path=task_xlsx,
+                output_json=output_json,
+            )
+            rows[1]["manual_decision"] = "accept"
+            rows.append(dict(rows[0]))
+            bad_csv = root / "bad_protected.csv"
+            _write_test_csv(bad_csv, rows)
+            bad_report = verify_protected_lane_review_task(
+                csv_path=bad_csv,
+                summary_json=summary_json,
+                xlsx_path=task_xlsx,
+            )
+            allow_filled_report = verify_protected_lane_review_task(
+                csv_path=bad_csv,
+                summary_json=summary_json,
+                xlsx_path=task_xlsx,
+                allow_filled=True,
+            )
+            saved = json.loads(output_json.read_text(encoding="utf-8"))
+
+        self.assertTrue(report["summary"]["passed"])
+        self.assertEqual(report["summary"]["row_count"], 2)
+        self.assertGreater(report["summary"]["xlsx_hyperlink_formula_count"], 0)
+        self.assertEqual(saved["summary"]["failure_count"], 0)
+        self.assertFalse(bad_report["summary"]["passed"])
+        self.assertGreaterEqual(bad_report["summary"]["duplicate_key_count"], 1)
+        self.assertGreaterEqual(bad_report["summary"]["filled_manual_decision_rows"], 1)
+        self.assertFalse(allow_filled_report["summary"]["passed"])
+        self.assertTrue(any(item["check"] == "duplicate_provider_reason" for item in allow_filled_report["failures"]))
 
     def test_scoring_tries_www_variant_before_giving_up_on_candidate(self):
         config = load_config("config/scoring.json")

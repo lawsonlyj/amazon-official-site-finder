@@ -21,6 +21,7 @@ from tools.mine_evidence_patterns import mine_evidence_patterns
 from tools.run_calibration_regression_gate import run_calibration_regression_gate
 from tools.simulate_pattern_release import simulate_pattern_release
 from tools.build_threshold_boundary_report import build_threshold_boundary_report
+from tools.verify_protected_lane_review_task import verify_protected_lane_review_task
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -137,6 +138,8 @@ def run_calibration_cycle(
     protected_lane_task_csv = out_dir / "protected_lanes_next_review_task.csv"
     protected_lane_task_xlsx = out_dir / "protected_lanes_next_review_task.xlsx"
     protected_lane_task_json = out_dir / "protected_lanes_next_review_task_summary.json"
+    protected_lane_task_verify_json = out_dir / "protected_lanes_next_review_task_verification.json"
+    protected_lane_task_verify_md = out_dir / "protected_lanes_next_review_task_verification.md"
     summary_json = out_dir / "calibration_cycle_summary.json"
     summary_md = out_dir / "calibration_cycle_summary.md"
     status_json = out_dir / "calibration_status.json"
@@ -379,6 +382,8 @@ def run_calibration_cycle(
             "protected_lanes_next_review_task_csv": str(protected_lane_task_csv),
             "protected_lanes_next_review_task_xlsx": str(protected_lane_task_xlsx),
             "protected_lanes_next_review_task_summary_json": str(protected_lane_task_json),
+            "protected_lanes_next_review_task_verification_json": str(protected_lane_task_verify_json),
+            "protected_lanes_next_review_task_verification_md": str(protected_lane_task_verify_md),
             "summary_json": str(summary_json),
             "summary_md": str(summary_md),
             "status_json": str(status_json),
@@ -473,6 +478,17 @@ def run_calibration_cycle(
     report["summary"]["threshold_decision"] = convergence_audit["summary"].get("threshold_decision")
     report["summary"]["review_lane_decision"] = convergence_audit["summary"].get("review_lane_decision")
     report["summary"]["pattern_release_decision"] = convergence_audit["summary"].get("pattern_release_decision")
+    protected_lane_task_verification = verify_protected_lane_review_task(
+        csv_path=protected_lane_task_csv,
+        summary_json=protected_lane_task_json,
+        xlsx_path=protected_lane_task_xlsx,
+        output_json=protected_lane_task_verify_json,
+        output_md=protected_lane_task_verify_md,
+    )
+    report["protected_lanes_next_review_task_verification"] = protected_lane_task_verification
+    report["summary"]["protected_lanes_next_review_task_verification_passed"] = protected_lane_task_verification[
+        "summary"
+    ].get("passed")
     summary_json.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
     summary_md.write_text(_render_markdown(report), encoding="utf-8")
     return report
@@ -538,6 +554,7 @@ def _render_markdown(report: dict) -> str:
         f"- Threshold decision: {summary.get('threshold_decision') or 'not_audited'}",
         f"- Review-lane decision: {summary.get('review_lane_decision') or 'not_audited'}",
         f"- Pattern-release decision: {summary.get('pattern_release_decision') or 'not_audited'}",
+        f"- Protected-lane task verification passed: {summary.get('protected_lanes_next_review_task_verification_passed')}",
         "",
         "## Outputs",
         "",
