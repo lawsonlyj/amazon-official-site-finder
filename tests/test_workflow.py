@@ -5251,11 +5251,12 @@ class OperationalCommandTests(unittest.TestCase):
 
         self.assertEqual(report["summary"]["workflow_status"], "not_converged_needs_human_labels")
         self.assertEqual(report["summary"]["threshold_status"], "stable_keep_current")
-        self.assertEqual(report["summary"]["pattern_release_status"], "guarded_candidate")
+        self.assertEqual(report["summary"]["pattern_release_status"], "historical_guarded_candidate")
         self.assertEqual(report["summary"]["pattern_release_source_path"], "prior/pattern_release.json")
         self.assertEqual(report["summary"]["pattern_release_source_kind"], "supplied_prior")
         self.assertEqual(report["summary"]["review_lane_status"], "needs_human_labels")
         self.assertIn("fill_calibration_sample", {item["id"] for item in report["open_requirements"]})
+        self.assertIn("validate_historical_pattern_release", {item["id"] for item in report["open_requirements"]})
         self.assertEqual(report["artifacts"]["sample_xlsx"], str(sample_xlsx))
         self.assertEqual(report["labeling_instructions"]["fields_to_fill"], ["manual_decision", "manual_url", "notes"])
         self.assertIn("precision_second_pass_accepted_lt70", {item["review_reason"] for item in report["label_targets"]})
@@ -5316,6 +5317,7 @@ class OperationalCommandTests(unittest.TestCase):
             )
 
         self.assertEqual(report["summary"]["workflow_status"], "candidate_changes_require_regression")
+        self.assertEqual(report["summary"]["pattern_release_status"], "current_guarded_candidate")
         self.assertEqual(report["summary"]["review_lane_status"], "candidate_for_downgrade")
         self.assertIn("lane_downgrade_candidate", {item["id"] for item in report["open_requirements"]})
 

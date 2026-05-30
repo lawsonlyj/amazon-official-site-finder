@@ -171,6 +171,16 @@ def _pattern_release_status(cycle_summary: dict, balance_summary: dict, threshol
         cycle_summary.get("recommended_pattern_release"),
         balance_summary.get("recommended_pattern_release"),
     )
+    source_kind = _first_present(
+        cycle_summary.get("recommended_pattern_release_source_kind"),
+        balance_summary.get("pattern_release_source_kind"),
+        "",
+    )
+    source_path = _first_present(
+        cycle_summary.get("recommended_pattern_release_source_path"),
+        balance_summary.get("pattern_release_source_path"),
+        "",
+    )
     correct = _to_int(
         _first_present(
             cycle_summary.get("pattern_release_correct_rows"),
@@ -186,11 +196,22 @@ def _pattern_release_status(cycle_summary: dict, balance_summary: dict, threshol
         )
     )
     if recommendation == "narrow_pattern_release_candidate" and correct > 0 and wrong == 0:
+        if source_kind == "supplied_prior":
+            return {
+                "status": "historical_guarded_candidate",
+                "reason": "A supplied prior pattern release has clean historical labels but still needs current-batch spot-check labels before widening automation.",
+                "correct_rows": correct,
+                "wrong_rows": wrong,
+                "source_kind": source_kind,
+                "source_path": source_path,
+            }
         return {
-            "status": "guarded_candidate",
-            "reason": "A narrow pattern release recovers labeled over-rejected sites with zero labeled wrong releases.",
+            "status": "current_guarded_candidate",
+            "reason": "A current-cycle narrow pattern release recovers labeled over-rejected sites with zero labeled wrong releases.",
             "correct_rows": correct,
             "wrong_rows": wrong,
+            "source_kind": source_kind or "current_cycle",
+            "source_path": source_path,
         }
     if wrong > 0:
         return {
@@ -198,12 +219,16 @@ def _pattern_release_status(cycle_summary: dict, balance_summary: dict, threshol
             "reason": "Pattern release would release labeled wrong candidates.",
             "correct_rows": correct,
             "wrong_rows": wrong,
+            "source_kind": source_kind,
+            "source_path": source_path,
         }
     return {
         "status": "not_ready",
         "reason": "No actionable clean pattern release is currently available.",
         "correct_rows": correct,
         "wrong_rows": wrong,
+        "source_kind": source_kind,
+        "source_path": source_path,
     }
 
 
@@ -274,7 +299,10 @@ def _workflow_status(
         return "not_converged_threshold_review_needed"
     if lane_status["status"] in {"protected_by_filled_labels", "needs_more_labels"}:
         return "partially_converged_keep_review_lanes"
-    if lane_status["status"] == "candidate_for_downgrade" or pattern_status["status"] == "guarded_candidate":
+    if lane_status["status"] == "candidate_for_downgrade" or pattern_status["status"] in {
+        "current_guarded_candidate",
+        "historical_guarded_candidate",
+    }:
         return "candidate_changes_require_regression"
     return "converged_current_rules"
 
@@ -311,13 +339,22 @@ def _open_requirements(
                 "action": "Inspect threshold boundary and add regression tests before changing score thresholds.",
             }
         )
-    if pattern_status["status"] == "guarded_candidate":
+    if pattern_status["status"] == "current_guarded_candidate":
         out.append(
             {
                 "id": "guarded_pattern_release",
                 "status": "candidate",
                 "reason": pattern_status["reason"],
                 "action": "Keep the guarded pattern release enabled only with risky-subdomain guards and spot-check rows.",
+            }
+        )
+    elif pattern_status["status"] == "historical_guarded_candidate":
+        out.append(
+            {
+                "id": "validate_historical_pattern_release",
+                "status": "candidate",
+                "reason": pattern_status["reason"],
+                "action": "Treat the supplied prior pattern release as a historical candidate; require current label-gap spot-checks before widening automatic release.",
             }
         )
     elif pattern_status["status"] == "blocked_by_wrong_release":
