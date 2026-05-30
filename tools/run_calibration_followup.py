@@ -125,6 +125,7 @@ def _build_decision(
         "filled_labeled_rows": status.get("filled_labeled_rows"),
         "filled_decisive_rows": status.get("filled_decisive_rows"),
         "protected_lanes_next_review_task_rows": convergence_summary.get("protected_lanes_next_review_task_rows"),
+        "protected_lanes_priority_task_rows": (report.get("summary") or {}).get("protected_lanes_priority_task_rows"),
         "regression_gate_status": status.get("regression_gate_status"),
         "allowed_gate_count": gate_summary.get("allowed_gate_count", 0),
         "candidate_gate_count": gate_summary.get("candidate_gate_count", 0),
@@ -157,11 +158,20 @@ def _build_decision(
             "protected_lanes_next_review_task_xlsx": (report.get("outputs") or {}).get(
                 "protected_lanes_next_review_task_xlsx", ""
             ),
+            "protected_lanes_priority_task_xlsx": (report.get("outputs") or {}).get(
+                "protected_lanes_priority_task_xlsx", ""
+            ),
             "protected_lanes_next_review_task_verification_json": (report.get("outputs") or {}).get(
                 "protected_lanes_next_review_task_verification_json", ""
             ),
+            "protected_lanes_priority_task_verification_json": (report.get("outputs") or {}).get(
+                "protected_lanes_priority_task_verification_json", ""
+            ),
             "protected_lanes_next_review_task_verification_md": (report.get("outputs") or {}).get(
                 "protected_lanes_next_review_task_verification_md", ""
+            ),
+            "protected_lanes_priority_task_verification_md": (report.get("outputs") or {}).get(
+                "protected_lanes_priority_task_verification_md", ""
             ),
             "regression_cases_csv": (report.get("outputs") or {}).get("regression_cases_csv", ""),
             "regression_gate_json": (report.get("outputs") or {}).get("regression_gate_json", ""),
@@ -185,6 +195,7 @@ def _render_decision_markdown(decision: dict) -> str:
         f"- Recommended thresholds: {summary.get('recommended_global_accept_threshold')}/{summary.get('recommended_second_pass_threshold')}",
         f"- Current threshold ties best accuracy: {str(summary.get('current_threshold_ties_best_accuracy')).lower()}",
         f"- Protected-lane next review rows: {summary.get('protected_lanes_next_review_task_rows')}",
+        f"- Protected-lane priority review rows: {summary.get('protected_lanes_priority_task_rows')}",
         f"- Filled labeled/decisive rows: {summary.get('filled_labeled_rows')}/{summary.get('filled_decisive_rows')}",
         f"- Regression gate status: {summary.get('regression_gate_status')}",
         f"- Allowed gates: {', '.join(summary.get('allowed_gates') or []) or 'None'}",

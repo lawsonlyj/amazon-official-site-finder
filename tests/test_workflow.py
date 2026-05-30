@@ -44,6 +44,7 @@ from tools.evaluate_workflow_balance import evaluate_balance, evaluate_balance_f
 from tools.build_balance_report import build_balance_report
 from tools.build_calibration_label_gap_task import build_calibration_label_gap_task
 from tools.build_protected_lane_review_task import build_protected_lane_review_task
+from tools.build_protected_lane_priority_task import build_protected_lane_priority_task
 from tools.build_convergence_audit import build_convergence_audit
 from tools.build_calibration_regression_cases import build_calibration_regression_cases
 from tools.build_calibration_review_sample import build_calibration_review_sample
@@ -4617,6 +4618,15 @@ class OperationalCommandTests(unittest.TestCase):
                 "protected_lane_json": (output_dir / "protected_lanes_next_review_task_summary.json").exists(),
                 "protected_lane_verify_json": (output_dir / "protected_lanes_next_review_task_verification.json").exists(),
                 "protected_lane_verify_md": (output_dir / "protected_lanes_next_review_task_verification.md").exists(),
+                "protected_lane_priority_csv": (output_dir / "protected_lanes_priority_task.csv").exists(),
+                "protected_lane_priority_xlsx": (output_dir / "protected_lanes_priority_task.xlsx").exists(),
+                "protected_lane_priority_json": (output_dir / "protected_lanes_priority_task_summary.json").exists(),
+                "protected_lane_priority_verify_json": (
+                    output_dir / "protected_lanes_priority_task_verification.json"
+                ).exists(),
+                "protected_lane_priority_verify_md": (
+                    output_dir / "protected_lanes_priority_task_verification.md"
+                ).exists(),
                 "convergence_audit_json": (output_dir / "convergence_audit.json").exists(),
                 "convergence_audit_md": (output_dir / "convergence_audit.md").exists(),
             }
@@ -4629,6 +4639,9 @@ class OperationalCommandTests(unittest.TestCase):
             convergence_data = json.loads((output_dir / "convergence_audit.json").read_text(encoding="utf-8"))
             protected_verify = json.loads(
                 (output_dir / "protected_lanes_next_review_task_verification.json").read_text(encoding="utf-8")
+            )
+            protected_priority_verify = json.loads(
+                (output_dir / "protected_lanes_priority_task_verification.json").read_text(encoding="utf-8")
             )
 
         self.assertEqual(report["summary"]["sample_rows"], 2)
@@ -4655,29 +4668,43 @@ class OperationalCommandTests(unittest.TestCase):
         self.assertTrue(output_exists["protected_lane_json"])
         self.assertTrue(output_exists["protected_lane_verify_json"])
         self.assertTrue(output_exists["protected_lane_verify_md"])
+        self.assertTrue(output_exists["protected_lane_priority_csv"])
+        self.assertTrue(output_exists["protected_lane_priority_xlsx"])
+        self.assertTrue(output_exists["protected_lane_priority_json"])
+        self.assertTrue(output_exists["protected_lane_priority_verify_json"])
+        self.assertTrue(output_exists["protected_lane_priority_verify_md"])
         self.assertTrue(output_exists["convergence_audit_json"])
         self.assertTrue(output_exists["convergence_audit_md"])
         self.assertEqual(report["summary"]["empty_eval_labeled_rows"], 0)
         self.assertIn("label_gap_task_rows", report["summary"])
         self.assertIn("label_gap_high_priority_task_rows", report["summary"])
         self.assertIn("protected_lanes_next_review_task_rows", report["summary"])
+        self.assertIn("protected_lanes_priority_task_rows", report["summary"])
         self.assertIn("convergence_state", report["summary"])
         self.assertIn("threshold_decision", report["summary"])
         self.assertTrue(report["summary"]["protected_lanes_next_review_task_verification_passed"])
+        self.assertTrue(report["summary"]["protected_lanes_priority_task_verification_passed"])
         self.assertIn("label_gap_task", report)
         self.assertIn("label_gap_high_priority_task", report)
         self.assertIn("protected_lanes_next_review_task", report)
         self.assertIn("protected_lanes_next_review_task_verification", report)
+        self.assertIn("protected_lanes_priority_task", report)
+        self.assertIn("protected_lanes_priority_task_verification", report)
         self.assertIn("convergence_audit", report)
         self.assertEqual(report["summary"]["label_gap_high_priority_task_rows"], 0)
         self.assertEqual(report["summary"]["protected_lanes_next_review_task_rows"], 2)
+        self.assertEqual(report["summary"]["protected_lanes_priority_task_rows"], 2)
         self.assertEqual({row["provider_id"] for row in protected_lane_rows}, {"batch-recall", "batch-precision"})
         self.assertIn("provider_detail_url", protected_lane_rows[0])
         self.assertTrue(protected_verify["summary"]["passed"])
         self.assertEqual(protected_verify["summary"]["row_count"], 2)
+        self.assertTrue(protected_priority_verify["summary"]["passed"])
+        self.assertEqual(protected_priority_verify["summary"]["row_count"], 2)
         self.assertEqual(status_data["summary"]["label_gap_task_rows"], report["summary"]["label_gap_task_rows"])
         self.assertEqual(status_data["summary"]["label_gap_high_priority_task_rows"], 0)
+        self.assertEqual(status_data["summary"]["protected_lanes_priority_task_rows"], 2)
         self.assertIn("protected_lanes_next_review_task_xlsx", status_data["artifacts"])
+        self.assertIn("protected_lanes_priority_task_xlsx", status_data["artifacts"])
         self.assertEqual(high_gap_rows, [])
         self.assertIn("release_actionable_safe_patterns", report["summary"])
         self.assertEqual(report["summary"]["actionable_release_validation_rows"], 1)
@@ -4861,14 +4888,18 @@ class OperationalCommandTests(unittest.TestCase):
         self.assertIn("pattern_release_decision", decision["summary"])
         self.assertIn("current_threshold_ties_best_accuracy", decision["summary"])
         self.assertIn("protected_lanes_next_review_task_rows", decision["summary"])
+        self.assertIn("protected_lanes_priority_task_rows", decision["summary"])
         self.assertIn("blocked_gates", decision["summary"])
         self.assertIn("blocked_gate_count", decision["summary"])
         self.assertIn("convergence_audit", decision)
         self.assertIn("application_gate_checks", decision)
         self.assertIn("convergence_audit_json", decision["outputs"])
         self.assertIn("protected_lanes_next_review_task_xlsx", decision["outputs"])
+        self.assertIn("protected_lanes_priority_task_xlsx", decision["outputs"])
         self.assertIn("protected_lanes_next_review_task_verification_json", decision["outputs"])
+        self.assertIn("protected_lanes_priority_task_verification_json", decision["outputs"])
         self.assertIn("protected_lanes_next_review_task_verification_md", decision["outputs"])
+        self.assertIn("protected_lanes_priority_task_verification_md", decision["outputs"])
         self.assertIn("Threshold decision", decision_md)
         self.assertIn("Next Actions", decision_md)
 
@@ -6951,6 +6982,129 @@ class OperationalCommandTests(unittest.TestCase):
         self.assertIn("provider_detail_url", out_rows[0])
         self.assertIn("HYPERLINK", sheet_xml)
         self.assertEqual(summary["excluded_filled_rows"], 2)
+
+    def test_build_protected_lane_priority_task_balances_high_value_boundaries(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source = root / "protected.csv"
+            output_csv = root / "priority.csv"
+            output_xlsx = root / "priority.xlsx"
+            output_json = root / "priority.json"
+            rows = [
+                {
+                    "sample_priority": "74",
+                    "review_reason": "precision_generic_identity_term_risk",
+                    "agent_b_decision": "unsure",
+                    "provider_id": "generic-1",
+                    "provider_name": "AA Consulting",
+                    "provider_detail_url": "https://amazon.example/generic-1",
+                    "official_url": "https://aa.example",
+                    "candidate_url": "https://aa.example",
+                    "source_confidence": "100",
+                    "supporting_facts": "page_contains_exact_provider_name",
+                    "counter_evidence": "",
+                    "evidence_summary": "domain_exact_provider_slug",
+                    "manual_decision": "",
+                    "manual_url": "",
+                    "notes": "",
+                },
+                {
+                    "sample_priority": "96",
+                    "review_reason": "precision_low_confidence_auto_match",
+                    "agent_b_decision": "unsure",
+                    "provider_id": "low-1",
+                    "provider_name": "E TECH HUB",
+                    "provider_detail_url": "https://amazon.example/low-1",
+                    "official_url": "https://etech.example",
+                    "candidate_url": "https://etech.example",
+                    "source_confidence": "82",
+                    "supporting_facts": "",
+                    "counter_evidence": "candidate_pages_not_fetchable; provider_name_not_found_on_candidate_pages",
+                    "evidence_summary": "domain_exact_provider_slug",
+                    "manual_decision": "",
+                    "manual_url": "",
+                    "notes": "",
+                },
+                {
+                    "sample_priority": "74",
+                    "review_reason": "precision_low_confidence_auto_match",
+                    "agent_b_decision": "accept",
+                    "provider_id": "low-filled",
+                    "provider_name": "Filled Low",
+                    "provider_detail_url": "https://amazon.example/low-filled",
+                    "official_url": "https://filled.example",
+                    "candidate_url": "https://filled.example",
+                    "source_confidence": "82",
+                    "supporting_facts": "",
+                    "counter_evidence": "",
+                    "evidence_summary": "",
+                    "manual_decision": "accept",
+                    "manual_url": "",
+                    "notes": "",
+                },
+                {
+                    "sample_priority": "96",
+                    "review_reason": "recall_unresolved_top_candidate",
+                    "agent_b_decision": "unsure",
+                    "provider_id": "recall-1",
+                    "provider_name": "Recall One",
+                    "provider_detail_url": "https://amazon.example/recall-1",
+                    "official_url": "",
+                    "candidate_url": "https://recall.example",
+                    "source_confidence": "69",
+                    "supporting_facts": "",
+                    "counter_evidence": "provider_name_not_found_on_candidate_pages",
+                    "evidence_summary": "identity_cap_ambiguous_name_requires_page_and_service",
+                    "manual_decision": "",
+                    "manual_url": "",
+                    "notes": "",
+                },
+                {
+                    "sample_priority": "96",
+                    "review_reason": "precision_slug_extension_identity_risk",
+                    "agent_b_decision": "accept",
+                    "provider_id": "slug-1",
+                    "provider_name": "Slug One",
+                    "provider_detail_url": "https://amazon.example/slug-1",
+                    "official_url": "https://slug.example",
+                    "candidate_url": "https://slug.example",
+                    "source_confidence": "100",
+                    "supporting_facts": "service_content_matches_amazon_provider",
+                    "counter_evidence": "",
+                    "evidence_summary": "domain_contains_provider_slug",
+                    "manual_decision": "",
+                    "manual_url": "",
+                    "notes": "",
+                },
+            ]
+            _write_test_csv(source, rows)
+
+            summary = build_protected_lane_priority_task(
+                source_csv=source,
+                output_csv=output_csv,
+                output_xlsx=output_xlsx,
+                output_json=output_json,
+                max_rows=4,
+                max_per_reason=1,
+            )
+            with output_csv.open(newline="", encoding="utf-8") as f:
+                out_rows = list(csv.DictReader(f))
+            with zipfile.ZipFile(output_xlsx) as z:
+                sheet_xml = z.read("xl/worksheets/sheet1.xml").decode("utf-8")
+            summary_json = json.loads(output_json.read_text(encoding="utf-8"))
+
+        self.assertEqual(summary["task_rows"], 4)
+        self.assertEqual(summary_json["task_rows"], 4)
+        self.assertEqual(set(summary["reason_counts"].values()), {1})
+        self.assertNotIn("low-filled", {row["provider_id"] for row in out_rows})
+        self.assertEqual(out_rows[0]["priority_rank"], "1")
+        self.assertIn("priority_reason", out_rows[0])
+        self.assertIn("decision_impact", out_rows[0])
+        self.assertTrue(any(row["priority_reason"] == "unfetchable_candidate_boundary" for row in out_rows))
+        self.assertTrue(any(row["priority_reason"] == "slug_extension_agentb_accept" for row in out_rows))
+        self.assertTrue(all(row["manual_decision"] == "" for row in out_rows))
+        self.assertIn("provider_detail_url", out_rows[0])
+        self.assertIn("HYPERLINK", sheet_xml)
 
     def test_build_convergence_audit_keeps_75_75_and_routes_next_protected_labels(self):
         with tempfile.TemporaryDirectory() as tmp:

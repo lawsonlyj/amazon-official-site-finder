@@ -12,6 +12,7 @@ from tools.build_calibration_review_sample import build_calibration_review_sampl
 from tools.build_balance_report import build_balance_report
 from tools.build_calibration_label_gap_task import build_calibration_label_gap_task
 from tools.build_protected_lane_review_task import build_protected_lane_review_task
+from tools.build_protected_lane_priority_task import build_protected_lane_priority_task
 from tools.build_convergence_audit import build_convergence_audit
 from tools.build_calibration_regression_cases import build_calibration_regression_cases
 from tools.build_calibration_status_report import build_calibration_status_report
@@ -140,6 +141,11 @@ def run_calibration_cycle(
     protected_lane_task_json = out_dir / "protected_lanes_next_review_task_summary.json"
     protected_lane_task_verify_json = out_dir / "protected_lanes_next_review_task_verification.json"
     protected_lane_task_verify_md = out_dir / "protected_lanes_next_review_task_verification.md"
+    protected_lane_priority_csv = out_dir / "protected_lanes_priority_task.csv"
+    protected_lane_priority_xlsx = out_dir / "protected_lanes_priority_task.xlsx"
+    protected_lane_priority_json = out_dir / "protected_lanes_priority_task_summary.json"
+    protected_lane_priority_verify_json = out_dir / "protected_lanes_priority_task_verification.json"
+    protected_lane_priority_verify_md = out_dir / "protected_lanes_priority_task_verification.md"
     summary_json = out_dir / "calibration_cycle_summary.json"
     summary_md = out_dir / "calibration_cycle_summary.md"
     status_json = out_dir / "calibration_status.json"
@@ -384,6 +390,11 @@ def run_calibration_cycle(
             "protected_lanes_next_review_task_summary_json": str(protected_lane_task_json),
             "protected_lanes_next_review_task_verification_json": str(protected_lane_task_verify_json),
             "protected_lanes_next_review_task_verification_md": str(protected_lane_task_verify_md),
+            "protected_lanes_priority_task_csv": str(protected_lane_priority_csv),
+            "protected_lanes_priority_task_xlsx": str(protected_lane_priority_xlsx),
+            "protected_lanes_priority_task_summary_json": str(protected_lane_priority_json),
+            "protected_lanes_priority_task_verification_json": str(protected_lane_priority_verify_json),
+            "protected_lanes_priority_task_verification_md": str(protected_lane_priority_verify_md),
             "summary_json": str(summary_json),
             "summary_md": str(summary_md),
             "status_json": str(status_json),
@@ -443,14 +454,22 @@ def run_calibration_cycle(
         output_xlsx=protected_lane_task_xlsx,
         output_json=protected_lane_task_json,
     )
+    protected_lane_priority_task = build_protected_lane_priority_task(
+        source_csv=protected_lane_task_csv,
+        output_csv=protected_lane_priority_csv,
+        output_xlsx=protected_lane_priority_xlsx,
+        output_json=protected_lane_priority_json,
+    )
     report["calibration_status"] = status_report
     report["label_gap_task"] = label_gap_task
     report["label_gap_high_priority_task"] = high_priority_label_gap_task
     report["protected_lanes_next_review_task"] = protected_lane_task
+    report["protected_lanes_priority_task"] = protected_lane_priority_task
     report["summary"]["label_gap_task_rows"] = label_gap_task.get("task_rows")
     report["summary"]["label_gap_high_priority_rows"] = label_gap_task.get("priority_counts", {}).get("high", 0)
     report["summary"]["label_gap_high_priority_task_rows"] = high_priority_label_gap_task.get("task_rows")
     report["summary"]["protected_lanes_next_review_task_rows"] = protected_lane_task.get("task_rows")
+    report["summary"]["protected_lanes_priority_task_rows"] = protected_lane_priority_task.get("task_rows")
     summary_json.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
     status_report = build_calibration_status_report(
         calibration_cycle_json=summary_json,
@@ -487,6 +506,17 @@ def run_calibration_cycle(
     )
     report["protected_lanes_next_review_task_verification"] = protected_lane_task_verification
     report["summary"]["protected_lanes_next_review_task_verification_passed"] = protected_lane_task_verification[
+        "summary"
+    ].get("passed")
+    protected_lane_priority_verification = verify_protected_lane_review_task(
+        csv_path=protected_lane_priority_csv,
+        summary_json=protected_lane_priority_json,
+        xlsx_path=protected_lane_priority_xlsx,
+        output_json=protected_lane_priority_verify_json,
+        output_md=protected_lane_priority_verify_md,
+    )
+    report["protected_lanes_priority_task_verification"] = protected_lane_priority_verification
+    report["summary"]["protected_lanes_priority_task_verification_passed"] = protected_lane_priority_verification[
         "summary"
     ].get("passed")
     summary_json.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -530,6 +560,7 @@ def _render_markdown(report: dict) -> str:
         f"- Label-gap high-priority rows: {summary.get('label_gap_high_priority_rows')}",
         f"- Label-gap high-priority task rows: {summary.get('label_gap_high_priority_task_rows')}",
         f"- Protected-lane next review task rows: {summary.get('protected_lanes_next_review_task_rows')}",
+        f"- Protected-lane priority task rows: {summary.get('protected_lanes_priority_task_rows')}",
         f"- Actionable release validation rows: {summary['actionable_release_validation_rows']}",
         f"- Pattern candidate validation rows: {summary['pattern_validation_rows']}",
         f"- Pattern control validation rows: {summary['pattern_control_rows']}",
@@ -555,6 +586,7 @@ def _render_markdown(report: dict) -> str:
         f"- Review-lane decision: {summary.get('review_lane_decision') or 'not_audited'}",
         f"- Pattern-release decision: {summary.get('pattern_release_decision') or 'not_audited'}",
         f"- Protected-lane task verification passed: {summary.get('protected_lanes_next_review_task_verification_passed')}",
+        f"- Protected-lane priority task verification passed: {summary.get('protected_lanes_priority_task_verification_passed')}",
         "",
         "## Outputs",
         "",
