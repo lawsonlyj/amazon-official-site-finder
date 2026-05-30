@@ -27,6 +27,7 @@ DETAIL_FIELDS = [
     "manual_url",
     "normalized_decision",
     "normalized_manual_url",
+    "decision_quality_issue",
     "lane_kind",
     "calibration_outcome",
 ]
@@ -66,6 +67,9 @@ def evaluate_calibration_review_sample(
         "labeled_rows": len(labeled),
         "decisive_rows": len(decisive),
         "manual_decision_counts": dict(Counter(row["normalized_decision"] for row in labeled)),
+        "invalid_manual_decision_rows": sum(1 for row in details if row["decision_quality_issue"] == "invalid_manual_decision"),
+        "replace_missing_manual_url_rows": sum(1 for row in details if row["decision_quality_issue"] == "replace_missing_manual_url"),
+        "decision_quality_issue_rows": sum(1 for row in details if row["decision_quality_issue"]),
         "candidate_correct_rows": sum(1 for row in details if row["calibration_outcome"] == "candidate_correct"),
         "candidate_incorrect_rows": sum(1 for row in details if row["calibration_outcome"] == "candidate_incorrect"),
         "recall_useful_rows": sum(1 for row in details if row["calibration_outcome"] == "recall_candidate_useful"),
@@ -114,6 +118,8 @@ def _detail(row: dict[str, str]) -> dict[str, str]:
     decision = _decision(row)
     lane_kind = _lane_kind(row)
     outcome = _outcome(decision, lane_kind)
+    manual_decision = _first(row, "manual_decision", "your_decision", "decision")
+    normalized_manual_url = _normalize_url(_first(row, "manual_url", "your_true_official_url", "true_official_url"))
     return {
         "provider_id": _first(row, "provider_id"),
         "provider_name": _first(row, "provider_name"),
@@ -125,10 +131,11 @@ def _detail(row: dict[str, str]) -> dict[str, str]:
         "reason_for_unsure": _first(row, "reason_for_unsure"),
         "official_url": _normalize_url(_first(row, "official_url")),
         "candidate_url": _normalize_url(_first(row, "candidate_url", "current_or_candidate_url", "official_url")),
-        "manual_decision": _first(row, "manual_decision", "your_decision", "decision"),
+        "manual_decision": manual_decision,
         "manual_url": _first(row, "manual_url", "your_true_official_url", "true_official_url"),
         "normalized_decision": decision,
-        "normalized_manual_url": _normalize_url(_first(row, "manual_url", "your_true_official_url", "true_official_url")),
+        "normalized_manual_url": normalized_manual_url,
+        "decision_quality_issue": _decision_quality_issue(manual_decision, decision, normalized_manual_url),
         "lane_kind": lane_kind,
         "calibration_outcome": outcome,
     }
@@ -200,6 +207,11 @@ def _recommendations(details: list[dict[str, str]]) -> list[str]:
         ]
 
     recommendations: list[str] = []
+    quality_issues = [row for row in details if row["decision_quality_issue"]]
+    if quality_issues:
+        recommendations.append(
+            "Fix calibration fill-quality issues before applying threshold or rule changes; invalid decisions and replace rows without manual_url can distort calibration."
+        )
     precision_rows = [row for row in decisive if row["lane_kind"] == "precision"]
     precision_bad = [row for row in precision_rows if row["calibration_outcome"] == "candidate_incorrect"]
     recall_rows = [row for row in decisive if row["lane_kind"] == "recall"]
@@ -476,6 +488,14 @@ def _decision(row: dict[str, str]) -> str:
     return aliases.get(raw, raw if raw in {"accept", "replace", "reject", "unsure"} else "")
 
 
+def _decision_quality_issue(manual_decision: str, normalized_decision: str, normalized_manual_url: str) -> str:
+    if manual_decision.strip() and not normalized_decision:
+        return "invalid_manual_decision"
+    if normalized_decision == "replace" and not normalized_manual_url:
+        return "replace_missing_manual_url"
+    return ""
+
+
 def _read_table(path: Path) -> list[dict[str, str]]:
     if path.suffix.casefold() == ".xlsx":
         return _read_xlsx(path)
@@ -524,6 +544,9 @@ def _render_markdown(report: dict) -> str:
         f"- Sample rows: {summary['sample_rows']}",
         f"- Labeled rows: {summary['labeled_rows']}",
         f"- Decisive rows: {summary['decisive_rows']}",
+        f"- Decision quality issue rows: {summary['decision_quality_issue_rows']}",
+        f"- Invalid manual decisions: {summary['invalid_manual_decision_rows']}",
+        f"- Replace rows missing manual_url: {summary['replace_missing_manual_url_rows']}",
         f"- Candidate correct rows: {summary['candidate_correct_rows']}",
         f"- Candidate incorrect rows: {summary['candidate_incorrect_rows']}",
         f"- Recall useful rows: {summary['recall_useful_rows']}",

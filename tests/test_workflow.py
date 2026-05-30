@@ -5091,6 +5091,46 @@ class OperationalCommandTests(unittest.TestCase):
         self.assertEqual(report["pattern_rule_candidates"]["reject_pattern"][0]["pattern"], "has:page_contains_exact_provider_name")
         self.assertIn("Do not release", report["pattern_rule_candidates"]["reject_pattern"][0]["required_action"])
 
+    def test_evaluate_calibration_review_sample_reports_fill_quality_issues(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            sample = root / "bad_fill.csv"
+            out_csv = root / "details.csv"
+            _write_test_csv(
+                sample,
+                [
+                    {
+                        "provider_id": "bad-decision",
+                        "provider_name": "Bad Decision",
+                        "review_reason": "precision_low_confidence_auto_match",
+                        "official_url": "https://bad.example",
+                        "candidate_url": "https://bad.example",
+                        "manual_decision": "maybe",
+                        "manual_url": "",
+                    },
+                    {
+                        "provider_id": "missing-url",
+                        "provider_name": "Missing Url",
+                        "review_reason": "recall_unresolved_top_candidate",
+                        "official_url": "",
+                        "candidate_url": "https://candidate.example",
+                        "manual_decision": "replace",
+                        "manual_url": "",
+                    },
+                ],
+            )
+
+            report = evaluate_calibration_review_sample(sample=sample, output_csv=out_csv)
+            with out_csv.open(newline="", encoding="utf-8") as f:
+                rows = list(csv.DictReader(f))
+
+        self.assertEqual(report["summary"]["invalid_manual_decision_rows"], 1)
+        self.assertEqual(report["summary"]["replace_missing_manual_url_rows"], 1)
+        self.assertEqual(report["summary"]["decision_quality_issue_rows"], 2)
+        self.assertIn("Fix calibration fill-quality issues", report["recommendations"][0])
+        self.assertEqual(rows[0]["decision_quality_issue"], "invalid_manual_decision")
+        self.assertEqual(rows[1]["decision_quality_issue"], "replace_missing_manual_url")
+
     def test_evaluate_calibration_review_sample_exports_candidate_rule_patterns(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
