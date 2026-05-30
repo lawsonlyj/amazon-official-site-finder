@@ -50,6 +50,7 @@ from tools.simulate_pattern_release import simulate_pattern_release
 from tools.apply_pattern_release_experiment import apply_pattern_release_experiment
 from tools.apply_pattern_release_to_run import apply_pattern_release_to_run
 from tools.build_release_policy_report import build_release_policy_report
+from tools.build_threshold_boundary_report import build_threshold_boundary_report
 from tools.output_layout import DEFAULT_SECOND_PASS_ACCEPT_THRESHOLD, WORKFLOW_VERSION
 
 
@@ -3369,6 +3370,113 @@ class OperationalCommandTests(unittest.TestCase):
         self.assertEqual(report["summary"]["accuracy_delta"], 0.04)
         self.assertEqual(report["summary"]["false_official_delta"], 0)
         self.assertIn("do not globally lower thresholds", md_text)
+        self.assertTrue(output_json_exists)
+
+    def test_build_threshold_boundary_report_keeps_threshold_and_review_band(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            labeled = root / "labeled.json"
+            pattern = root / "pattern.json"
+            policy = root / "policy.json"
+            output_json = root / "boundary.json"
+            output_md = root / "boundary.md"
+            labeled.write_text(
+                json.dumps(
+                    {
+                        "threshold_simulations": [
+                            {
+                                "threshold": 75,
+                                "overall_accuracy": 0.81,
+                                "auto_precision": 0.9024,
+                                "official_recall": 0.8605,
+                                "false_official_rows": 8,
+                                "over_rejected_rows": 11,
+                                "official_output_rows": 82,
+                                "correct_official_rows": 74,
+                            },
+                            {
+                                "threshold": 82,
+                                "overall_accuracy": 0.81,
+                                "auto_precision": 0.9231,
+                                "official_recall": 0.8372,
+                                "false_official_rows": 6,
+                                "over_rejected_rows": 13,
+                                "official_output_rows": 78,
+                                "correct_official_rows": 72,
+                            },
+                            {
+                                "threshold": 85,
+                                "overall_accuracy": 0.78,
+                                "auto_precision": 0.9315,
+                                "official_recall": 0.7907,
+                                "false_official_rows": 5,
+                                "over_rejected_rows": 17,
+                                "official_output_rows": 73,
+                                "correct_official_rows": 68,
+                            },
+                        ],
+                        "agent_b_recall_release_simulations": [
+                            {
+                                "agent_b_evidence_threshold": 0,
+                                "correct_recovery_rows": 6,
+                                "wrong_release_rows": 9,
+                                "release_precision": 0.4,
+                            },
+                            {
+                                "agent_b_evidence_threshold": 75,
+                                "correct_recovery_rows": 1,
+                                "wrong_release_rows": 3,
+                                "release_precision": 0.25,
+                            },
+                        ],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            pattern.write_text(
+                json.dumps(
+                    {
+                        "summary": {
+                            "selected_actionable_pattern_count": 2,
+                            "selected_actionable_correct_recovery_rows": 4,
+                            "selected_actionable_wrong_release_rows": 0,
+                        }
+                    }
+                ),
+                encoding="utf-8",
+            )
+            policy.write_text(
+                json.dumps(
+                    {
+                        "summary": {
+                            "recommended_first_pass_threshold": 75,
+                            "recommended_second_pass_threshold": 75,
+                            "calibrated_pattern_release": "enabled_with_guard_no_batch_release",
+                        }
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            report = build_threshold_boundary_report(
+                labeled_eval_json=labeled,
+                pattern_release_json=pattern,
+                policy_report_json=policy,
+                output_json=output_json,
+                output_md=output_md,
+            )
+            md_text = output_md.read_text(encoding="utf-8")
+            output_json_exists = output_json.exists()
+
+        self.assertEqual(report["summary"]["recommended_global_accept_threshold"], 75)
+        self.assertEqual(report["summary"]["best_labeled_accuracy_threshold"], 75)
+        self.assertEqual(report["summary"]["precision_watch_min"], 75)
+        self.assertEqual(report["summary"]["precision_watch_max"], 81)
+        self.assertEqual(report["thresholds"]["precision_boundary"]["threshold"], 82)
+        self.assertEqual(report["thresholds"]["precision_boundary"]["recommended_use"], "review_lane_only")
+        self.assertEqual(report["summary"]["raw_agent_b_recall_release"], "manual_only")
+        self.assertEqual(report["summary"]["calibrated_pattern_release"], "enabled_with_guard_no_batch_release")
+        self.assertIn("high-value precision review band", md_text)
         self.assertTrue(output_json_exists)
 
     def test_build_calibration_review_sample_prioritizes_high_value_rows(self):
