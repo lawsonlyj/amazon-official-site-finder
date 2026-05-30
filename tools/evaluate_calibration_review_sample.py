@@ -60,8 +60,8 @@ def evaluate_calibration_review_sample(
 ) -> dict:
     rows = _read_table(Path(sample))
     details = [_detail(row) for row in rows]
-    labeled = [row for row in details if row["normalized_decision"]]
-    decisive = [row for row in labeled if row["normalized_decision"] != "unsure"]
+    labeled = _valid_labeled(details)
+    decisive = _valid_decisive(details)
     summary = {
         "sample_rows": len(details),
         "labeled_rows": len(labeled),
@@ -117,9 +117,10 @@ def evaluate_calibration_review_sample(
 def _detail(row: dict[str, str]) -> dict[str, str]:
     decision = _decision(row)
     lane_kind = _lane_kind(row)
-    outcome = _outcome(decision, lane_kind)
     manual_decision = _first(row, "manual_decision", "your_decision", "decision")
     normalized_manual_url = _normalize_url(_first(row, "manual_url", "your_true_official_url", "true_official_url"))
+    issue = _decision_quality_issue(manual_decision, decision, normalized_manual_url)
+    outcome = "fill_quality_issue" if issue else _outcome(decision, lane_kind)
     return {
         "provider_id": _first(row, "provider_id"),
         "provider_name": _first(row, "provider_name"),
@@ -135,7 +136,7 @@ def _detail(row: dict[str, str]) -> dict[str, str]:
         "manual_url": _first(row, "manual_url", "your_true_official_url", "true_official_url"),
         "normalized_decision": decision,
         "normalized_manual_url": normalized_manual_url,
-        "decision_quality_issue": _decision_quality_issue(manual_decision, decision, normalized_manual_url),
+        "decision_quality_issue": issue,
         "lane_kind": lane_kind,
         "calibration_outcome": outcome,
     }
@@ -181,8 +182,8 @@ def _group_stats(rows: list[dict[str, str]], field: str) -> dict[str, dict]:
     for row in rows:
         grouped[row.get(field, "") or "(blank)"].append(row)
     for key, items in sorted(grouped.items()):
-        labeled = [row for row in items if row["normalized_decision"]]
-        decisive = [row for row in labeled if row["normalized_decision"] != "unsure"]
+        labeled = _valid_labeled(items)
+        decisive = _valid_decisive(items)
         decisions = Counter(row["normalized_decision"] for row in labeled)
         outcomes = Counter(row["calibration_outcome"] for row in items)
         out[key] = {
@@ -198,20 +199,28 @@ def _group_stats(rows: list[dict[str, str]], field: str) -> dict[str, dict]:
     return out
 
 
-def _recommendations(details: list[dict[str, str]]) -> list[str]:
-    labeled = [row for row in details if row["normalized_decision"]]
-    decisive = [row for row in labeled if row["normalized_decision"] != "unsure"]
-    if not labeled:
-        return [
-            "No filled calibration labels yet. Fill manual_decision, manual_url, and notes before changing thresholds or review lanes."
-        ]
+def _valid_labeled(rows: list[dict[str, str]]) -> list[dict[str, str]]:
+    return [row for row in rows if row["normalized_decision"] and not row["decision_quality_issue"]]
 
+
+def _valid_decisive(rows: list[dict[str, str]]) -> list[dict[str, str]]:
+    return [row for row in _valid_labeled(rows) if row["normalized_decision"] != "unsure"]
+
+
+def _recommendations(details: list[dict[str, str]]) -> list[str]:
     recommendations: list[str] = []
     quality_issues = [row for row in details if row["decision_quality_issue"]]
     if quality_issues:
         recommendations.append(
             "Fix calibration fill-quality issues before applying threshold or rule changes; invalid decisions and replace rows without manual_url can distort calibration."
         )
+    labeled = _valid_labeled(details)
+    decisive = _valid_decisive(details)
+    if not labeled:
+        recommendations.append(
+            "No valid filled calibration labels yet. Fill manual_decision, manual_url, and notes before changing thresholds or review lanes."
+        )
+        return recommendations
     precision_rows = [row for row in decisive if row["lane_kind"] == "precision"]
     precision_bad = [row for row in precision_rows if row["calibration_outcome"] == "candidate_incorrect"]
     recall_rows = [row for row in decisive if row["lane_kind"] == "recall"]
@@ -282,8 +291,8 @@ def _pattern_recommendations(details: list[dict[str, str]]) -> list[dict]:
             groups[row["pattern_match"]].append(row)
     out = []
     for pattern, rows in sorted(groups.items()):
-        labeled = [row for row in rows if row["normalized_decision"]]
-        decisive = [row for row in labeled if row["normalized_decision"] != "unsure"]
+        labeled = _valid_labeled(rows)
+        decisive = _valid_decisive(rows)
         good = [
             row
             for row in decisive
@@ -338,8 +347,8 @@ def _lane_recommendations(details: list[dict[str, str]]) -> list[dict]:
             groups[row["review_reason"]].append(row)
     out = []
     for reason, rows in sorted(groups.items()):
-        labeled = [row for row in rows if row["normalized_decision"]]
-        decisive = [row for row in labeled if row["normalized_decision"] != "unsure"]
+        labeled = _valid_labeled(rows)
+        decisive = _valid_decisive(rows)
         outcomes = Counter(row["calibration_outcome"] for row in decisive)
         lane_kind = _first(rows[0], "lane_kind")
         recommendation, explanation, required_action = _lane_decision(reason, lane_kind, outcomes, len(decisive))

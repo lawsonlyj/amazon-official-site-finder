@@ -5127,9 +5127,14 @@ class OperationalCommandTests(unittest.TestCase):
         self.assertEqual(report["summary"]["invalid_manual_decision_rows"], 1)
         self.assertEqual(report["summary"]["replace_missing_manual_url_rows"], 1)
         self.assertEqual(report["summary"]["decision_quality_issue_rows"], 2)
+        self.assertEqual(report["summary"]["labeled_rows"], 0)
+        self.assertEqual(report["summary"]["decisive_rows"], 0)
+        self.assertEqual(report["summary"]["recall_useful_rows"], 0)
         self.assertIn("Fix calibration fill-quality issues", report["recommendations"][0])
         self.assertEqual(rows[0]["decision_quality_issue"], "invalid_manual_decision")
+        self.assertEqual(rows[0]["calibration_outcome"], "fill_quality_issue")
         self.assertEqual(rows[1]["decision_quality_issue"], "replace_missing_manual_url")
+        self.assertEqual(rows[1]["calibration_outcome"], "fill_quality_issue")
 
     def test_evaluate_calibration_review_sample_exports_candidate_rule_patterns(self):
         with tempfile.TemporaryDirectory() as tmp:
