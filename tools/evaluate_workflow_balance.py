@@ -5,6 +5,7 @@ import csv
 import json
 import re
 import sys
+from collections import Counter
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -168,9 +169,16 @@ def _evaluate_balance_from_labels(
             details = _annotate_agent_b(details, agent_b_rows)
     overall = _summarize(details)
     agent_b_recall_release_simulations = []
+    manual_review_lanes = []
+    manual_review_lane_drop_simulations = []
     if run_dir:
         if review_task_rows is not None:
             overall.update(_summarize_manual_review_capture(details, len(review_task_rows)))
+            manual_review_lanes = _summarize_manual_review_lanes(details, review_task_rows)
+            manual_review_lane_drop_simulations = _manual_review_lane_drop_simulations(
+                manual_review_lanes,
+                len(review_task_rows),
+            )
         if agent_b_rows is not None:
             overall.update(_summarize_agent_b_balance(details, agent_b_rows))
             agent_b_recall_release_simulations = _agent_b_recall_release_simulations(details)
@@ -181,6 +189,8 @@ def _evaluate_balance_from_labels(
         "overall": overall,
         "threshold_simulations": _threshold_simulations(labels, candidate_rows, simulate_thresholds),
         "agent_b_recall_release_simulations": agent_b_recall_release_simulations,
+        "manual_review_lanes": manual_review_lanes,
+        "manual_review_lane_drop_simulations": manual_review_lane_drop_simulations,
         "inputs": {
             "candidate_final": str(candidate_final),
             **inputs,
@@ -415,6 +425,74 @@ def _summarize_manual_review_capture(details: list[dict[str, str]], review_task_
         "manual_review_false_official_share": _ratio(false_official_reviewed, len(reviewed)),
         "manual_review_correct_official_share": _ratio(correct_official_reviewed, len(reviewed)),
     }
+
+
+def _summarize_manual_review_lanes(
+    details: list[dict[str, str]],
+    review_task_rows: list[dict[str, str]],
+) -> list[dict]:
+    review_counts = Counter(row.get("review_reason", "") for row in review_task_rows)
+    reviewed_details = [row for row in details if row.get("manual_review_required") == "yes"]
+    all_reasons = sorted(
+        set(review_counts)
+        | {row.get("manual_review_reason", "") for row in reviewed_details if row.get("manual_review_reason")}
+    )
+    out = []
+    for reason in all_reasons:
+        lane_details = [row for row in reviewed_details if row.get("manual_review_reason") == reason]
+        outcome_counts = _counts(row["outcome"] for row in lane_details)
+        labeled_rows = len(lane_details)
+        risk_rows = outcome_counts.get("false_official", 0) + outcome_counts.get("over_rejected", 0)
+        out.append(
+            {
+                "review_reason": reason,
+                "review_task_rows": review_counts.get(reason, 0),
+                "labeled_rows": labeled_rows,
+                "false_official_rows": outcome_counts.get("false_official", 0),
+                "over_rejected_rows": outcome_counts.get("over_rejected", 0),
+                "correct_official_rows": outcome_counts.get("correct_official", 0),
+                "correct_no_official_rows": outcome_counts.get("correct_no_official", 0),
+                "risk_rows": risk_rows,
+                "risk_share_of_labeled_lane": _ratio(risk_rows, labeled_rows),
+                "correct_share_of_labeled_lane": _ratio(
+                    outcome_counts.get("correct_official", 0) + outcome_counts.get("correct_no_official", 0),
+                    labeled_rows,
+                ),
+            }
+        )
+    return sorted(
+        out,
+        key=lambda row: (
+            -(row["risk_rows"] or 0),
+            -(row["review_task_rows"] or 0),
+            row["review_reason"],
+        ),
+    )
+
+
+def _manual_review_lane_drop_simulations(lanes: list[dict], review_task_rows: int) -> list[dict]:
+    out = []
+    for lane in lanes:
+        out.append(
+            {
+                "drop_review_reason": lane["review_reason"],
+                "manual_review_rows_after_drop": review_task_rows - lane.get("review_task_rows", 0),
+                "manual_review_rows_removed": lane.get("review_task_rows", 0),
+                "known_false_official_missed_if_dropped": lane.get("false_official_rows", 0),
+                "known_over_rejected_missed_if_dropped": lane.get("over_rejected_rows", 0),
+                "known_correct_reviews_removed_if_dropped": lane.get("correct_official_rows", 0)
+                + lane.get("correct_no_official_rows", 0),
+            }
+        )
+    return sorted(
+        out,
+        key=lambda row: (
+            row["known_false_official_missed_if_dropped"] > 0,
+            row["known_over_rejected_missed_if_dropped"] > 0,
+            -row["manual_review_rows_removed"],
+            row["drop_review_reason"],
+        ),
+    )
 
 
 def _summarize_agent_b_balance(details: list[dict[str, str]], agent_b_rows: list[dict[str, str]]) -> dict:

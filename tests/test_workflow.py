@@ -2338,6 +2338,14 @@ class OperationalCommandTests(unittest.TestCase):
         detail_by_id = {row["provider_id"]: row for row in summary["details"]}
         self.assertEqual(detail_by_id["p-4"]["manual_review_reason"], "identity_weak_or_conflicting")
         self.assertEqual(detail_by_id["p-3"]["agent_b_suggested_domain"], "three.example")
+        lanes = {row["review_reason"]: row for row in summary["manual_review_lanes"]}
+        self.assertEqual(lanes["identity_weak_or_conflicting"]["false_official_rows"], 1)
+        self.assertEqual(lanes["recall_unresolved_near_threshold"]["over_rejected_rows"], 1)
+        self.assertEqual(lanes["precision_second_pass_accepted_85_plus"]["correct_official_rows"], 1)
+        drop = {row["drop_review_reason"]: row for row in summary["manual_review_lane_drop_simulations"]}
+        self.assertEqual(drop["identity_weak_or_conflicting"]["known_false_official_missed_if_dropped"], 1)
+        self.assertEqual(drop["recall_unresolved_near_threshold"]["known_over_rejected_missed_if_dropped"], 1)
+        self.assertEqual(drop["precision_second_pass_accepted_85_plus"]["known_correct_reviews_removed_if_dropped"], 1)
 
     def test_evaluate_workflow_balance_can_reuse_labeled_details(self):
         with tempfile.TemporaryDirectory() as tmp:
