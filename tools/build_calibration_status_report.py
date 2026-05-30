@@ -101,6 +101,11 @@ def build_calibration_status_report(
                     threshold_summary.get("selected_actionable_wrong_rows"),
                 )
             ),
+            "pattern_release_source_path": _first_present(
+                cycle_summary.get("recommended_pattern_release_source_path"),
+                balance_summary.get("pattern_release_source_path"),
+                "",
+            ),
             "open_requirement_count": len(open_requirements),
             "label_target_count": len(label_targets),
             "high_priority_label_target_count": sum(1 for target in label_targets if target.get("priority") == "high"),
@@ -540,6 +545,7 @@ def _render_markdown(report: dict) -> str:
         f"- Protected review lanes: {summary['protected_review_lane_count']}",
         f"- Lane needs-more-label rows: {summary['lane_needs_more_label_rows']}",
         f"- Pattern release correct/wrong rows: {summary['pattern_release_correct_rows']}/{summary['pattern_release_wrong_rows']}",
+        f"- Pattern release source: {summary.get('pattern_release_source_path') or 'not_evaluated'}",
         f"- Label targets: {summary['label_target_count']} total, {summary['high_priority_label_target_count']} high priority",
         f"- Decisive labels still needed: {summary['decisive_rows_needed']} total, {summary['high_priority_decisive_rows_needed']} high priority",
         "",

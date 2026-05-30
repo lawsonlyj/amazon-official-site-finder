@@ -3500,6 +3500,7 @@ class OperationalCommandTests(unittest.TestCase):
         self.assertEqual(report["summary"]["recommended_threshold"], 75)
         self.assertEqual(report["summary"]["recommended_agent_b_recall_release"], "manual_only")
         self.assertEqual(report["summary"]["recommended_pattern_release"], "narrow_pattern_release_candidate")
+        self.assertEqual(report["summary"]["pattern_release_source_path"], str(pattern_release))
         self.assertEqual(report["summary"]["pattern_release_correct_rows"], 4)
         self.assertEqual(report["summary"]["pattern_release_wrong_rows"], 0)
         self.assertEqual(report["summary"]["protected_review_lane_count"], 2)
@@ -3518,6 +3519,7 @@ class OperationalCommandTests(unittest.TestCase):
         self.assertIn("Spot-Check Candidates", md_text)
         self.assertIn("Needs More Labels", md_text)
         self.assertIn("AgentB Recall Release Simulation", md_text)
+        self.assertIn(str(pattern_release), md_text)
         self.assertIn("Prefer narrow pattern release over global threshold relaxation", md_text)
         self.assertIn("Pattern Release", md_text)
         self.assertTrue(json_exists)
@@ -4550,6 +4552,7 @@ class OperationalCommandTests(unittest.TestCase):
         )
         self.assertEqual(report["summary"]["calibrated_pattern_release"], "enabled_with_guard_no_batch_release")
         self.assertEqual(report["summary"]["recommended_pattern_release"], "narrow_pattern_release_candidate")
+        self.assertEqual(report["summary"]["recommended_pattern_release_source_path"], str(pattern_release))
         self.assertEqual(report["summary"]["pattern_release_correct_rows"], 2)
         self.assertEqual(report["summary"]["pattern_release_wrong_rows"], 0)
         self.assertEqual(report["summary"]["protected_review_lane_count"], 2)
@@ -5157,6 +5160,7 @@ class OperationalCommandTests(unittest.TestCase):
                             "recommended_global_accept_threshold": 75,
                             "recommended_second_pass_threshold": 75,
                             "recommended_pattern_release": "narrow_pattern_release_candidate",
+                            "recommended_pattern_release_source_path": "prior/pattern_release.json",
                             "pattern_release_correct_rows": 4,
                             "pattern_release_wrong_rows": 0,
                             "protected_review_lane_count": 5,
@@ -5178,6 +5182,7 @@ class OperationalCommandTests(unittest.TestCase):
                         "summary": {
                             "protected_review_lane_count": 5,
                             "recommended_pattern_release": "narrow_pattern_release_candidate",
+                            "pattern_release_source_path": "prior/pattern_release.json",
                             "pattern_release_correct_rows": 4,
                             "pattern_release_wrong_rows": 0,
                             "protected_review_lanes": ["precision_low_confidence_auto_match"],
@@ -5245,6 +5250,7 @@ class OperationalCommandTests(unittest.TestCase):
         self.assertEqual(report["summary"]["workflow_status"], "not_converged_needs_human_labels")
         self.assertEqual(report["summary"]["threshold_status"], "stable_keep_current")
         self.assertEqual(report["summary"]["pattern_release_status"], "guarded_candidate")
+        self.assertEqual(report["summary"]["pattern_release_source_path"], "prior/pattern_release.json")
         self.assertEqual(report["summary"]["review_lane_status"], "needs_human_labels")
         self.assertIn("fill_calibration_sample", {item["id"] for item in report["open_requirements"]})
         self.assertEqual(report["artifacts"]["sample_xlsx"], str(sample_xlsx))
@@ -5261,6 +5267,7 @@ class OperationalCommandTests(unittest.TestCase):
         self.assertIn(str(sample_xlsx), report["next_actions"][0])
         self.assertIn(str(sample_xlsx), md_text)
         self.assertIn("precision_second_pass_accepted_lt70", md_text)
+        self.assertIn("prior/pattern_release.json", md_text)
         self.assertIn("decisive=0/5", md_text)
 
     def test_build_calibration_status_report_flags_candidate_changes_after_labels(self):
