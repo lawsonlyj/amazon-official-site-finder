@@ -23,6 +23,8 @@ from finder.search_sources import SearchCandidate, collect_candidates_for_querie
 from finder.text import domain_from_url, normalize_text, tokens
 from tools.build_linked_workbook import build_workbook
 from tools.output_layout import (
+    DEFAULT_MATCHED_REVIEW_CONFIDENCE_CUTOFF,
+    DEFAULT_SECOND_PASS_REVIEW_CONFIDENCE_CUTOFF,
     WORKFLOW_VERSION,
     agent_b_paths,
     first_existing,
@@ -371,7 +373,7 @@ def _is_high_risk_for_agent_b(row: dict[str, str], second_pass_row: dict[str, st
         return True
     if status != "matched":
         return True
-    if confidence < 85:
+    if confidence < DEFAULT_MATCHED_REVIEW_CONFIDENCE_CUTOFF:
         return True
     if "identity_cap_" in evidence or "page_industry_mismatch:" in evidence:
         return True
@@ -553,7 +555,7 @@ def _decide(candidate: dict, replacement: dict[str, str], review_reason: str = "
         replacement_score = _to_int(replacement.get("score"))
         confidence = max(score, replacement_score)
         return "unsure", "", max(0, min(69, confidence)), "recall_candidate_needs_human_confirmation"
-    if _is_precision_high_risk_reason(review_reason) and 70 <= score < 85 and "listing_logo_visual_match" not in facts:
+    if _is_precision_high_risk_reason(review_reason) and 70 <= score < DEFAULT_SECOND_PASS_REVIEW_CONFIDENCE_CUTOFF and "listing_logo_visual_match" not in facts:
         return "unsure", "", min(69, score), "high_risk_identity_needs_human_confirmation"
     if score >= 70 and "candidate_not_independent_official_site" not in counters:
         return "accept", "", min(100, score), ""
@@ -571,6 +573,7 @@ def _decide(candidate: dict, replacement: dict[str, str], review_reason: str = "
 
 def _is_precision_high_risk_reason(reason: str) -> bool:
     return reason in {
+        "precision_low_confidence_auto_match",
         "precision_second_pass_accepted_70_84",
         "precision_generic_identity_term_risk",
         "precision_slug_extension_identity_risk",

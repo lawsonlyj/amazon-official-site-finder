@@ -1637,7 +1637,16 @@ class OperationalCommandTests(unittest.TestCase):
                     "provider_detail_url": "https://amazon.example/low",
                     "official_url": "https://low.example",
                     "status": "matched",
-                    "confidence": "74",
+                    "confidence": str(DEFAULT_MATCHED_REVIEW_CONFIDENCE_CUTOFF - 1),
+                    "evidence_summary": "page_contains_exact_provider_name",
+                },
+                {
+                    "provider_id": "above",
+                    "provider_name": "Above Watch Band",
+                    "provider_detail_url": "https://amazon.example/above",
+                    "official_url": "https://above.example",
+                    "status": "matched",
+                    "confidence": str(DEFAULT_MATCHED_REVIEW_CONFIDENCE_CUTOFF),
                     "evidence_summary": "page_contains_exact_provider_name",
                 },
                 {
@@ -1669,6 +1678,7 @@ class OperationalCommandTests(unittest.TestCase):
 
         self.assertEqual(summary["input_rows"], 4)
         self.assertEqual(checked_ids, ["second", "low", "logo", "ambiguous"])
+        self.assertNotIn("above", checked_ids)
 
     def test_agent_b_keeps_high_risk_ambiguous_identity_as_unsure_without_exact_logo(self):
         with tempfile.TemporaryDirectory() as tmp:
