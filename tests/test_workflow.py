@@ -43,6 +43,7 @@ from tools.apply_agent_optimizations import apply_agent_optimizations
 from tools.evaluate_workflow_balance import evaluate_balance, evaluate_balance_from_details
 from tools.build_balance_report import build_balance_report
 from tools.build_calibration_label_gap_task import build_calibration_label_gap_task
+from tools.build_calibration_regression_cases import build_calibration_regression_cases
 from tools.build_calibration_review_sample import build_calibration_review_sample
 from tools.build_calibration_status_report import build_calibration_status_report
 from tools.evaluate_calibration_review_sample import evaluate_calibration_review_sample
@@ -4720,21 +4721,29 @@ class OperationalCommandTests(unittest.TestCase):
             )
             filled_eval_exists = (output_dir / "pattern_validation_sample_50_eval_filled.json").exists()
             rule_candidates_json_exists = (output_dir / "pattern_rule_candidates.json").exists()
+            regression_cases_json_exists = (output_dir / "calibration_regression_cases.json").exists()
+            regression_cases_csv_exists = (output_dir / "calibration_regression_cases.csv").exists()
             rule_candidates_md = output_dir / "pattern_rule_candidates.md"
             rule_candidates_md_text = rule_candidates_md.read_text(encoding="utf-8")
             summary_text = (output_dir / "calibration_cycle_summary.md").read_text(encoding="utf-8")
 
         self.assertTrue(filled_eval_exists)
         self.assertTrue(rule_candidates_json_exists)
+        self.assertTrue(regression_cases_json_exists)
+        self.assertTrue(regression_cases_csv_exists)
         self.assertEqual(report["summary"]["filled_eval_labeled_rows"], 2)
         self.assertEqual(report["summary"]["filled_pattern_recommendation_counts"]["reject_pattern"], 1)
         self.assertEqual(report["summary"]["filled_lane_recommendation_counts"]["keep_review_lane"], 1)
         self.assertEqual(report["summary"]["filled_lane_keep_review_count"], 1)
         self.assertEqual(report["summary"]["filled_rejected_pattern_count"], 1)
+        self.assertEqual(report["summary"]["filled_regression_case_rows"], 2)
+        self.assertEqual(report["summary"]["filled_recall_blocking_fixture_rows"], 1)
+        self.assertEqual(report["summary"]["filled_positive_fixture_rows"], 1)
         self.assertIn("Rejected Pattern", rule_candidates_md_text)
         self.assertIn("Filled Lane Recommendations", summary_text)
         self.assertIn("Filled Pattern Recommendations", summary_text)
         self.assertIn("Filled Candidate Rule Export", summary_text)
+        self.assertIn("Filled Regression Cases", summary_text)
         self.assertEqual(report["calibration_status"]["summary"]["workflow_status"], "partially_converged_keep_review_lanes")
 
     def test_run_calibration_cycle_merges_multiple_filled_samples(self):
@@ -5043,6 +5052,93 @@ class OperationalCommandTests(unittest.TestCase):
         self.assertIn("Candidate Rule Export", md_text)
         self.assertTrue(out_json_exists)
         self.assertEqual(detail_rows[1]["normalized_manual_url"], "https://real-recall.example")
+
+    def test_build_calibration_regression_cases_exports_decisive_fixtures(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            sample = root / "calibration.csv"
+            eval_json = root / "calibration.json"
+            cases_csv = root / "cases.csv"
+            cases_json = root / "cases.json"
+            cases_md = root / "cases.md"
+            _write_test_csv(
+                sample,
+                [
+                    {
+                        "provider_id": "precision-good",
+                        "provider_name": "Precision Good",
+                        "sample_reason": "low_confidence_label",
+                        "pattern_scope": "precision",
+                        "pattern_match": "has:page_contains_exact_provider_name",
+                        "review_reason": "precision_low_confidence_auto_match",
+                        "agent_b_decision": "accept",
+                        "official_url": "https://good.example",
+                        "candidate_url": "https://good.example",
+                        "manual_decision": "accept",
+                        "manual_url": "",
+                    },
+                    {
+                        "provider_id": "precision-bad",
+                        "provider_name": "Precision Bad",
+                        "sample_reason": "low_confidence_label",
+                        "pattern_scope": "precision",
+                        "pattern_match": "has:page_contains_exact_provider_name",
+                        "review_reason": "precision_low_confidence_auto_match",
+                        "agent_b_decision": "accept",
+                        "official_url": "https://bad.example",
+                        "candidate_url": "https://bad.example",
+                        "manual_decision": "replace",
+                        "manual_url": "https://real.example",
+                    },
+                    {
+                        "provider_id": "recall-bad",
+                        "provider_name": "Recall Bad",
+                        "sample_reason": "pattern_candidate_validation",
+                        "pattern_scope": "recall",
+                        "pattern_match": "agent_b_score<45",
+                        "review_reason": "recall_unresolved_top_candidate",
+                        "agent_b_decision": "unsure",
+                        "official_url": "",
+                        "candidate_url": "https://recallbad.example",
+                        "manual_decision": "reject",
+                        "manual_url": "",
+                    },
+                    {
+                        "provider_id": "skip-unsure",
+                        "provider_name": "Skip Unsure",
+                        "sample_reason": "pattern_candidate_validation",
+                        "pattern_scope": "recall",
+                        "pattern_match": "agent_b_score<45",
+                        "review_reason": "recall_unresolved_top_candidate",
+                        "agent_b_decision": "unsure",
+                        "official_url": "",
+                        "candidate_url": "https://skip.example",
+                        "manual_decision": "unsure",
+                        "manual_url": "",
+                    },
+                ],
+            )
+            evaluate_calibration_review_sample(sample=sample, output_json=eval_json)
+
+            report = build_calibration_regression_cases(
+                sample_eval_json=eval_json,
+                output_csv=cases_csv,
+                output_json=cases_json,
+                output_md=cases_md,
+            )
+            with cases_csv.open(newline="", encoding="utf-8") as f:
+                rows = list(csv.DictReader(f))
+            md_text = cases_md.read_text(encoding="utf-8")
+
+        self.assertEqual(report["summary"]["case_rows"], 3)
+        self.assertEqual(report["summary"]["precision_blocking_fixture_rows"], 1)
+        self.assertEqual(report["summary"]["recall_blocking_fixture_rows"], 1)
+        self.assertEqual(report["summary"]["positive_fixture_rows"], 1)
+        self.assertEqual({row["case_type"] for row in rows}, {"precision_positive_fixture", "precision_blocking_fixture", "recall_blocking_fixture"})
+        by_id = {row["provider_id"]: row for row in rows}
+        self.assertEqual(by_id["precision-bad"]["expected_url"], "https://real.example")
+        self.assertEqual(by_id["precision-bad"]["assertion"], "candidate_url_or_official_url_must_not_auto_accept")
+        self.assertIn("Precision blocking fixtures: 1", md_text)
 
     def test_evaluate_calibration_review_sample_rejects_pattern_when_label_blocks_it(self):
         with tempfile.TemporaryDirectory() as tmp:

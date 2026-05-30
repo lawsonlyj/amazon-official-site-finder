@@ -11,6 +11,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from tools.build_calibration_review_sample import build_calibration_review_sample
 from tools.build_balance_report import build_balance_report
 from tools.build_calibration_label_gap_task import build_calibration_label_gap_task
+from tools.build_calibration_regression_cases import build_calibration_regression_cases
 from tools.build_calibration_status_report import build_calibration_status_report
 from tools.evaluate_calibration_review_sample import evaluate_calibration_review_sample
 from tools.mine_evidence_patterns import mine_evidence_patterns
@@ -113,6 +114,9 @@ def run_calibration_cycle(
     filled_samples_merged_csv = out_dir / f"{sample_prefix}_filled_samples_merged.csv"
     rule_candidates_json = out_dir / "pattern_rule_candidates.json"
     rule_candidates_md = out_dir / "pattern_rule_candidates.md"
+    regression_cases_csv = out_dir / "calibration_regression_cases.csv"
+    regression_cases_json = out_dir / "calibration_regression_cases.json"
+    regression_cases_md = out_dir / "calibration_regression_cases.md"
     label_gap_csv = out_dir / "label_gap_task.csv"
     label_gap_xlsx = out_dir / "label_gap_task.xlsx"
     label_gap_high_csv = out_dir / "label_gap_high_priority_task.csv"
@@ -186,6 +190,7 @@ def run_calibration_cycle(
     filled_sample_paths = _filled_sample_paths(filled_sample)
     filled_eval_sample = _filled_eval_sample_path(filled_sample_paths, filled_samples_merged_csv)
     filled_eval = {}
+    regression_cases = {}
     if filled_eval_sample:
         filled_eval = evaluate_calibration_review_sample(
             sample=filled_eval_sample,
@@ -197,6 +202,12 @@ def run_calibration_cycle(
             filled_eval.get("pattern_rule_candidates", {}),
             rule_candidates_json,
             rule_candidates_md,
+        )
+        regression_cases = build_calibration_regression_cases(
+            sample_eval_json=filled_eval_json,
+            output_csv=regression_cases_csv,
+            output_json=regression_cases_json,
+            output_md=regression_cases_md,
         )
     pattern_recommendation_counts = _pattern_recommendation_counts(filled_eval)
     lane_recommendation_counts = _lane_recommendation_counts(filled_eval)
@@ -268,6 +279,16 @@ def run_calibration_cycle(
             )
             if filled_eval
             else None,
+            "filled_regression_case_rows": regression_cases.get("summary", {}).get("case_rows") if regression_cases else None,
+            "filled_precision_blocking_fixture_rows": regression_cases.get("summary", {}).get("precision_blocking_fixture_rows")
+            if regression_cases
+            else None,
+            "filled_recall_blocking_fixture_rows": regression_cases.get("summary", {}).get("recall_blocking_fixture_rows")
+            if regression_cases
+            else None,
+            "filled_positive_fixture_rows": regression_cases.get("summary", {}).get("positive_fixture_rows")
+            if regression_cases
+            else None,
         },
         "inputs": {
             "labeled_eval_json": str(labeled_eval_json),
@@ -303,6 +324,9 @@ def run_calibration_cycle(
             "filled_eval_csv": str(filled_eval_csv) if filled_eval_sample else "",
             "rule_candidates_json": str(rule_candidates_json) if filled_eval_sample else "",
             "rule_candidates_md": str(rule_candidates_md) if filled_eval_sample else "",
+            "regression_cases_csv": str(regression_cases_csv) if filled_eval_sample else "",
+            "regression_cases_json": str(regression_cases_json) if filled_eval_sample else "",
+            "regression_cases_md": str(regression_cases_md) if filled_eval_sample else "",
             "label_gap_csv": str(label_gap_csv),
             "label_gap_xlsx": str(label_gap_xlsx),
             "label_gap_high_priority_csv": str(label_gap_high_csv),
@@ -326,6 +350,7 @@ def run_calibration_cycle(
         "filled_lane_recommendations": filled_eval.get("lane_recommendations", []) if filled_eval else [],
         "filled_pattern_recommendations": filled_eval.get("pattern_recommendations", []) if filled_eval else [],
         "filled_pattern_rule_candidates": filled_eval.get("pattern_rule_candidates", {}) if filled_eval else {},
+        "filled_regression_cases": regression_cases,
     }
     summary_json.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
     summary_md.write_text(_render_markdown(report), encoding="utf-8")
@@ -421,6 +446,10 @@ def _render_markdown(report: dict) -> str:
         f"- Filled lane keep-review count: {summary['filled_lane_keep_review_count']}",
         f"- Filled candidate-for-rule patterns: {summary['filled_rule_candidate_count']}",
         f"- Filled rejected patterns: {summary['filled_rejected_pattern_count']}",
+        f"- Filled regression case rows: {summary.get('filled_regression_case_rows')}",
+        f"- Filled precision blocking fixtures: {summary.get('filled_precision_blocking_fixture_rows')}",
+        f"- Filled recall blocking fixtures: {summary.get('filled_recall_blocking_fixture_rows')}",
+        f"- Filled positive fixtures: {summary.get('filled_positive_fixture_rows')}",
         "",
         "## Outputs",
         "",
@@ -551,6 +580,14 @@ def _render_markdown(report: dict) -> str:
                         action=item.get("required_action", ""),
                     )
                 )
+    regression_cases = report.get("filled_regression_cases") or {}
+    if regression_cases.get("summary"):
+        lines.extend(["", "## Filled Regression Cases", ""])
+        case_summary = regression_cases["summary"]
+        lines.append(f"- Case rows: {case_summary.get('case_rows')}")
+        lines.append(f"- Precision blocking fixtures: {case_summary.get('precision_blocking_fixture_rows')}")
+        lines.append(f"- Recall blocking fixtures: {case_summary.get('recall_blocking_fixture_rows')}")
+        lines.append(f"- Positive fixtures: {case_summary.get('positive_fixture_rows')}")
     lines.append("")
     return "\n".join(lines)
 
