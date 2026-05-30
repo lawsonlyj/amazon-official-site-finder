@@ -135,6 +135,12 @@ def _build_decision(
         )
         if filled_sample_verifications
         else None,
+        "filled_lane_candidate_for_change_count": (report.get("summary") or {}).get(
+            "filled_lane_candidate_for_change_count"
+        ),
+        "filled_lane_keep_review_count": (report.get("summary") or {}).get("filled_lane_keep_review_count"),
+        "filled_rule_candidate_count": (report.get("summary") or {}).get("filled_rule_candidate_count"),
+        "filled_rejected_pattern_count": (report.get("summary") or {}).get("filled_rejected_pattern_count"),
         "protected_lanes_next_review_task_rows": convergence_summary.get("protected_lanes_next_review_task_rows"),
         "protected_lanes_priority_task_rows": (report.get("summary") or {}).get("protected_lanes_priority_task_rows"),
         "regression_gate_status": status.get("regression_gate_status"),
@@ -185,6 +191,11 @@ def _build_decision(
                 "protected_lanes_priority_task_verification_md", ""
             ),
             "regression_cases_csv": (report.get("outputs") or {}).get("regression_cases_csv", ""),
+            "filled_eval_json": (report.get("outputs") or {}).get("filled_eval_json", ""),
+            "filled_eval_md": (report.get("outputs") or {}).get("filled_eval_md", ""),
+            "filled_eval_csv": (report.get("outputs") or {}).get("filled_eval_csv", ""),
+            "pattern_rule_candidates_json": (report.get("outputs") or {}).get("rule_candidates_json", ""),
+            "pattern_rule_candidates_md": (report.get("outputs") or {}).get("rule_candidates_md", ""),
             "regression_gate_json": (report.get("outputs") or {}).get("regression_gate_json", ""),
             "filled_protected_sample_verification_json": str(output_json.with_name("filled_protected_sample_verification.json"))
             if filled_sample_verifications
@@ -194,6 +205,8 @@ def _build_decision(
             else "",
         },
         "filled_protected_sample_verifications": filled_sample_verifications,
+        "filled_lane_recommendations": report.get("filled_lane_recommendations") or [],
+        "filled_pattern_rule_candidates": report.get("filled_pattern_rule_candidates") or {},
         "application_gate_checks": checks,
         "convergence_audit": convergence,
         "next_actions": effective_next_actions,
@@ -215,6 +228,8 @@ def _render_decision_markdown(decision: dict) -> str:
         f"- Protected-lane next review rows: {summary.get('protected_lanes_next_review_task_rows')}",
         f"- Protected-lane priority review rows: {summary.get('protected_lanes_priority_task_rows')}",
         f"- Filled protected sample verification: {summary.get('filled_protected_sample_verification_count')}/{summary.get('filled_protected_sample_verification_passed')}",
+        f"- Filled lane candidate/keep-review counts: {summary.get('filled_lane_candidate_for_change_count')}/{summary.get('filled_lane_keep_review_count')}",
+        f"- Filled pattern candidate/rejected counts: {summary.get('filled_rule_candidate_count')}/{summary.get('filled_rejected_pattern_count')}",
         f"- Filled labeled/decisive rows: {summary.get('filled_labeled_rows')}/{summary.get('filled_decisive_rows')}",
         f"- Regression gate status: {summary.get('regression_gate_status')}",
         f"- Allowed gates: {', '.join(summary.get('allowed_gates') or []) or 'None'}",
@@ -242,6 +257,36 @@ def _render_decision_markdown(decision: dict) -> str:
             )
         )
     if not decision.get("filled_protected_sample_verifications"):
+        lines.append("- None")
+    lines.extend(["", "## Filled Lane Recommendations", ""])
+    for row in decision.get("filled_lane_recommendations", []):
+        lines.append(
+            "- {recommendation}: {review_reason}, decisive={decisive}, support={support}, blocking={blocking}, action={action}".format(
+                recommendation=row.get("recommendation"),
+                review_reason=row.get("review_reason"),
+                decisive=row.get("decisive_rows"),
+                support=row.get("support_rows"),
+                blocking=row.get("blocking_rows"),
+                action=row.get("required_action") or "",
+            )
+        )
+    if not decision.get("filled_lane_recommendations"):
+        lines.append("- None")
+    lines.extend(["", "## Filled Pattern Rule Candidates", ""])
+    candidates = decision.get("filled_pattern_rule_candidates") or {}
+    for bucket in ["candidate_for_rule", "reject_pattern", "needs_more_labels"]:
+        rows = candidates.get(bucket) or []
+        lines.append(f"- {bucket}: {len(rows)}")
+        for row in rows[:10]:
+            lines.append(
+                "  - {recommendation}: support={support}, block={block}, pattern={pattern}".format(
+                    recommendation=row.get("recommendation"),
+                    support=row.get("support_rows"),
+                    block=row.get("blocking_rows"),
+                    pattern=row.get("pattern"),
+                )
+            )
+    if not candidates:
         lines.append("- None")
     lines.extend(["", "## Gate Details", ""])
     for row in decision.get("application_gate_checks", []):
