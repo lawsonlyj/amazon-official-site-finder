@@ -5105,6 +5105,66 @@ class OperationalCommandTests(unittest.TestCase):
         self.assertEqual(report["summary"]["review_lane_status"], "candidate_for_downgrade")
         self.assertIn("lane_downgrade_candidate", {item["id"] for item in report["open_requirements"]})
 
+    def test_build_calibration_status_report_uses_full_sample_counts_after_partial_fill(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            cycle = root / "cycle.json"
+            sample_eval = root / "filled_eval.json"
+            sample_csv = root / "sample.csv"
+            sample_rows = [
+                {
+                    "provider_id": f"p-{idx}",
+                    "review_reason": "precision_second_pass_accepted_lt70",
+                    "manual_decision": "",
+                }
+                for idx in range(8)
+            ]
+            _write_test_csv(sample_csv, sample_rows)
+            cycle.write_text(
+                json.dumps(
+                    {
+                        "summary": {
+                            "recommended_global_accept_threshold": 75,
+                            "recommended_second_pass_threshold": 75,
+                            "more_label_review_lanes": ["precision_second_pass_accepted_lt70"],
+                            "filled_eval_labeled_rows": 4,
+                            "filled_eval_decisive_rows": 4,
+                        },
+                        "outputs": {"sample_csv": str(sample_csv)},
+                    }
+                ),
+                encoding="utf-8",
+            )
+            sample_eval.write_text(
+                json.dumps(
+                    {
+                        "summary": {
+                            "labeled_rows": 4,
+                            "decisive_rows": 4,
+                            "lane_needs_more_label_rows": 1,
+                        },
+                        "by_review_reason": {
+                            "precision_second_pass_accepted_lt70": {
+                                "rows": 4,
+                                "labeled_rows": 4,
+                                "decisive_rows": 4,
+                            }
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            report = build_calibration_status_report(calibration_cycle_json=cycle, sample_eval_json=sample_eval)
+            target = {
+                item["review_reason"]: item for item in report["label_targets"]
+            }["precision_second_pass_accepted_lt70"]
+
+        self.assertEqual(target["rows"], 8)
+        self.assertEqual(target["decisive_rows"], 4)
+        self.assertEqual(target["target_decisive_rows"], 5)
+        self.assertEqual(target["decisive_rows_needed"], 1)
+
     def test_build_calibration_label_gap_task_selects_needed_unlabeled_rows(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

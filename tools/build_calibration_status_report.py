@@ -343,7 +343,11 @@ def _sample_artifacts(cycle: dict, sample_eval_json: str | Path | None) -> dict:
 def _label_targets(cycle: dict, balance: dict, sample_eval: dict, artifacts: dict) -> list[dict]:
     by_review = dict(sample_eval.get("by_review_reason") or {})
     for reason, rows in _sample_review_reason_counts(artifacts.get("sample_csv")).items():
-        by_review.setdefault(reason, {"rows": rows, "labeled_rows": 0, "decisive_rows": 0})
+        existing = dict(by_review.get(reason) or {})
+        existing["rows"] = max(_to_int(existing.get("rows")), rows)
+        existing.setdefault("labeled_rows", 0)
+        existing.setdefault("decisive_rows", 0)
+        by_review[reason] = existing
 
     lane_recommendations = {
         row.get("review_reason", ""): row for row in sample_eval.get("lane_recommendations", []) if row.get("review_reason")
