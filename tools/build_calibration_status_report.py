@@ -647,10 +647,7 @@ def _pattern_release_application_gate(
         return _blocked_gate("pattern_release_change", ["block_pattern_release"], pattern_status.get("reason", "Pattern release is blocked."))
     if regression_gate_status["status"] in {"failed", "not_run"}:
         return _blocked_gate("pattern_release_change", blockers, "Regression gate must pass before widening pattern release.")
-    if workflow_status == "candidate_changes_regression_passed" and pattern_status["status"] in {
-        "current_guarded_candidate",
-        "historical_guarded_candidate",
-    }:
+    if pattern_status["status"] == "current_guarded_candidate":
         return {
             "status": "candidate",
             "can_apply_now": False,
@@ -658,6 +655,12 @@ def _pattern_release_application_gate(
             "reason": pattern_status.get("reason", ""),
             "required_action": "Keep any pattern release guarded and narrow; do not widen beyond the validated evidence pattern.",
         }
+    if pattern_status["status"] == "historical_guarded_candidate":
+        return _blocked_gate(
+            "pattern_release_change",
+            ["validate_historical_pattern_release", *blockers],
+            pattern_status.get("reason", "Historical pattern release still needs current-batch validation."),
+        )
     return _blocked_gate("pattern_release_change", blockers, pattern_status.get("reason", "Pattern release is not ready."))
 
 

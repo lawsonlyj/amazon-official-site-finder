@@ -6066,6 +6066,152 @@ class OperationalCommandTests(unittest.TestCase):
         self.assertFalse(report["application_gates"]["review_lane_change"]["can_apply_now"])
         self.assertIn("Regression gate passed", report["next_actions"][0])
 
+    def test_build_calibration_status_report_allows_current_guarded_pattern_candidate_with_protected_lanes(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            cycle = root / "cycle.json"
+            sample_eval = root / "sample_eval.json"
+            status_json = root / "status.json"
+            cycle.write_text(
+                json.dumps(
+                    {
+                        "summary": {
+                            "recommended_global_accept_threshold": 75,
+                            "recommended_second_pass_threshold": 75,
+                            "recommended_pattern_release": "narrow_pattern_release_candidate",
+                            "recommended_pattern_release_source_kind": "supplied_prior",
+                            "recommended_pattern_release_source_path": "prior/pattern_release.json",
+                            "pattern_release_correct_rows": 4,
+                            "pattern_release_wrong_rows": 0,
+                            "filled_eval_labeled_rows": 8,
+                            "filled_eval_decisive_rows": 8,
+                            "filled_regression_case_rows": 8,
+                            "regression_gate_status": "pass",
+                            "regression_gate_fail_rows": 0,
+                            "regression_gate_unverified_rows": 0,
+                            "protected_review_lane_count": 2,
+                        }
+                    }
+                ),
+                encoding="utf-8",
+            )
+            sample_eval.write_text(
+                json.dumps(
+                    {
+                        "summary": {
+                            "labeled_rows": 8,
+                            "decisive_rows": 8,
+                            "lane_keep_review_rows": 1,
+                            "lane_candidate_for_change_rows": 0,
+                            "lane_needs_more_label_rows": 0,
+                        },
+                        "by_review_reason": {
+                            "precision_calibrated_pattern_release": {
+                                "rows": 4,
+                                "labeled_rows": 4,
+                                "decisive_rows": 4,
+                            },
+                            "precision_low_confidence_auto_match": {
+                                "rows": 4,
+                                "labeled_rows": 4,
+                                "decisive_rows": 4,
+                            },
+                        },
+                        "lane_recommendations": [
+                            {
+                                "review_reason": "precision_calibrated_pattern_release",
+                                "recommendation": "candidate_for_review_downgrade",
+                                "support_rows": 4,
+                                "blocking_rows": 0,
+                            },
+                            {
+                                "review_reason": "precision_low_confidence_auto_match",
+                                "recommendation": "keep_review_lane",
+                                "support_rows": 3,
+                                "blocking_rows": 1,
+                            },
+                        ],
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            report = build_calibration_status_report(
+                calibration_cycle_json=cycle,
+                sample_eval_json=sample_eval,
+                output_json=status_json,
+            )
+            default_gate = check_calibration_application_gate(status_json=status_json, gate="pattern_release_change")
+            allowed_gate = check_calibration_application_gate(
+                status_json=status_json,
+                gate="pattern_release_change",
+                allow_candidate=True,
+            )
+
+        self.assertEqual(report["summary"]["workflow_status"], "partially_converged_keep_review_lanes")
+        self.assertEqual(report["summary"]["pattern_release_status"], "current_guarded_candidate")
+        self.assertEqual(report["summary"]["review_lane_status"], "protected_by_filled_labels")
+        self.assertEqual(report["application_gates"]["pattern_release_change"]["status"], "candidate")
+        self.assertEqual(report["application_gates"]["pattern_release_change"]["blockers"], [])
+        self.assertFalse(default_gate["summary"]["allowed"])
+        self.assertEqual(default_gate["summary"]["decision_reason"], "candidate_requires_explicit_allow_candidate")
+        self.assertTrue(allowed_gate["summary"]["allowed"])
+        self.assertEqual(allowed_gate["summary"]["decision_reason"], "candidate_allowed_for_controlled_rollout")
+
+    def test_build_calibration_status_report_blocks_historical_pattern_candidate_until_current_spot_check(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            cycle = root / "cycle.json"
+            sample_eval = root / "sample_eval.json"
+            cycle.write_text(
+                json.dumps(
+                    {
+                        "summary": {
+                            "recommended_global_accept_threshold": 75,
+                            "recommended_second_pass_threshold": 75,
+                            "recommended_pattern_release": "narrow_pattern_release_candidate",
+                            "recommended_pattern_release_source_kind": "supplied_prior",
+                            "recommended_pattern_release_source_path": "prior/pattern_release.json",
+                            "pattern_release_correct_rows": 4,
+                            "pattern_release_wrong_rows": 0,
+                            "filled_eval_labeled_rows": 4,
+                            "filled_eval_decisive_rows": 4,
+                            "filled_regression_case_rows": 4,
+                            "regression_gate_status": "pass",
+                            "regression_gate_fail_rows": 0,
+                            "regression_gate_unverified_rows": 0,
+                            "protected_review_lane_count": 0,
+                        }
+                    }
+                ),
+                encoding="utf-8",
+            )
+            sample_eval.write_text(
+                json.dumps(
+                    {
+                        "summary": {
+                            "labeled_rows": 4,
+                            "decisive_rows": 4,
+                            "lane_keep_review_rows": 0,
+                            "lane_candidate_for_change_rows": 0,
+                            "lane_needs_more_label_rows": 0,
+                        },
+                        "by_review_reason": {},
+                        "lane_recommendations": [],
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            report = build_calibration_status_report(calibration_cycle_json=cycle, sample_eval_json=sample_eval)
+
+        self.assertEqual(report["summary"]["pattern_release_status"], "historical_guarded_candidate")
+        self.assertEqual(report["application_gates"]["pattern_release_change"]["status"], "blocked")
+        self.assertIn(
+            "validate_historical_pattern_release",
+            report["application_gates"]["pattern_release_change"]["blockers"],
+        )
+
     def test_check_calibration_application_gate_blocks_unsafe_actions(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
