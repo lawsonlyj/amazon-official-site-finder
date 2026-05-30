@@ -11,6 +11,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from tools.build_calibration_review_sample import build_calibration_review_sample
 from tools.build_balance_report import build_balance_report
 from tools.build_calibration_label_gap_task import build_calibration_label_gap_task
+from tools.build_protected_lane_review_task import build_protected_lane_review_task
 from tools.build_calibration_regression_cases import build_calibration_regression_cases
 from tools.build_calibration_status_report import build_calibration_status_report
 from tools.check_calibration_application_gate import APPLICATION_GATES, check_calibration_application_gate
@@ -132,6 +133,9 @@ def run_calibration_cycle(
     label_gap_xlsx = out_dir / "label_gap_task.xlsx"
     label_gap_high_csv = out_dir / "label_gap_high_priority_task.csv"
     label_gap_high_xlsx = out_dir / "label_gap_high_priority_task.xlsx"
+    protected_lane_task_csv = out_dir / "protected_lanes_next_review_task.csv"
+    protected_lane_task_xlsx = out_dir / "protected_lanes_next_review_task.xlsx"
+    protected_lane_task_json = out_dir / "protected_lanes_next_review_task_summary.json"
     summary_json = out_dir / "calibration_cycle_summary.json"
     summary_md = out_dir / "calibration_cycle_summary.md"
     status_json = out_dir / "calibration_status.json"
@@ -369,6 +373,9 @@ def run_calibration_cycle(
             "label_gap_xlsx": str(label_gap_xlsx),
             "label_gap_high_priority_csv": str(label_gap_high_csv),
             "label_gap_high_priority_xlsx": str(label_gap_high_xlsx),
+            "protected_lanes_next_review_task_csv": str(protected_lane_task_csv),
+            "protected_lanes_next_review_task_xlsx": str(protected_lane_task_xlsx),
+            "protected_lanes_next_review_task_summary_json": str(protected_lane_task_json),
             "summary_json": str(summary_json),
             "summary_md": str(summary_md),
             "status_json": str(status_json),
@@ -418,12 +425,22 @@ def run_calibration_cycle(
         output_xlsx=label_gap_high_xlsx,
         priorities=["high"],
     )
+    protected_lane_task = build_protected_lane_review_task(
+        status_json=status_json,
+        sample_csv=sample_csv,
+        filled_sample=filled_eval_sample,
+        output_csv=protected_lane_task_csv,
+        output_xlsx=protected_lane_task_xlsx,
+        output_json=protected_lane_task_json,
+    )
     report["calibration_status"] = status_report
     report["label_gap_task"] = label_gap_task
     report["label_gap_high_priority_task"] = high_priority_label_gap_task
+    report["protected_lanes_next_review_task"] = protected_lane_task
     report["summary"]["label_gap_task_rows"] = label_gap_task.get("task_rows")
     report["summary"]["label_gap_high_priority_rows"] = label_gap_task.get("priority_counts", {}).get("high", 0)
     report["summary"]["label_gap_high_priority_task_rows"] = high_priority_label_gap_task.get("task_rows")
+    report["summary"]["protected_lanes_next_review_task_rows"] = protected_lane_task.get("task_rows")
     summary_json.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
     status_report = build_calibration_status_report(
         calibration_cycle_json=summary_json,
@@ -479,6 +496,7 @@ def _render_markdown(report: dict) -> str:
         f"- Label-gap task rows: {summary.get('label_gap_task_rows')}",
         f"- Label-gap high-priority rows: {summary.get('label_gap_high_priority_rows')}",
         f"- Label-gap high-priority task rows: {summary.get('label_gap_high_priority_task_rows')}",
+        f"- Protected-lane next review task rows: {summary.get('protected_lanes_next_review_task_rows')}",
         f"- Actionable release validation rows: {summary['actionable_release_validation_rows']}",
         f"- Pattern candidate validation rows: {summary['pattern_validation_rows']}",
         f"- Pattern control validation rows: {summary['pattern_control_rows']}",

@@ -688,6 +688,11 @@ def _sample_artifacts(cycle: dict, sample_eval_json: str | Path | None) -> dict:
         "label_gap_xlsx": str(outputs.get("label_gap_xlsx") or ""),
         "label_gap_high_priority_csv": str(outputs.get("label_gap_high_priority_csv") or ""),
         "label_gap_high_priority_xlsx": str(outputs.get("label_gap_high_priority_xlsx") or ""),
+        "protected_lanes_next_review_task_csv": str(outputs.get("protected_lanes_next_review_task_csv") or ""),
+        "protected_lanes_next_review_task_xlsx": str(outputs.get("protected_lanes_next_review_task_xlsx") or ""),
+        "protected_lanes_next_review_task_summary_json": str(
+            outputs.get("protected_lanes_next_review_task_summary_json") or ""
+        ),
         "sample_eval_json": str(outputs.get("eval_json") or sample_eval_json or ""),
         "filled_eval_json": str(outputs.get("filled_eval_json") or ""),
         "regression_cases_csv": str(outputs.get("regression_cases_csv") or ""),
@@ -945,8 +950,10 @@ def _next_actions(
             "Do not change the global threshold unless the threshold boundary report also recommends it.",
         ]
     if workflow_status == "partially_converged_keep_review_lanes":
+        protected_task = artifacts.get("protected_lanes_next_review_task_xlsx")
         return [
             "Keep protected review lanes active.",
+            f"Use {protected_task or 'the protected-lane next review task'} for the next small label batch before more tuning.",
             "Use filled wrong rows as blocking fixtures before more tuning.",
         ]
     if open_requirements:
@@ -999,6 +1006,7 @@ def _render_markdown(report: dict) -> str:
             f"- Sample CSV: {report['artifacts'].get('sample_csv') or 'not recorded'}",
             f"- Label-gap XLSX: {report['artifacts'].get('label_gap_xlsx') or 'not recorded'}",
             f"- High-priority label-gap XLSX: {report['artifacts'].get('label_gap_high_priority_xlsx') or 'not recorded'}",
+            f"- Protected-lane next review XLSX: {report['artifacts'].get('protected_lanes_next_review_task_xlsx') or 'not recorded'}",
             f"- Regression cases CSV: {report['artifacts'].get('regression_cases_csv') or 'not recorded'}",
             f"- Regression gate report: {report['artifacts'].get('regression_gate_md') or 'not recorded'}",
             "",

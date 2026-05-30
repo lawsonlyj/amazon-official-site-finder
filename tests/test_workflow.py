@@ -43,6 +43,7 @@ from tools.apply_agent_optimizations import apply_agent_optimizations
 from tools.evaluate_workflow_balance import evaluate_balance, evaluate_balance_from_details
 from tools.build_balance_report import build_balance_report
 from tools.build_calibration_label_gap_task import build_calibration_label_gap_task
+from tools.build_protected_lane_review_task import build_protected_lane_review_task
 from tools.build_calibration_regression_cases import build_calibration_regression_cases
 from tools.build_calibration_review_sample import build_calibration_review_sample
 from tools.build_calibration_status_report import build_calibration_status_report
@@ -4609,9 +4610,14 @@ class OperationalCommandTests(unittest.TestCase):
                 "label_gap_xlsx": (output_dir / "label_gap_task.xlsx").exists(),
                 "label_gap_high_csv": (output_dir / "label_gap_high_priority_task.csv").exists(),
                 "label_gap_high_xlsx": (output_dir / "label_gap_high_priority_task.xlsx").exists(),
+                "protected_lane_csv": (output_dir / "protected_lanes_next_review_task.csv").exists(),
+                "protected_lane_xlsx": (output_dir / "protected_lanes_next_review_task.xlsx").exists(),
+                "protected_lane_json": (output_dir / "protected_lanes_next_review_task_summary.json").exists(),
             }
             with (output_dir / "label_gap_high_priority_task.csv").open(newline="", encoding="utf-8") as f:
                 high_gap_rows = list(csv.DictReader(f))
+            with (output_dir / "protected_lanes_next_review_task.csv").open(newline="", encoding="utf-8") as f:
+                protected_lane_rows = list(csv.DictReader(f))
             status_data = json.loads((output_dir / "calibration_status.json").read_text(encoding="utf-8"))
             gate_data = json.loads((output_dir / "calibration_application_gates.json").read_text(encoding="utf-8"))
 
@@ -4634,14 +4640,23 @@ class OperationalCommandTests(unittest.TestCase):
         self.assertTrue(output_exists["label_gap_xlsx"])
         self.assertTrue(output_exists["label_gap_high_csv"])
         self.assertTrue(output_exists["label_gap_high_xlsx"])
+        self.assertTrue(output_exists["protected_lane_csv"])
+        self.assertTrue(output_exists["protected_lane_xlsx"])
+        self.assertTrue(output_exists["protected_lane_json"])
         self.assertEqual(report["summary"]["empty_eval_labeled_rows"], 0)
         self.assertIn("label_gap_task_rows", report["summary"])
         self.assertIn("label_gap_high_priority_task_rows", report["summary"])
+        self.assertIn("protected_lanes_next_review_task_rows", report["summary"])
         self.assertIn("label_gap_task", report)
         self.assertIn("label_gap_high_priority_task", report)
+        self.assertIn("protected_lanes_next_review_task", report)
         self.assertEqual(report["summary"]["label_gap_high_priority_task_rows"], 0)
+        self.assertEqual(report["summary"]["protected_lanes_next_review_task_rows"], 2)
+        self.assertEqual({row["provider_id"] for row in protected_lane_rows}, {"batch-recall", "batch-precision"})
+        self.assertIn("provider_detail_url", protected_lane_rows[0])
         self.assertEqual(status_data["summary"]["label_gap_task_rows"], report["summary"]["label_gap_task_rows"])
         self.assertEqual(status_data["summary"]["label_gap_high_priority_task_rows"], 0)
+        self.assertIn("protected_lanes_next_review_task_xlsx", status_data["artifacts"])
         self.assertEqual(high_gap_rows, [])
         self.assertIn("release_actionable_safe_patterns", report["summary"])
         self.assertEqual(report["summary"]["actionable_release_validation_rows"], 1)
@@ -6567,6 +6582,190 @@ class OperationalCommandTests(unittest.TestCase):
         self.assertIn("Block wider pattern release", spot_rows[0]["label_if_blocked_action"])
         self.assertEqual(high_only_summary["task_rows"], 4)
         self.assertEqual({row["label_priority"] for row in high_only_rows}, {"high"})
+
+    def test_build_protected_lane_review_task_selects_unfilled_protected_rows(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            status = root / "status.json"
+            sample = root / "sample.csv"
+            filled = root / "filled.csv"
+            output_csv = root / "protected.csv"
+            output_xlsx = root / "protected.xlsx"
+            output_json = root / "protected_summary.json"
+            rows = [
+                {
+                    "sample_priority": "58",
+                    "review_reason": "precision_low_confidence_auto_match",
+                    "agent_b_decision": "accept",
+                    "provider_id": "low-0",
+                    "provider_name": "Low Zero",
+                    "provider_detail_url": "https://amazon.example/low-0",
+                    "official_url": "https://low0.example",
+                    "candidate_url": "https://low0.example",
+                    "manual_decision": "",
+                    "manual_url": "",
+                    "notes": "",
+                },
+                {
+                    "sample_priority": "58",
+                    "review_reason": "precision_low_confidence_auto_match",
+                    "agent_b_decision": "accept",
+                    "provider_id": "low-1",
+                    "provider_name": "Low One",
+                    "provider_detail_url": "https://amazon.example/low-1",
+                    "official_url": "https://low1.example",
+                    "candidate_url": "https://low1.example",
+                    "manual_decision": "",
+                    "manual_url": "",
+                    "notes": "",
+                },
+                {
+                    "sample_priority": "58",
+                    "review_reason": "precision_low_confidence_auto_match",
+                    "agent_b_decision": "accept",
+                    "provider_id": "low-2",
+                    "provider_name": "Low Two",
+                    "provider_detail_url": "https://amazon.example/low-2",
+                    "official_url": "https://low2.example",
+                    "candidate_url": "https://low2.example",
+                    "manual_decision": "accept",
+                    "manual_url": "",
+                    "notes": "",
+                },
+                {
+                    "sample_priority": "66",
+                    "review_reason": "precision_generic_identity_term_risk",
+                    "agent_b_decision": "unsure",
+                    "provider_id": "generic-0",
+                    "provider_name": "Generic Zero",
+                    "provider_detail_url": "https://amazon.example/generic-0",
+                    "official_url": "https://generic0.example",
+                    "candidate_url": "https://generic0.example",
+                    "manual_decision": "",
+                    "manual_url": "",
+                    "notes": "",
+                },
+                {
+                    "sample_priority": "98",
+                    "review_reason": "precision_calibrated_pattern_release",
+                    "agent_b_decision": "accept",
+                    "provider_id": "release-0",
+                    "provider_name": "Release Zero",
+                    "provider_detail_url": "https://amazon.example/release-0",
+                    "official_url": "https://release0.example",
+                    "candidate_url": "https://release0.example",
+                    "manual_decision": "",
+                    "manual_url": "",
+                    "notes": "",
+                },
+                {
+                    "sample_priority": "80",
+                    "review_reason": "recall_unresolved_top_candidate",
+                    "agent_b_decision": "unsure",
+                    "provider_id": "recall-0",
+                    "provider_name": "Recall Zero",
+                    "provider_detail_url": "https://amazon.example/recall-0",
+                    "official_url": "",
+                    "candidate_url": "https://recall0.example",
+                    "manual_decision": "",
+                    "manual_url": "",
+                    "notes": "",
+                },
+            ]
+            _write_test_csv(sample, rows)
+            _write_test_csv(
+                filled,
+                [
+                    {
+                        "provider_id": "low-1",
+                        "review_reason": "precision_low_confidence_auto_match",
+                        "manual_decision": "reject",
+                    }
+                ],
+            )
+            status.write_text(
+                json.dumps(
+                    {
+                        "summary": {"pattern_release_status": "current_guarded_candidate"},
+                        "artifacts": {"sample_csv": str(sample)},
+                        "label_targets": [
+                            {
+                                "review_reason": "precision_low_confidence_auto_match",
+                                "priority": "medium",
+                                "target_decisive_rows": 3,
+                                "decisive_rows": 3,
+                                "decisive_rows_needed": 0,
+                                "recommendation": "keep_review_lane",
+                                "label_goal": "Keep checking low-confidence accepted rows.",
+                                "if_clean_action": "Consider a narrow routing downgrade only after regression tests.",
+                                "if_blocked_action": "Keep this lane protected.",
+                                "if_unsure_action": "Keep this lane protected.",
+                            },
+                            {
+                                "review_reason": "precision_generic_identity_term_risk",
+                                "priority": "high",
+                                "target_decisive_rows": 5,
+                                "decisive_rows": 5,
+                                "decisive_rows_needed": 0,
+                                "recommendation": "needs_more_labels",
+                                "label_goal": "Collect more generic-name identity labels.",
+                            },
+                            {
+                                "review_reason": "precision_calibrated_pattern_release",
+                                "priority": "medium",
+                                "target_decisive_rows": 3,
+                                "decisive_rows": 3,
+                                "decisive_rows_needed": 0,
+                                "blocking_rows": 0,
+                                "recommendation": "spot_check_candidate",
+                                "label_goal": "Already validated current guarded release.",
+                            },
+                            {
+                                "review_reason": "recall_unresolved_top_candidate",
+                                "priority": "medium",
+                                "target_decisive_rows": 3,
+                                "decisive_rows": 3,
+                                "decisive_rows_needed": 0,
+                                "recommendation": "keep_review_lane",
+                                "label_goal": "Keep recall rows manual-only.",
+                            },
+                        ],
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            summary = build_protected_lane_review_task(
+                status_json=status,
+                filled_sample=[filled],
+                output_csv=output_csv,
+                output_xlsx=output_xlsx,
+                output_json=output_json,
+                max_rows=4,
+                max_per_reason=2,
+            )
+            with output_csv.open(newline="", encoding="utf-8") as f:
+                out_rows = list(csv.DictReader(f))
+            with zipfile.ZipFile(output_xlsx) as z:
+                sheet_xml = z.read("xl/worksheets/sheet1.xml").decode("utf-8")
+            summary_json = json.loads(output_json.read_text(encoding="utf-8"))
+
+        provider_ids = {row["provider_id"] for row in out_rows}
+        self.assertEqual(summary["task_rows"], 3)
+        self.assertEqual(summary_json["task_rows"], 3)
+        self.assertEqual(provider_ids, {"generic-0", "low-0", "recall-0"})
+        self.assertNotIn("low-1", provider_ids)
+        self.assertNotIn("low-2", provider_ids)
+        self.assertNotIn("release-0", provider_ids)
+        self.assertEqual(out_rows[0]["protected_lane_priority"], "high")
+        self.assertEqual(out_rows[0]["protected_lane_label_gap_closed"], "yes")
+        self.assertIn("manual_decision", out_rows[0]["review_instruction"])
+        low_row = next(row for row in out_rows if row["provider_id"] == "low-0")
+        self.assertIn("regression", low_row["optimization_use"])
+        self.assertEqual(low_row["manual_decision"], "")
+        self.assertIn("provider_detail_url", out_rows[0])
+        self.assertIn("HYPERLINK", sheet_xml)
+        self.assertEqual(summary["excluded_filled_rows"], 2)
 
     def test_scoring_tries_www_variant_before_giving_up_on_candidate(self):
         config = load_config("config/scoring.json")
