@@ -178,6 +178,9 @@ def _build_decision(
             "protected_lanes_priority_task_xlsx": (report.get("outputs") or {}).get(
                 "protected_lanes_priority_task_xlsx", ""
             ),
+            "protected_lanes_priority_task_handoff_md": (report.get("outputs") or {}).get(
+                "protected_lanes_priority_task_handoff_md", ""
+            ),
             "protected_lanes_next_review_task_verification_json": (report.get("outputs") or {}).get(
                 "protected_lanes_next_review_task_verification_json", ""
             ),

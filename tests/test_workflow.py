@@ -4621,6 +4621,7 @@ class OperationalCommandTests(unittest.TestCase):
                 "protected_lane_priority_csv": (output_dir / "protected_lanes_priority_task.csv").exists(),
                 "protected_lane_priority_xlsx": (output_dir / "protected_lanes_priority_task.xlsx").exists(),
                 "protected_lane_priority_json": (output_dir / "protected_lanes_priority_task_summary.json").exists(),
+                "protected_lane_priority_md": (output_dir / "protected_lanes_priority_task_handoff.md").exists(),
                 "protected_lane_priority_verify_json": (
                     output_dir / "protected_lanes_priority_task_verification.json"
                 ).exists(),
@@ -4671,6 +4672,7 @@ class OperationalCommandTests(unittest.TestCase):
         self.assertTrue(output_exists["protected_lane_priority_csv"])
         self.assertTrue(output_exists["protected_lane_priority_xlsx"])
         self.assertTrue(output_exists["protected_lane_priority_json"])
+        self.assertTrue(output_exists["protected_lane_priority_md"])
         self.assertTrue(output_exists["protected_lane_priority_verify_json"])
         self.assertTrue(output_exists["protected_lane_priority_verify_md"])
         self.assertTrue(output_exists["convergence_audit_json"])
@@ -4705,6 +4707,7 @@ class OperationalCommandTests(unittest.TestCase):
         self.assertEqual(status_data["summary"]["protected_lanes_priority_task_rows"], 2)
         self.assertIn("protected_lanes_next_review_task_xlsx", status_data["artifacts"])
         self.assertIn("protected_lanes_priority_task_xlsx", status_data["artifacts"])
+        self.assertIn("protected_lanes_priority_task_handoff_md", status_data["artifacts"])
         self.assertEqual(high_gap_rows, [])
         self.assertIn("release_actionable_safe_patterns", report["summary"])
         self.assertEqual(report["summary"]["actionable_release_validation_rows"], 1)
@@ -4920,6 +4923,7 @@ class OperationalCommandTests(unittest.TestCase):
         self.assertIn("convergence_audit_json", decision["outputs"])
         self.assertIn("protected_lanes_next_review_task_xlsx", decision["outputs"])
         self.assertIn("protected_lanes_priority_task_xlsx", decision["outputs"])
+        self.assertIn("protected_lanes_priority_task_handoff_md", decision["outputs"])
         self.assertIn("protected_lanes_next_review_task_verification_json", decision["outputs"])
         self.assertIn("protected_lanes_priority_task_verification_json", decision["outputs"])
         self.assertIn("protected_lanes_next_review_task_verification_md", decision["outputs"])
@@ -7026,6 +7030,7 @@ class OperationalCommandTests(unittest.TestCase):
             output_csv = root / "priority.csv"
             output_xlsx = root / "priority.xlsx"
             output_json = root / "priority.json"
+            output_md = root / "priority.md"
             rows = [
                 {
                     "sample_priority": "74",
@@ -7120,6 +7125,7 @@ class OperationalCommandTests(unittest.TestCase):
                 output_csv=output_csv,
                 output_xlsx=output_xlsx,
                 output_json=output_json,
+                output_md=output_md,
                 max_rows=4,
                 max_per_reason=1,
             )
@@ -7128,6 +7134,7 @@ class OperationalCommandTests(unittest.TestCase):
             with zipfile.ZipFile(output_xlsx) as z:
                 sheet_xml = z.read("xl/worksheets/sheet1.xml").decode("utf-8")
             summary_json = json.loads(output_json.read_text(encoding="utf-8"))
+            md_text = output_md.read_text(encoding="utf-8")
 
         self.assertEqual(summary["task_rows"], 4)
         self.assertEqual(summary_json["task_rows"], 4)
@@ -7141,6 +7148,9 @@ class OperationalCommandTests(unittest.TestCase):
         self.assertTrue(all(row["manual_decision"] == "" for row in out_rows))
         self.assertIn("provider_detail_url", out_rows[0])
         self.assertIn("HYPERLINK", sheet_xml)
+        self.assertIn("Protected-Lane Priority Review Handoff", md_text)
+        self.assertIn("unfetchable_candidate_boundary", md_text)
+        self.assertIn("manual_decision", md_text)
 
     def test_build_convergence_audit_keeps_75_75_and_routes_next_protected_labels(self):
         with tempfile.TemporaryDirectory() as tmp:

@@ -144,6 +144,7 @@ def run_calibration_cycle(
     protected_lane_priority_csv = out_dir / "protected_lanes_priority_task.csv"
     protected_lane_priority_xlsx = out_dir / "protected_lanes_priority_task.xlsx"
     protected_lane_priority_json = out_dir / "protected_lanes_priority_task_summary.json"
+    protected_lane_priority_md = out_dir / "protected_lanes_priority_task_handoff.md"
     protected_lane_priority_verify_json = out_dir / "protected_lanes_priority_task_verification.json"
     protected_lane_priority_verify_md = out_dir / "protected_lanes_priority_task_verification.md"
     summary_json = out_dir / "calibration_cycle_summary.json"
@@ -393,6 +394,7 @@ def run_calibration_cycle(
             "protected_lanes_priority_task_csv": str(protected_lane_priority_csv),
             "protected_lanes_priority_task_xlsx": str(protected_lane_priority_xlsx),
             "protected_lanes_priority_task_summary_json": str(protected_lane_priority_json),
+            "protected_lanes_priority_task_handoff_md": str(protected_lane_priority_md),
             "protected_lanes_priority_task_verification_json": str(protected_lane_priority_verify_json),
             "protected_lanes_priority_task_verification_md": str(protected_lane_priority_verify_md),
             "summary_json": str(summary_json),
@@ -459,6 +461,7 @@ def run_calibration_cycle(
         output_csv=protected_lane_priority_csv,
         output_xlsx=protected_lane_priority_xlsx,
         output_json=protected_lane_priority_json,
+        output_md=protected_lane_priority_md,
     )
     report["calibration_status"] = status_report
     report["label_gap_task"] = label_gap_task

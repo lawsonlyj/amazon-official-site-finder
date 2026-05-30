@@ -26,6 +26,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--output-csv", required=True)
     parser.add_argument("--output-xlsx")
     parser.add_argument("--output-json")
+    parser.add_argument("--output-md")
     parser.add_argument("--max-rows", type=int, default=16)
     parser.add_argument("--max-per-reason", type=int, default=4)
     args = parser.parse_args(argv)
@@ -35,6 +36,7 @@ def main(argv: list[str] | None = None) -> int:
         output_csv=args.output_csv,
         output_xlsx=args.output_xlsx,
         output_json=args.output_json,
+        output_md=args.output_md,
         max_rows=args.max_rows,
         max_per_reason=args.max_per_reason,
     )
@@ -48,6 +50,7 @@ def build_protected_lane_priority_task(
     output_csv: str | Path,
     output_xlsx: str | Path | None = None,
     output_json: str | Path | None = None,
+    output_md: str | Path | None = None,
     max_rows: int = 16,
     max_per_reason: int = 4,
 ) -> dict:
@@ -70,6 +73,7 @@ def build_protected_lane_priority_task(
         "source_csv": str(source_path),
         "output_csv": str(output_csv_path),
         "output_xlsx": str(output_xlsx or ""),
+        "output_md": str(output_md or ""),
         "task_rows": len(output_rows),
         "max_rows": max_rows,
         "max_per_reason": max_per_reason,
@@ -95,7 +99,60 @@ def build_protected_lane_priority_task(
         path = Path(output_json)
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
+    if output_md:
+        path = Path(output_md)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(_render_markdown(summary, output_rows), encoding="utf-8")
     return summary
+
+
+def _render_markdown(summary: dict, rows: list[dict[str, str]]) -> str:
+    lines = [
+        "# Protected-Lane Priority Review Handoff",
+        "",
+        "## Purpose",
+        "",
+        "This is the first small protected-lane label batch. Fill it before changing thresholds, review-lane routing, or guarded pattern-release rules.",
+        "",
+        "## Fill Fields",
+        "",
+        "- manual_decision: accept, replace, reject, or unsure",
+        "- manual_url: required for replace; optional for accept when the shown URL is correct",
+        "- notes: short reason such as correct_official, wrong_company, country_mismatch, service_mismatch, logo_only_not_enough, unreachable, no_official",
+        "",
+        "## Summary",
+        "",
+        f"- Rows: {summary.get('task_rows')}",
+        f"- Source rows: {summary.get('source_rows')}",
+        f"- Eligible unfilled rows: {summary.get('eligible_unfilled_rows')}",
+        f"- CSV: {summary.get('output_csv')}",
+        f"- XLSX: {summary.get('output_xlsx')}",
+        "",
+        "## Review Reasons",
+        "",
+    ]
+    for key, value in sorted((summary.get("reason_counts") or {}).items()):
+        lines.append(f"- {key}: {value}")
+    lines.extend(["", "## Priority Reasons", ""])
+    for key, value in sorted((summary.get("priority_reason_counts") or {}).items()):
+        lines.append(f"- {key}: {value}")
+    lines.extend(["", "## Rows", ""])
+    for row in rows:
+        candidate = row.get("official_url") or row.get("candidate_url") or ""
+        lines.append(
+            "- {rank}. {provider} | {review_reason} | {priority_reason} | {candidate}".format(
+                rank=row.get("priority_rank"),
+                provider=row.get("provider_name"),
+                review_reason=row.get("review_reason"),
+                priority_reason=row.get("priority_reason"),
+                candidate=candidate,
+            )
+        )
+        impact = row.get("decision_impact") or ""
+        if impact:
+            lines.append(f"  - impact: {impact}")
+    lines.append("")
+    return "\n".join(lines)
 
 
 def _priority_row(row: dict[str, str], rank: int) -> dict[str, str]:

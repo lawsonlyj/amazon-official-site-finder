@@ -708,6 +708,7 @@ def _sample_artifacts(cycle: dict, sample_eval_json: str | Path | None) -> dict:
         "protected_lanes_priority_task_summary_json": str(
             outputs.get("protected_lanes_priority_task_summary_json") or ""
         ),
+        "protected_lanes_priority_task_handoff_md": str(outputs.get("protected_lanes_priority_task_handoff_md") or ""),
         "protected_lanes_priority_task_verification_json": str(
             outputs.get("protected_lanes_priority_task_verification_json") or ""
         ),
@@ -1031,6 +1032,7 @@ def _render_markdown(report: dict) -> str:
             f"- High-priority label-gap XLSX: {report['artifacts'].get('label_gap_high_priority_xlsx') or 'not recorded'}",
             f"- Protected-lane next review XLSX: {report['artifacts'].get('protected_lanes_next_review_task_xlsx') or 'not recorded'}",
             f"- Protected-lane priority review XLSX: {report['artifacts'].get('protected_lanes_priority_task_xlsx') or 'not recorded'}",
+            f"- Protected-lane priority handoff MD: {report['artifacts'].get('protected_lanes_priority_task_handoff_md') or 'not recorded'}",
             f"- Regression cases CSV: {report['artifacts'].get('regression_cases_csv') or 'not recorded'}",
             f"- Regression gate report: {report['artifacts'].get('regression_gate_md') or 'not recorded'}",
             "",
