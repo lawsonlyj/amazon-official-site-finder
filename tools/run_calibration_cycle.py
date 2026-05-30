@@ -13,6 +13,7 @@ from tools.build_balance_report import build_balance_report
 from tools.build_calibration_label_gap_task import build_calibration_label_gap_task
 from tools.build_calibration_regression_cases import build_calibration_regression_cases
 from tools.build_calibration_status_report import build_calibration_status_report
+from tools.check_calibration_application_gate import APPLICATION_GATES, check_calibration_application_gate
 from tools.evaluate_calibration_review_sample import evaluate_calibration_review_sample
 from tools.mine_evidence_patterns import mine_evidence_patterns
 from tools.run_calibration_regression_gate import run_calibration_regression_gate
@@ -135,6 +136,8 @@ def run_calibration_cycle(
     summary_md = out_dir / "calibration_cycle_summary.md"
     status_json = out_dir / "calibration_status.json"
     status_md = out_dir / "calibration_status.md"
+    application_gates_json = out_dir / "calibration_application_gates.json"
+    application_gates_md = out_dir / "calibration_application_gates.md"
 
     recall_report = mine_evidence_patterns(
         balance_json=labeled_eval_json,
@@ -364,6 +367,8 @@ def run_calibration_cycle(
             "summary_md": str(summary_md),
             "status_json": str(status_json),
             "status_md": str(status_md),
+            "application_gates_json": str(application_gates_json),
+            "application_gates_md": str(application_gates_md),
         },
         "recall_recommendations": recall_report.get("recommendations", []),
         "precision_recommendations": precision_report.get("recommendations", []),
@@ -423,6 +428,11 @@ def run_calibration_cycle(
         output_md=status_md,
     )
     report["calibration_status"] = status_report
+    application_gate_checks = _write_application_gate_checks(status_json, application_gates_json, application_gates_md)
+    report["application_gate_checks"] = application_gate_checks
+    report["summary"]["application_gate_allowed_count"] = application_gate_checks["summary"]["allowed_gate_count"]
+    report["summary"]["application_gate_not_allowed_count"] = application_gate_checks["summary"]["not_allowed_gate_count"]
+    report["summary"]["application_gate_candidate_count"] = application_gate_checks["summary"]["candidate_gate_count"]
     summary_json.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
     summary_md.write_text(_render_markdown(report), encoding="utf-8")
     return report
@@ -482,6 +492,7 @@ def _render_markdown(report: dict) -> str:
         f"- Filled positive fixtures: {summary.get('filled_positive_fixture_rows')}",
         f"- Regression gate status: {summary.get('regression_gate_status') or 'not_run'}",
         f"- Regression gate fail/unverified rows: {summary.get('regression_gate_fail_rows')}/{summary.get('regression_gate_unverified_rows')}",
+        f"- Application gates allowed/not allowed/candidate: {summary.get('application_gate_allowed_count')}/{summary.get('application_gate_not_allowed_count')}/{summary.get('application_gate_candidate_count')}",
         "",
         "## Outputs",
         "",
@@ -628,7 +639,77 @@ def _render_markdown(report: dict) -> str:
         gate_summary = regression_gate["summary"]
         lines.append(f"- Gate status: {gate_summary.get('gate_status')}")
         lines.append(f"- Pass/fail/unverified: {gate_summary.get('pass_rows')}/{gate_summary.get('fail_rows')}/{gate_summary.get('unverified_rows')}")
+    application_gate_checks = report.get("application_gate_checks") or {}
+    if application_gate_checks.get("checks"):
+        lines.extend(["", "## Application Gates", ""])
+        for item in application_gate_checks["checks"]:
+            lines.append(
+                "- {gate}: allowed={allowed}, status={status}, blockers={blockers} :: {reason}".format(
+                    gate=item.get("gate"),
+                    allowed=str(item.get("allowed")).lower(),
+                    status=item.get("gate_status"),
+                    blockers=", ".join(item.get("blockers") or []) or "none",
+                    reason=item.get("reason") or item.get("decision_reason") or "",
+                )
+            )
     lines.append("")
+    return "\n".join(lines)
+
+
+def _write_application_gate_checks(status_json: Path, output_json: Path, output_md: Path) -> dict:
+    checks = [
+        check_calibration_application_gate(status_json=status_json, gate=gate)["summary"]
+        for gate in sorted(APPLICATION_GATES)
+    ]
+    allowed = [row["gate"] for row in checks if row.get("allowed")]
+    not_allowed = [row["gate"] for row in checks if not row.get("allowed")]
+    candidates = [row["gate"] for row in checks if row.get("gate_status") == "candidate"]
+    report = {
+        "summary": {
+            "gate_count": len(checks),
+            "allowed_gate_count": len(allowed),
+            "not_allowed_gate_count": len(not_allowed),
+            "candidate_gate_count": len(candidates),
+            "allowed_gates": allowed,
+            "not_allowed_gates": not_allowed,
+            "candidate_gates": candidates,
+        },
+        "inputs": {"status_json": str(status_json)},
+        "checks": checks,
+    }
+    output_json.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
+    output_md.write_text(_render_application_gate_checks_markdown(report), encoding="utf-8")
+    return report
+
+
+def _render_application_gate_checks_markdown(report: dict) -> str:
+    summary = report["summary"]
+    lines = [
+        "# Calibration Application Gates",
+        "",
+        f"- Gate count: {summary['gate_count']}",
+        f"- Allowed gates: {summary['allowed_gate_count']}",
+        f"- Not allowed gates: {summary['not_allowed_gate_count']}",
+        f"- Candidate gates: {summary['candidate_gate_count']}",
+        "",
+        "## Checks",
+        "",
+    ]
+    for row in report.get("checks", []):
+        blockers = ", ".join(row.get("blockers") or []) or "none"
+        lines.extend(
+            [
+                f"### {row.get('gate')}",
+                f"- Allowed: {str(row.get('allowed')).lower()}",
+                f"- Gate status: {row.get('gate_status')}",
+                f"- Can apply now: {str(row.get('can_apply_now')).lower()}",
+                f"- Blockers: {blockers}",
+                f"- Decision reason: {row.get('decision_reason')}",
+                f"- Reason: {row.get('reason') or 'not recorded'}",
+                f"- Required action: {row.get('required_action') or 'not recorded'}",
+                "",
+            ]
+        )
     return "\n".join(lines)
 
 

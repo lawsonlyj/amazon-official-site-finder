@@ -4524,6 +4524,8 @@ class OperationalCommandTests(unittest.TestCase):
                 "summary_md": (output_dir / "calibration_cycle_summary.md").exists(),
                 "status_json": (output_dir / "calibration_status.json").exists(),
                 "status_md": (output_dir / "calibration_status.md").exists(),
+                "application_gates_json": (output_dir / "calibration_application_gates.json").exists(),
+                "application_gates_md": (output_dir / "calibration_application_gates.md").exists(),
                 "label_gap_csv": (output_dir / "label_gap_task.csv").exists(),
                 "label_gap_xlsx": (output_dir / "label_gap_task.xlsx").exists(),
                 "label_gap_high_csv": (output_dir / "label_gap_high_priority_task.csv").exists(),
@@ -4532,6 +4534,7 @@ class OperationalCommandTests(unittest.TestCase):
             with (output_dir / "label_gap_high_priority_task.csv").open(newline="", encoding="utf-8") as f:
                 high_gap_rows = list(csv.DictReader(f))
             status_data = json.loads((output_dir / "calibration_status.json").read_text(encoding="utf-8"))
+            gate_data = json.loads((output_dir / "calibration_application_gates.json").read_text(encoding="utf-8"))
 
         self.assertEqual(report["summary"]["sample_rows"], 2)
         self.assertTrue(output_exists["recall_json"])
@@ -4546,6 +4549,8 @@ class OperationalCommandTests(unittest.TestCase):
         self.assertTrue(output_exists["summary_md"])
         self.assertTrue(output_exists["status_json"])
         self.assertTrue(output_exists["status_md"])
+        self.assertTrue(output_exists["application_gates_json"])
+        self.assertTrue(output_exists["application_gates_md"])
         self.assertTrue(output_exists["label_gap_csv"])
         self.assertTrue(output_exists["label_gap_xlsx"])
         self.assertTrue(output_exists["label_gap_high_csv"])
@@ -4579,6 +4584,11 @@ class OperationalCommandTests(unittest.TestCase):
         )
         self.assertIn("balance_report", report)
         self.assertIn("threshold_boundary", report)
+        self.assertIn("application_gate_checks", report)
+        self.assertEqual(gate_data["summary"]["gate_count"], 3)
+        self.assertEqual(report["summary"]["application_gate_not_allowed_count"], 3)
+        self.assertEqual(report["summary"]["application_gate_allowed_count"], 0)
+        self.assertIn("review_lane_change", gate_data["summary"]["not_allowed_gates"])
         self.assertEqual(report["calibration_status"]["summary"]["workflow_status"], "not_converged_needs_human_labels")
         self.assertEqual(report["inputs"]["pattern_release_jsons"], [str(pattern_release)])
         self.assertEqual(report["inputs"]["preferred_pattern_release_json"], str(pattern_release))
