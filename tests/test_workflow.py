@@ -64,6 +64,7 @@ from tools.build_threshold_boundary_report import build_threshold_boundary_repor
 from tools.verify_protected_lane_review_task import verify_protected_lane_review_task
 from tools.reuse_historical_labels_for_task import reuse_historical_labels_for_task
 from tools.apply_calibration_regression_cases import apply_calibration_regression_cases
+from tools.build_policy_validation_task import build_policy_validation_task
 from tools.output_layout import (
     DEFAULT_MATCHED_REVIEW_CONFIDENCE_CUTOFF,
     DEFAULT_SECOND_PASS_ACCEPT_THRESHOLD,
@@ -7929,6 +7930,229 @@ class OperationalCommandTests(unittest.TestCase):
             {"has:candidate_pages_fetch_ok AND review_reason:precision_low_confidence_auto_match": 1},
         )
         self.assertEqual(pattern_report["summary"]["regression_gate_summary"]["gate_status"], "pass")
+
+    def test_build_policy_validation_task_outputs_unlabeled_rule_impact_rows(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            final_csv = root / "official_sites.csv"
+            review_csv = root / "review_task.csv"
+            agent_b_csv = root / "agent_b.csv"
+            details_json = root / "details.json"
+            release_json = root / "release_pattern.json"
+            output_csv = root / "policy_validation.csv"
+            output_xlsx = root / "policy_validation.xlsx"
+            summary_json = root / "policy_validation.json"
+            summary_md = root / "policy_validation.md"
+            base_final_row = {
+                "provider_id": "",
+                "provider_name": "",
+                "provider_detail_url": "",
+                "official_url": "",
+                "official_domain": "",
+                "status": "",
+                "decision_source": "",
+                "confidence": "",
+                "source_status": "",
+                "evidence_summary": "",
+                "candidate_count": "1",
+                "scored_candidate_count": "1",
+                "service_apis": "",
+                "provider_locations": "",
+                "notes": "",
+            }
+            final_rows = []
+            for provider_id, name, url, domain, status in [
+                ("p-hold-labeled", "Hold Labeled", "https://wrong.example/", "wrong.example", "matched"),
+                ("p-hold-unlabeled", "Hold Unlabeled", "https://maybe.example/", "maybe.example", "matched"),
+                ("p-release-labeled", "Release Labeled", "", "", "unresolved"),
+                ("p-release-unlabeled", "Release Unlabeled", "", "", "unresolved"),
+            ]:
+                row = dict(base_final_row)
+                row.update(
+                    {
+                        "provider_id": provider_id,
+                        "provider_name": name,
+                        "provider_detail_url": f"https://amazon.example/{provider_id}",
+                        "official_url": url,
+                        "official_domain": domain,
+                        "status": status,
+                    }
+                )
+                final_rows.append(row)
+            _write_test_csv(final_csv, final_rows)
+            _write_test_csv(
+                review_csv,
+                [
+                    {
+                        "provider_id": "p-hold-labeled",
+                        "provider_name": "Hold Labeled",
+                        "provider_detail_url": "https://amazon.example/p-hold-labeled",
+                        "review_reason": "precision_low_confidence_auto_match",
+                        "service_apis": "Listings",
+                        "provider_locations": "DE",
+                    },
+                    {
+                        "provider_id": "p-hold-unlabeled",
+                        "provider_name": "Hold Unlabeled",
+                        "provider_detail_url": "https://amazon.example/p-hold-unlabeled",
+                        "review_reason": "precision_low_confidence_auto_match",
+                        "service_apis": "Listings",
+                        "provider_locations": "DE",
+                    },
+                    {
+                        "provider_id": "p-release-labeled",
+                        "provider_name": "Release Labeled",
+                        "provider_detail_url": "https://amazon.example/p-release-labeled",
+                        "review_reason": "recall_unresolved_top_candidate",
+                        "service_apis": "Listings",
+                        "provider_locations": "US",
+                    },
+                    {
+                        "provider_id": "p-release-unlabeled",
+                        "provider_name": "Release Unlabeled",
+                        "provider_detail_url": "https://amazon.example/p-release-unlabeled",
+                        "review_reason": "recall_unresolved_top_candidate",
+                        "service_apis": "Listings",
+                        "provider_locations": "US",
+                    },
+                ],
+            )
+            _write_test_csv(
+                agent_b_csv,
+                [
+                    {
+                        "provider_id": "p-hold-labeled",
+                        "provider_name": "Hold Labeled",
+                        "provider_detail_url": "https://amazon.example/p-hold-labeled",
+                        "review_reason": "precision_low_confidence_auto_match",
+                        "candidate_url": "https://wrong.example/",
+                        "candidate_domain": "wrong.example",
+                        "agent_b_decision": "unsure",
+                        "confidence": "68",
+                        "evidence_score": "68",
+                        "supporting_facts": "candidate_pages_fetch_ok; page_contains_exact_provider_name",
+                        "counter_evidence": "",
+                        "reason_for_unsure": "insufficient_or_conflicting_evidence",
+                    },
+                    {
+                        "provider_id": "p-hold-unlabeled",
+                        "provider_name": "Hold Unlabeled",
+                        "provider_detail_url": "https://amazon.example/p-hold-unlabeled",
+                        "review_reason": "precision_low_confidence_auto_match",
+                        "candidate_url": "https://maybe.example/",
+                        "candidate_domain": "maybe.example",
+                        "agent_b_decision": "unsure",
+                        "confidence": "68",
+                        "evidence_score": "68",
+                        "supporting_facts": "candidate_pages_fetch_ok; page_contains_exact_provider_name",
+                        "counter_evidence": "",
+                        "reason_for_unsure": "insufficient_or_conflicting_evidence",
+                    },
+                    {
+                        "provider_id": "p-release-labeled",
+                        "provider_name": "Release Labeled",
+                        "provider_detail_url": "https://amazon.example/p-release-labeled",
+                        "review_reason": "recall_unresolved_top_candidate",
+                        "candidate_url": "https://releaselabeled.example/",
+                        "candidate_domain": "releaselabeled.example",
+                        "agent_b_decision": "unsure",
+                        "confidence": "48",
+                        "evidence_score": "48",
+                        "supporting_facts": "page_contains_exact_provider_name",
+                        "counter_evidence": "",
+                        "reason_for_unsure": "",
+                    },
+                    {
+                        "provider_id": "p-release-unlabeled",
+                        "provider_name": "Release Unlabeled",
+                        "provider_detail_url": "https://amazon.example/p-release-unlabeled",
+                        "review_reason": "recall_unresolved_top_candidate",
+                        "candidate_url": "https://releaseunlabeled.example/",
+                        "candidate_domain": "releaseunlabeled.example",
+                        "agent_b_decision": "unsure",
+                        "confidence": "48",
+                        "evidence_score": "48",
+                        "supporting_facts": "page_contains_exact_provider_name",
+                        "counter_evidence": "",
+                        "reason_for_unsure": "",
+                    },
+                ],
+            )
+            details_json.write_text(
+                json.dumps(
+                    {
+                        "details": [
+                            {
+                                "provider_id": "p-hold-labeled",
+                                "provider_name": "Hold Labeled",
+                                "expected_kind": "no_official",
+                                "expected_url": "",
+                                "expected_domain": "",
+                            },
+                            {
+                                "provider_id": "p-release-labeled",
+                                "provider_name": "Release Labeled",
+                                "expected_kind": "official",
+                                "expected_url": "https://releaselabeled.example/",
+                                "expected_domain": "releaselabeled.example",
+                            },
+                        ]
+                    }
+                ),
+                encoding="utf-8",
+            )
+            release_json.write_text(
+                json.dumps(
+                    {
+                        "candidate_for_rule": [
+                            {
+                                "pattern": "review_reason:recall_unresolved_top_candidate AND has:page_contains_exact_provider_name AND agent_b_score>=45 AND agent_b_score<50",
+                                "features": [
+                                    "review_reason:recall_unresolved_top_candidate",
+                                    "has:page_contains_exact_provider_name",
+                                    "agent_b_score>=45",
+                                    "agent_b_score<50",
+                                ],
+                                "supporting_rows": 1,
+                                "blocking_rows": 0,
+                                "actionable": True,
+                            }
+                        ]
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            report = build_policy_validation_task(
+                final_csv=final_csv,
+                review_task_csv=review_csv,
+                agent_b_csv=agent_b_csv,
+                hold_patterns=["review_reason:precision_low_confidence_auto_match AND has:candidate_pages_fetch_ok"],
+                release_pattern_jsons=[release_json],
+                labeled_details=[details_json],
+                output_csv=output_csv,
+                output_xlsx=output_xlsx,
+                summary_json=summary_json,
+                summary_md=summary_md,
+            )
+            with output_csv.open(newline="", encoding="utf-8-sig") as f:
+                rows = {row["provider_id"]: row for row in csv.DictReader(f)}
+            saved = json.loads(summary_json.read_text(encoding="utf-8"))
+            md_text = summary_md.read_text(encoding="utf-8")
+            with zipfile.ZipFile(output_xlsx) as z:
+                sheet_text = z.read("xl/worksheets/sheet1.xml").decode("utf-8")
+
+        self.assertEqual(report["summary"]["matched_candidate_rows"], 4)
+        self.assertEqual(report["summary"]["output_rows"], 2)
+        self.assertEqual(report["summary"]["skipped_labeled_rows"], 2)
+        self.assertEqual(report["summary"]["action_counts"], {"holdout": 1, "release": 1})
+        self.assertEqual(set(rows), {"p-hold-unlabeled", "p-release-unlabeled"})
+        self.assertEqual(rows["p-hold-unlabeled"]["manual_decision"], "")
+        self.assertEqual(rows["p-release-unlabeled"]["candidate_url"], "https://releaseunlabeled.example/")
+        self.assertEqual(rows["p-release-unlabeled"]["provider_detail_url"], "https://amazon.example/p-release-unlabeled")
+        self.assertEqual(saved["summary"]["known_label_counts"], {"unlabeled": 2})
+        self.assertIn("Policy Validation Task", md_text)
+        self.assertIn("HYPERLINK", sheet_text)
 
     def test_verify_protected_lane_review_task_checks_links_summary_and_manual_blanks(self):
         with tempfile.TemporaryDirectory() as tmp:
