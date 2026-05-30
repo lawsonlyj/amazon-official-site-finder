@@ -47,11 +47,11 @@ def build_calibration_status_report(
     threshold_summary = threshold.get("summary", {})
     sample_summary = sample_eval.get("summary", {})
 
+    artifacts = _sample_artifacts(cycle, sample_eval_json)
     threshold_status = _threshold_status(cycle_summary, threshold_summary)
     pattern_status = _pattern_release_status(cycle_summary, balance_summary, threshold_summary)
-    lane_status = _lane_status(cycle_summary, balance_summary, sample_summary)
-    artifacts = _sample_artifacts(cycle, sample_eval_json)
     label_targets = _label_targets(cycle, balance, sample_eval, artifacts)
+    lane_status = _lane_status(cycle_summary, balance_summary, sample_summary, label_targets)
     labeling_instructions = _labeling_instructions()
     workflow_status = _workflow_status(cycle_summary, sample_summary, threshold_status, pattern_status, lane_status)
     open_requirements = _open_requirements(cycle_summary, sample_summary, threshold_status, pattern_status, lane_status)
@@ -197,22 +197,30 @@ def _pattern_release_status(cycle_summary: dict, balance_summary: dict, threshol
     }
 
 
-def _lane_status(cycle_summary: dict, balance_summary: dict, sample_summary: dict) -> dict:
+def _lane_status(cycle_summary: dict, balance_summary: dict, sample_summary: dict, label_targets: list[dict] | None = None) -> dict:
     protected_lanes = _first_present(
         cycle_summary.get("protected_review_lane_count"),
         balance_summary.get("protected_review_lane_count"),
         0,
     )
+    label_targets = label_targets or []
+    decisive_rows_needed = sum(_to_int(target.get("decisive_rows_needed")) for target in label_targets)
+    high_priority_decisive_rows_needed = sum(
+        _to_int(target.get("decisive_rows_needed")) for target in label_targets if target.get("priority") == "high"
+    )
     needs_more = _to_int(sample_summary.get("lane_needs_more_label_rows"))
     candidate_for_change = _to_int(sample_summary.get("lane_candidate_for_change_rows"))
     keep_review = _to_int(sample_summary.get("lane_keep_review_rows"))
     labeled = _to_int(sample_summary.get("labeled_rows"))
-    if labeled == 0 and needs_more:
+    if labeled == 0 and (needs_more or decisive_rows_needed):
         status = "needs_human_labels"
         reason = "The current calibration sample is not filled; lane decisions cannot be changed yet."
     elif keep_review:
         status = "protected_by_filled_labels"
         reason = "Filled labels still show at least one lane that must remain in manual review."
+    elif decisive_rows_needed:
+        status = "needs_more_labels"
+        reason = "Remaining decisive-label gaps must be filled before reducing manual review or changing rules."
     elif candidate_for_change:
         status = "candidate_for_downgrade"
         reason = "Filled labels found lane candidates for downgrade, but regression tests are still required."
@@ -232,6 +240,8 @@ def _lane_status(cycle_summary: dict, balance_summary: dict, sample_summary: dic
         "needs_more_label_rows": needs_more,
         "candidate_for_change_rows": candidate_for_change,
         "keep_review_rows": keep_review,
+        "decisive_rows_needed": decisive_rows_needed,
+        "high_priority_decisive_rows_needed": high_priority_decisive_rows_needed,
     }
 
 

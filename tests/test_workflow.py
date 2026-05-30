@@ -5165,6 +5165,96 @@ class OperationalCommandTests(unittest.TestCase):
         self.assertEqual(target["target_decisive_rows"], 5)
         self.assertEqual(target["decisive_rows_needed"], 1)
 
+    def test_build_calibration_status_report_keeps_partial_gap_from_candidate_change(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            cycle = root / "cycle.json"
+            balance = root / "balance.json"
+            sample_eval = root / "filled_eval.json"
+            sample_csv = root / "sample.csv"
+            rows = []
+            for idx in range(5):
+                rows.append(
+                    {
+                        "provider_id": f"high-{idx}",
+                        "review_reason": "precision_second_pass_accepted_lt70",
+                    }
+                )
+            for idx in range(3):
+                rows.append(
+                    {
+                        "provider_id": f"medium-{idx}",
+                        "review_reason": "precision_low_confidence_auto_match",
+                    }
+                )
+            _write_test_csv(sample_csv, rows)
+            cycle.write_text(
+                json.dumps(
+                    {
+                        "summary": {
+                            "recommended_global_accept_threshold": 75,
+                            "recommended_second_pass_threshold": 75,
+                            "more_label_review_lanes": ["precision_second_pass_accepted_lt70"],
+                            "filled_eval_labeled_rows": 5,
+                            "filled_eval_decisive_rows": 5,
+                        },
+                        "outputs": {"sample_csv": str(sample_csv)},
+                    }
+                ),
+                encoding="utf-8",
+            )
+            balance.write_text(
+                json.dumps(
+                    {
+                        "summary": {
+                            "protected_review_lanes": ["precision_low_confidence_auto_match"],
+                            "protected_review_lane_count": 1,
+                        }
+                    }
+                ),
+                encoding="utf-8",
+            )
+            sample_eval.write_text(
+                json.dumps(
+                    {
+                        "summary": {
+                            "labeled_rows": 5,
+                            "decisive_rows": 5,
+                            "lane_candidate_for_change_rows": 1,
+                            "lane_keep_review_rows": 0,
+                            "lane_needs_more_label_rows": 0,
+                        },
+                        "by_review_reason": {
+                            "precision_second_pass_accepted_lt70": {
+                                "rows": 5,
+                                "labeled_rows": 5,
+                                "decisive_rows": 5,
+                            }
+                        },
+                        "lane_recommendations": [
+                            {
+                                "review_reason": "precision_second_pass_accepted_lt70",
+                                "recommendation": "candidate_for_review_downgrade",
+                            }
+                        ],
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            report = build_calibration_status_report(
+                calibration_cycle_json=cycle,
+                balance_report_json=balance,
+                sample_eval_json=sample_eval,
+            )
+            by_reason = {item["review_reason"]: item for item in report["label_targets"]}
+
+        self.assertEqual(report["summary"]["workflow_status"], "partially_converged_keep_review_lanes")
+        self.assertEqual(report["summary"]["review_lane_status"], "needs_more_labels")
+        self.assertEqual(report["review_lanes"]["decisive_rows_needed"], 3)
+        self.assertEqual(by_reason["precision_second_pass_accepted_lt70"]["decisive_rows_needed"], 0)
+        self.assertEqual(by_reason["precision_low_confidence_auto_match"]["decisive_rows_needed"], 3)
+
     def test_build_calibration_label_gap_task_selects_needed_unlabeled_rows(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
