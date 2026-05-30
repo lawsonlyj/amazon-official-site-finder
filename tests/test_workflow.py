@@ -51,7 +51,7 @@ from tools.build_calibration_review_sample import build_calibration_review_sampl
 from tools.build_calibration_status_report import build_calibration_status_report
 from tools.check_calibration_application_gate import check_calibration_application_gate
 from tools.evaluate_calibration_review_sample import evaluate_calibration_review_sample
-from tools.mine_evidence_patterns import mine_evidence_patterns
+from tools.mine_evidence_patterns import features_for_review_agent_row, mine_evidence_patterns
 from tools.run_calibration_cycle import run_calibration_cycle
 from tools.run_calibration_followup import run_calibration_followup
 from tools.run_calibration_regression_gate import run_calibration_regression_gate
@@ -2622,6 +2622,32 @@ class OperationalCommandTests(unittest.TestCase):
         self.assertTrue(any("has:shared_fact" in pattern for pattern in all_patterns))
         self.assertTrue(output_json_exists)
         self.assertIn("Best candidate pattern", md_text)
+
+    def test_evidence_pattern_features_include_missing_identity_and_generic_name_markers(self):
+        features = features_for_review_agent_row(
+            {
+                "provider_id": "p-1",
+                "provider_name": "Aseller",
+                "review_reason": "precision_generic_identity_term_risk",
+            },
+            {
+                "provider_id": "p-1",
+                "provider_name": "Aseller",
+                "candidate_url": "https://aseller.example",
+                "candidate_domain": "aseller.example",
+                "agent_b_decision": "unsure",
+                "evidence_score": "81",
+                "supporting_facts": "candidate_pages_fetch_ok; page_contains_exact_provider_name",
+                "counter_evidence": "",
+                "reason_for_unsure": "high_risk_identity_needs_human_confirmation",
+            },
+        )
+
+        self.assertIn("provider_name_contains:seller", features)
+        self.assertIn("provider_name_shape:single_token", features)
+        self.assertIn("missing:legal_entity_marker_found", features)
+        self.assertIn("missing:listing_logo_visual_match", features)
+        self.assertIn("review_reason:precision_generic_identity_term_risk", features)
 
     def test_simulate_pattern_release_scores_safe_recall_rules(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -7722,10 +7748,13 @@ class OperationalCommandTests(unittest.TestCase):
             root = Path(tmp)
             final_csv = root / "official_sites.csv"
             review_csv = root / "review_task.csv"
+            agent_b_csv = root / "agent_b.csv"
             details_json = root / "details.json"
             cases_csv = root / "cases.csv"
             output_csv = root / "policy.csv"
             output_xlsx = root / "policy.xlsx"
+            pattern_csv = root / "pattern_policy.csv"
+            pattern_summary_json = root / "pattern_policy.json"
             summary_json = root / "policy.json"
             summary_md = root / "policy.md"
             _write_test_csv(
@@ -7779,6 +7808,35 @@ class OperationalCommandTests(unittest.TestCase):
                         "provider_id": "p-safe",
                         "provider_name": "Safe Agency",
                         "review_reason": "precision_calibrated_pattern_release",
+                    },
+                ],
+            )
+            _write_test_csv(
+                agent_b_csv,
+                [
+                    {
+                        "provider_id": "p-risk",
+                        "provider_name": "Risk Agency",
+                        "review_reason": "precision_low_confidence_auto_match",
+                        "candidate_url": "https://wrong.example/",
+                        "candidate_domain": "wrong.example",
+                        "agent_b_decision": "unsure",
+                        "evidence_score": "65",
+                        "supporting_facts": "candidate_pages_fetch_ok; page_contains_exact_provider_name",
+                        "counter_evidence": "",
+                        "reason_for_unsure": "insufficient_or_conflicting_evidence",
+                    },
+                    {
+                        "provider_id": "p-safe",
+                        "provider_name": "Safe Agency",
+                        "review_reason": "precision_calibrated_pattern_release",
+                        "candidate_url": "https://safe.example/",
+                        "candidate_domain": "safe.example",
+                        "agent_b_decision": "accept",
+                        "evidence_score": "90",
+                        "supporting_facts": "candidate_pages_fetch_ok; page_contains_exact_provider_name",
+                        "counter_evidence": "",
+                        "reason_for_unsure": "",
                     },
                 ],
             )
@@ -7838,6 +7896,19 @@ class OperationalCommandTests(unittest.TestCase):
             saved = json.loads(summary_json.read_text(encoding="utf-8"))
             md_text = summary_md.read_text(encoding="utf-8")
             output_xlsx_exists = output_xlsx.exists()
+            pattern_report = simulate_review_lane_output_policy(
+                final_csv=final_csv,
+                review_task_csv=review_csv,
+                hold_review_reasons=[],
+                hold_patterns=["review_reason:precision_low_confidence_auto_match AND has:candidate_pages_fetch_ok"],
+                agent_b_csv=agent_b_csv,
+                output_csv=pattern_csv,
+                labeled_details=details_json,
+                cases_csv=cases_csv,
+                summary_json=pattern_summary_json,
+            )
+            with pattern_csv.open(newline="", encoding="utf-8-sig") as f:
+                pattern_rows = {row["provider_id"]: row for row in csv.DictReader(f)}
 
         self.assertEqual(rows["p-risk"]["official_url"], "")
         self.assertEqual(rows["p-risk"]["status"], "needs_review")
@@ -7850,6 +7921,14 @@ class OperationalCommandTests(unittest.TestCase):
         self.assertEqual(saved["summary"]["held_provider_ids"], ["p-risk"])
         self.assertTrue(output_xlsx_exists)
         self.assertIn("Review Lane Output Policy Simulation", md_text)
+        self.assertEqual(pattern_rows["p-risk"]["official_url"], "")
+        self.assertEqual(pattern_rows["p-safe"]["official_url"], "https://safe.example/")
+        self.assertEqual(pattern_report["summary"]["held_rows"], 1)
+        self.assertEqual(
+            pattern_report["summary"]["held_pattern_counts"],
+            {"has:candidate_pages_fetch_ok AND review_reason:precision_low_confidence_auto_match": 1},
+        )
+        self.assertEqual(pattern_report["summary"]["regression_gate_summary"]["gate_status"], "pass")
 
     def test_verify_protected_lane_review_task_checks_links_summary_and_manual_blanks(self):
         with tempfile.TemporaryDirectory() as tmp:

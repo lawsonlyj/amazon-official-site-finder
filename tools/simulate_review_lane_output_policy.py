@@ -12,6 +12,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from finder.finalize import FINAL_FIELDS, write_rows
 from tools.build_linked_workbook import build_workbook
 from tools.evaluate_workflow_balance import evaluate_balance_from_details
+from tools.mine_evidence_patterns import features_for_review_agent_row
 from tools.run_calibration_regression_gate import run_calibration_regression_gate
 
 
@@ -27,6 +28,13 @@ def main(argv: list[str] | None = None) -> int:
         default=[],
         help="review_reason to move from automatic official output to needs_review. Repeatable or comma-separated.",
     )
+    parser.add_argument(
+        "--hold-pattern",
+        action="append",
+        default=[],
+        help="AgentB evidence feature pattern to hold out. Repeatable. Use 'feature AND feature'.",
+    )
+    parser.add_argument("--agent-b-csv", help="AgentB check.csv, required when --hold-pattern is used.")
     parser.add_argument("--output-csv", required=True)
     parser.add_argument("--output-xlsx")
     parser.add_argument("--labeled-details", help="Optional labeled balance details CSV/JSON for metric evaluation.")
@@ -40,6 +48,8 @@ def main(argv: list[str] | None = None) -> int:
         final_csv=args.final_csv,
         review_task_csv=args.review_task_csv,
         hold_review_reasons=args.hold_review_reason,
+        hold_patterns=args.hold_pattern,
+        agent_b_csv=args.agent_b_csv,
         output_csv=args.output_csv,
         output_xlsx=args.output_xlsx,
         labeled_details=args.labeled_details,
@@ -57,6 +67,8 @@ def simulate_review_lane_output_policy(
     final_csv: str | Path,
     review_task_csv: str | Path,
     hold_review_reasons: list[str],
+    hold_patterns: list[str] | None = None,
+    agent_b_csv: str | Path | None = None,
     output_csv: str | Path,
     output_xlsx: str | Path | None = None,
     labeled_details: str | Path | None = None,
@@ -68,17 +80,25 @@ def simulate_review_lane_output_policy(
     final_rows = _read_rows(Path(final_csv))
     review_rows = _read_rows(Path(review_task_csv))
     hold_reasons = _normalize_reasons(hold_review_reasons)
+    parsed_patterns = _parse_patterns(hold_patterns or [])
+    if parsed_patterns and not agent_b_csv:
+        raise ValueError("--agent-b-csv is required when hold_patterns are provided.")
     review_index = _review_reason_index(review_rows)
+    review_rows_by_key = {_row_key(row): row for row in review_rows if _row_key(row)}
+    agent_rows = {_row_key(row): row for row in _read_rows(Path(agent_b_csv)) if _row_key(row)} if agent_b_csv else {}
 
     output_rows = []
     held_rows = []
+    held_matches = []
     for row in final_rows:
         key = _row_key(row)
         reason = review_index.get(key, "")
-        if reason in hold_reasons and row.get("official_url"):
-            held = _held_row(row, reason)
+        pattern = _matching_hold_pattern(review_rows_by_key.get(key, {}), agent_rows.get(key, {}), parsed_patterns)
+        if row.get("official_url") and (reason in hold_reasons or pattern):
+            held = _held_row(row, reason, hold_pattern=pattern)
             output_rows.append(held)
             held_rows.append(held)
+            held_matches.append({"review_reason": reason, "hold_pattern": pattern})
         else:
             output_rows.append(dict(row))
 
@@ -105,7 +125,9 @@ def simulate_review_lane_output_policy(
         "output_rows": len(output_rows),
         "held_rows": len(held_rows),
         "held_review_reasons": sorted(hold_reasons),
+        "held_patterns": [" AND ".join(pattern) for pattern in parsed_patterns],
         "held_reason_counts": dict(Counter(row.get("source_status", "") for row in held_rows)),
+        "held_pattern_counts": dict(Counter(match["hold_pattern"] for match in held_matches if match["hold_pattern"])),
         "held_provider_ids": [row.get("provider_id", "") for row in held_rows],
         "official_url_rows": sum(1 for row in output_rows if row.get("official_url")),
         "unresolved_or_needs_review_rows": sum(1 for row in output_rows if not row.get("official_url")),
@@ -121,6 +143,7 @@ def simulate_review_lane_output_policy(
                 "provider_id": row.get("provider_id", ""),
                 "provider_name": row.get("provider_name", ""),
                 "review_reason": row.get("source_status", ""),
+                "hold_pattern": _held_pattern(row),
                 "provider_detail_url": row.get("provider_detail_url", ""),
                 "held_url": _held_url(row),
             }
@@ -131,6 +154,7 @@ def simulate_review_lane_output_policy(
         "inputs": {
             "final_csv": str(final_csv),
             "review_task_csv": str(review_task_csv),
+            "agent_b_csv": str(agent_b_csv or ""),
             "labeled_details": str(labeled_details or ""),
             "run_dir": str(run_dir or ""),
             "cases_csv": str(cases_csv or ""),
@@ -147,20 +171,32 @@ def simulate_review_lane_output_policy(
     return report
 
 
-def _held_row(row: dict[str, str], reason: str) -> dict[str, str]:
+def _held_row(row: dict[str, str], reason: str, *, hold_pattern: str = "") -> dict[str, str]:
     out = {field: row.get(field, "") for field in FINAL_FIELDS}
     held_url = out.get("official_url", "")
     out["official_url"] = ""
     out["official_domain"] = ""
     out["status"] = "needs_review"
     out["source_status"] = reason
-    out["notes"] = _append_note(out.get("notes", ""), f"review_lane_holdout:{reason}; held_url:{held_url}")
+    note_parts = [f"review_lane_holdout:{reason}"]
+    if hold_pattern:
+        note_parts.append(f"hold_pattern:{hold_pattern}")
+    note_parts.append(f"held_url:{held_url}")
+    out["notes"] = _append_note(out.get("notes", ""), "; ".join(note_parts))
     return out
 
 
 def _held_url(row: dict[str, str]) -> str:
     notes = row.get("notes", "")
     marker = "held_url:"
+    if marker not in notes:
+        return ""
+    return notes.split(marker, 1)[1].split(";", 1)[0].strip()
+
+
+def _held_pattern(row: dict[str, str]) -> str:
+    notes = row.get("notes", "")
+    marker = "hold_pattern:"
     if marker not in notes:
         return ""
     return notes.split(marker, 1)[1].split(";", 1)[0].strip()
@@ -180,6 +216,33 @@ def _normalize_reasons(values: list[str]) -> set[str]:
             if item:
                 out.add(item)
     return out
+
+
+def _parse_patterns(values: list[str]) -> list[tuple[str, ...]]:
+    out: list[tuple[str, ...]] = []
+    seen: set[tuple[str, ...]] = set()
+    for value in values:
+        features = tuple(sorted(part.strip() for part in str(value or "").split(" AND ") if part.strip()))
+        if features and features not in seen:
+            seen.add(features)
+            out.append(features)
+    return out
+
+
+def _matching_hold_pattern(
+    review_row: dict[str, str],
+    agent_row: dict[str, str],
+    patterns: list[tuple[str, ...]],
+) -> str:
+    if not patterns:
+        return ""
+    if not review_row and not agent_row:
+        return ""
+    features = features_for_review_agent_row(review_row, agent_row)
+    for pattern in patterns:
+        if set(pattern) <= features:
+            return " AND ".join(pattern)
+    return ""
 
 
 def _review_reason_index(rows: list[dict[str, str]]) -> dict[str, str]:
@@ -216,6 +279,7 @@ def _render_markdown(report: dict) -> str:
         "",
         f"- Held rows: {summary['held_rows']}",
         f"- Held review reasons: {', '.join(summary['held_review_reasons']) or 'None'}",
+        f"- Held patterns: {' | '.join(summary.get('held_patterns') or []) or 'None'}",
         f"- Official URL rows: {summary['official_url_rows']}",
         f"- Unresolved/needs-review rows: {summary['unresolved_or_needs_review_rows']}",
         f"- Output CSV: {summary['output_csv']}",
@@ -242,7 +306,7 @@ def _render_markdown(report: dict) -> str:
     else:
         for row in report["held_rows"][:100]:
             lines.append(
-                "- {provider_name} ({provider_id}) :: {review_reason} :: {held_url}".format(**row)
+                "- {provider_name} ({provider_id}) :: {review_reason} :: {hold_pattern} :: {held_url}".format(**row)
             )
     lines.append("")
     return "\n".join(lines)

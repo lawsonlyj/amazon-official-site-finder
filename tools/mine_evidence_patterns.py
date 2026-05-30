@@ -170,13 +170,32 @@ def _features(detail: dict, agent_row: dict[str, str], candidate_domain: str) ->
     score = _numeric(agent_row.get("evidence_score") or detail.get("agent_b_candidate_score"))
     for threshold in [30, 45, 50, 60, 70, 75, 80, 85]:
         features.add(f"agent_b_score>={threshold}" if score >= threshold else f"agent_b_score<{threshold}")
-    for fact in _split_facts(agent_row.get("supporting_facts", "")):
+    supporting_facts = set(_split_facts(agent_row.get("supporting_facts", "")))
+    for fact in supporting_facts:
         features.add(f"has:{fact}")
         if fact.startswith("location_matches:"):
             features.add("has:location_matches")
+    for fact in _identity_fact_markers():
+        if fact not in supporting_facts and not any(item.startswith(f"{fact}:") for item in supporting_facts):
+            features.add(f"missing:{fact}")
     for fact in _split_facts(agent_row.get("counter_evidence", "")):
         features.add(f"counter:{fact}")
     provider_name = detail.get("provider_name", "") or agent_row.get("provider_name", "")
+    provider_tokens = tokens(provider_name)
+    generic_tokens = _generic_identity_tokens()
+    meaningful_tokens = [token for token in provider_tokens if token not in generic_tokens]
+    name_text = provider_name.casefold()
+    if provider_tokens:
+        features.add(f"provider_token_count:{min(len(provider_tokens), 5)}")
+    if len(provider_tokens) == 1:
+        features.add("provider_name_shape:single_token")
+    if len(meaningful_tokens) <= 1:
+        features.add("provider_name_shape:generic_or_one_meaningful_token")
+    if len("".join(provider_tokens)) <= 4:
+        features.add("provider_name_shape:short")
+    for marker in ["consult", "seller", "marketplace", "agency", "amazon", "ecom"]:
+        if marker in name_text:
+            features.add(f"provider_name_contains:{marker}")
     name_slug = slug(provider_name)
     domain_slug = slug(base_domain_label(candidate_domain))
     if name_slug and domain_slug:
@@ -192,6 +211,48 @@ def _features(detail: dict, agent_row: dict[str, str], candidate_domain: str) ->
         if len(matching_tokens) >= 2:
             features.add("domain_relation:two_provider_tokens_in_domain")
     return {feature for feature in features if feature and not feature.endswith(":")}
+
+
+def _identity_fact_markers() -> set[str]:
+    return {
+        "candidate_pages_fetch_ok",
+        "contact_email_found",
+        "legal_entity_marker_found",
+        "listing_logo_visual_match",
+        "listing_logo_visual_near_match",
+        "location_matches",
+        "page_contains_exact_provider_name",
+        "page_contains_provider_name_tokens",
+        "schema_org_organization_seen",
+        "service_content_matches_amazon_provider",
+        "standard_company_pages_found",
+    }
+
+
+def _generic_identity_tokens() -> set[str]:
+    return {
+        "amazon",
+        "account",
+        "agency",
+        "consulting",
+        "consultancy",
+        "digital",
+        "ecom",
+        "ecommerce",
+        "global",
+        "growth",
+        "llc",
+        "ltd",
+        "management",
+        "marketplace",
+        "media",
+        "seller",
+        "sellers",
+        "service",
+        "services",
+        "solution",
+        "solutions",
+    }
 
 
 def _mine_patterns(rows: list[dict], *, max_pattern_size: int) -> list[dict]:
