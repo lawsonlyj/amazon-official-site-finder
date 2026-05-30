@@ -4862,7 +4862,19 @@ class OperationalCommandTests(unittest.TestCase):
                 output_dir=output_dir,
                 max_rows=1,
             )
-            with (output_dir / "pattern_validation_sample_50.csv").open(newline="", encoding="utf-8") as f:
+            blank_priority_sample = output_dir / "protected_lanes_priority_task.csv"
+            with self.assertRaises(ValueError):
+                run_calibration_followup(
+                    previous_summary_json=output_dir / "calibration_cycle_summary.json",
+                    filled_sample=blank_priority_sample,
+                )
+            failed_verification = json.loads(
+                (output_dir / "filled_protected_sample_verification.json").read_text(encoding="utf-8")
+            )
+            self.assertFalse(failed_verification["summary"]["passed"])
+            self.assertGreater(failed_verification["summary"]["failure_count"], 0)
+
+            with blank_priority_sample.open(newline="", encoding="utf-8") as f:
                 rows = list(csv.DictReader(f))
             for row in rows:
                 row["manual_decision"] = "accept"
@@ -4876,11 +4888,19 @@ class OperationalCommandTests(unittest.TestCase):
             decision_json_exists = (output_dir / "calibration_followup_decision.json").exists()
             decision_md_exists = (output_dir / "calibration_followup_decision.md").exists()
             decision_md = (output_dir / "calibration_followup_decision.md").read_text(encoding="utf-8")
+            verification_json_exists = (output_dir / "filled_protected_sample_verification.json").exists()
+            verification_md_exists = (output_dir / "filled_protected_sample_verification.md").exists()
+            verification = json.loads((output_dir / "filled_protected_sample_verification.json").read_text(encoding="utf-8"))
 
         self.assertTrue(decision_json_exists)
         self.assertTrue(decision_md_exists)
+        self.assertTrue(verification_json_exists)
+        self.assertTrue(verification_md_exists)
+        self.assertTrue(verification["summary"]["passed"])
         self.assertEqual(decision["inputs"]["filled_samples"], [str(filled_sample)])
         self.assertEqual(decision["summary"]["filled_labeled_rows"], len(rows))
+        self.assertEqual(decision["summary"]["filled_protected_sample_verification_count"], 1)
+        self.assertTrue(decision["summary"]["filled_protected_sample_verification_passed"])
         self.assertIn("workflow_status", decision["summary"])
         self.assertIn("convergence_state", decision["summary"])
         self.assertIn("threshold_decision", decision["summary"])
@@ -4900,6 +4920,9 @@ class OperationalCommandTests(unittest.TestCase):
         self.assertIn("protected_lanes_priority_task_verification_json", decision["outputs"])
         self.assertIn("protected_lanes_next_review_task_verification_md", decision["outputs"])
         self.assertIn("protected_lanes_priority_task_verification_md", decision["outputs"])
+        self.assertIn("filled_protected_sample_verification_json", decision["outputs"])
+        self.assertIn("filled_protected_sample_verification_md", decision["outputs"])
+        self.assertEqual(len(decision["filled_protected_sample_verifications"]), 1)
         if decision["summary"].get("protected_lanes_priority_task_rows"):
             self.assertIn("protected_lanes_priority_task.xlsx", decision["summary"]["next_action"])
         self.assertIn("Threshold decision", decision_md)
@@ -7347,11 +7370,20 @@ class OperationalCommandTests(unittest.TestCase):
             filled_rows[0]["manual_url"] = "https://replacement.example"
             filled_rows[1]["manual_decision"] = "accept"
             filled_good_csv = root / "filled_good.csv"
+            filled_good_xlsx = root / "filled_good.xlsx"
             _write_test_csv(filled_good_csv, filled_rows)
+            build_workbook([("Filled", filled_good_csv)], filled_good_xlsx)
             filled_good_report = verify_protected_lane_review_task(
                 csv_path=filled_good_csv,
                 summary_json=summary_json,
                 xlsx_path=task_xlsx,
+                allow_filled=True,
+                require_filled=True,
+            )
+            filled_good_xlsx_report = verify_protected_lane_review_task(
+                csv_path=filled_good_xlsx,
+                summary_json=summary_json,
+                xlsx_path=filled_good_xlsx,
                 allow_filled=True,
                 require_filled=True,
             )
@@ -7376,6 +7408,9 @@ class OperationalCommandTests(unittest.TestCase):
         self.assertTrue(any(item["check"] == "replace_missing_manual_url" for item in filled_bad_report["failures"]))
         self.assertTrue(filled_good_report["summary"]["passed"])
         self.assertEqual(filled_good_report["summary"]["blank_manual_decision_rows"], 0)
+        self.assertTrue(filled_good_xlsx_report["summary"]["passed"])
+        self.assertEqual(filled_good_xlsx_report["summary"]["blank_manual_decision_rows"], 0)
+        self.assertGreater(filled_good_xlsx_report["summary"]["xlsx_hyperlink_formula_count"], 0)
 
     def test_scoring_tries_www_variant_before_giving_up_on_candidate(self):
         config = load_config("config/scoring.json")

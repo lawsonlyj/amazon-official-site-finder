@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import csv
 import json
 import sys
 from pathlib import Path
@@ -8,6 +9,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from tools.run_calibration_cycle import run_calibration_cycle
+from tools.verify_protected_lane_review_task import verify_protected_lane_review_task
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -56,6 +58,7 @@ def run_calibration_followup(
     summary = previous.get("summary") or {}
     out_dir = Path(output_dir) if output_dir else previous_path.parent
     filled_samples = _merged_filled_samples(inputs, filled_sample, reuse_previous_filled)
+    filled_sample_verifications = _verify_filled_protected_samples(filled_samples, outputs, out_dir)
     candidate_final = str(candidate_final_csv or inputs.get("candidate_final_csv") or "")
     sample_prefix = str(inputs.get("sample_prefix") or _sample_prefix(outputs.get("sample_csv")))
     report = run_calibration_cycle(
@@ -82,6 +85,7 @@ def run_calibration_followup(
         report=report,
         previous_summary_json=previous_path,
         filled_samples=filled_samples,
+        filled_sample_verifications=filled_sample_verifications,
         candidate_final_csv=candidate_final,
         output_json=decision_json,
         output_md=decision_md,
@@ -96,6 +100,7 @@ def _build_decision(
     report: dict,
     previous_summary_json: Path,
     filled_samples: list[Path],
+    filled_sample_verifications: list[dict],
     candidate_final_csv: str,
     output_json: Path,
     output_md: Path,
@@ -124,6 +129,12 @@ def _build_decision(
         "recommended_second_pass_threshold": status.get("recommended_second_pass_threshold"),
         "filled_labeled_rows": status.get("filled_labeled_rows"),
         "filled_decisive_rows": status.get("filled_decisive_rows"),
+        "filled_protected_sample_verification_count": len(filled_sample_verifications),
+        "filled_protected_sample_verification_passed": all(
+            bool((item.get("summary") or {}).get("passed")) for item in filled_sample_verifications
+        )
+        if filled_sample_verifications
+        else None,
         "protected_lanes_next_review_task_rows": convergence_summary.get("protected_lanes_next_review_task_rows"),
         "protected_lanes_priority_task_rows": (report.get("summary") or {}).get("protected_lanes_priority_task_rows"),
         "regression_gate_status": status.get("regression_gate_status"),
@@ -175,7 +186,14 @@ def _build_decision(
             ),
             "regression_cases_csv": (report.get("outputs") or {}).get("regression_cases_csv", ""),
             "regression_gate_json": (report.get("outputs") or {}).get("regression_gate_json", ""),
+            "filled_protected_sample_verification_json": str(output_json.with_name("filled_protected_sample_verification.json"))
+            if filled_sample_verifications
+            else "",
+            "filled_protected_sample_verification_md": str(output_md.with_name("filled_protected_sample_verification.md"))
+            if filled_sample_verifications
+            else "",
         },
+        "filled_protected_sample_verifications": filled_sample_verifications,
         "application_gate_checks": checks,
         "convergence_audit": convergence,
         "next_actions": effective_next_actions,
@@ -196,6 +214,7 @@ def _render_decision_markdown(decision: dict) -> str:
         f"- Current threshold ties best accuracy: {str(summary.get('current_threshold_ties_best_accuracy')).lower()}",
         f"- Protected-lane next review rows: {summary.get('protected_lanes_next_review_task_rows')}",
         f"- Protected-lane priority review rows: {summary.get('protected_lanes_priority_task_rows')}",
+        f"- Filled protected sample verification: {summary.get('filled_protected_sample_verification_count')}/{summary.get('filled_protected_sample_verification_passed')}",
         f"- Filled labeled/decisive rows: {summary.get('filled_labeled_rows')}/{summary.get('filled_decisive_rows')}",
         f"- Regression gate status: {summary.get('regression_gate_status')}",
         f"- Allowed gates: {', '.join(summary.get('allowed_gates') or []) or 'None'}",
@@ -210,6 +229,19 @@ def _render_decision_markdown(decision: dict) -> str:
     for path in decision.get("inputs", {}).get("filled_samples", []):
         lines.append(f"- {path}")
     if not decision.get("inputs", {}).get("filled_samples"):
+        lines.append("- None")
+    lines.extend(["", "## Filled Protected Sample Verification", ""])
+    for item in decision.get("filled_protected_sample_verifications", []):
+        summary = item.get("summary") or {}
+        lines.append(
+            "- {path}: passed={passed}, rows={rows}, failures={failures}".format(
+                path=(item.get("inputs") or {}).get("csv") or "",
+                passed=str(summary.get("passed")).lower(),
+                rows=summary.get("row_count"),
+                failures=summary.get("failure_count"),
+            )
+        )
+    if not decision.get("filled_protected_sample_verifications"):
         lines.append("- None")
     lines.extend(["", "## Gate Details", ""])
     for row in decision.get("application_gate_checks", []):
@@ -230,6 +262,110 @@ def _render_decision_markdown(decision: dict) -> str:
         lines.append("- None")
     lines.append("")
     return "\n".join(lines)
+
+
+def _verify_filled_protected_samples(filled_samples: list[Path], outputs: dict, out_dir: Path) -> list[dict]:
+    verifications = []
+    for path in filled_samples:
+        if not _looks_like_protected_lane_task(path):
+            continue
+        summary_json = _summary_for_filled_sample(path, outputs)
+        report = verify_protected_lane_review_task(
+            csv_path=path,
+            summary_json=summary_json or None,
+            xlsx_path=path if path.suffix.casefold() == ".xlsx" else None,
+            allow_filled=True,
+            require_filled=True,
+        )
+        verifications.append(report)
+        if not report["summary"].get("passed"):
+            _write_filled_protected_verifications(verifications, out_dir)
+            raise ValueError(
+                f"Filled protected-lane sample failed verification: {path}. "
+                f"Failures: {report.get('failures') or []}"
+            )
+    if verifications:
+        _write_filled_protected_verifications(verifications, out_dir)
+    return verifications
+
+
+def _looks_like_protected_lane_task(path: Path) -> bool:
+    lowered = path.name.casefold()
+    if "protected_lanes" in lowered:
+        return True
+    headers = _table_headers(path)
+    return (
+        {"provider_id", "review_reason", "manual_decision", "optimization_use"}.issubset(headers)
+        and ("protected_lane_priority" in headers or "priority_rank" in headers)
+    )
+
+
+def _summary_for_filled_sample(path: Path, outputs: dict) -> str:
+    lowered = path.name.casefold()
+    if "priority" in lowered:
+        return str(outputs.get("protected_lanes_priority_task_summary_json") or "")
+    return str(outputs.get("protected_lanes_next_review_task_summary_json") or "")
+
+
+def _write_filled_protected_verifications(verifications: list[dict], out_dir: Path) -> None:
+    output_json = out_dir / "filled_protected_sample_verification.json"
+    output_md = out_dir / "filled_protected_sample_verification.md"
+    payload = {"verifications": verifications, "summary": _verification_summary(verifications)}
+    output_json.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    output_md.write_text(_render_filled_protected_verifications(payload), encoding="utf-8")
+
+
+def _verification_summary(verifications: list[dict]) -> dict:
+    return {
+        "verification_count": len(verifications),
+        "passed": all(bool((item.get("summary") or {}).get("passed")) for item in verifications),
+        "row_count": sum(_to_int((item.get("summary") or {}).get("row_count")) for item in verifications),
+        "failure_count": sum(_to_int((item.get("summary") or {}).get("failure_count")) for item in verifications),
+    }
+
+
+def _render_filled_protected_verifications(payload: dict) -> str:
+    summary = payload.get("summary") or {}
+    lines = [
+        "# Filled Protected Sample Verification",
+        "",
+        f"- Passed: {str(summary.get('passed')).lower()}",
+        f"- Verifications: {summary.get('verification_count')}",
+        f"- Rows: {summary.get('row_count')}",
+        f"- Failures: {summary.get('failure_count')}",
+        "",
+        "## Files",
+        "",
+    ]
+    for item in payload.get("verifications") or []:
+        item_summary = item.get("summary") or {}
+        lines.append(
+            "- {path}: passed={passed}, rows={rows}, failures={failures}".format(
+                path=(item.get("inputs") or {}).get("csv") or "",
+                passed=str(item_summary.get("passed")).lower(),
+                rows=item_summary.get("row_count"),
+                failures=item_summary.get("failure_count"),
+            )
+        )
+    lines.append("")
+    return "\n".join(lines)
+
+
+def _table_headers(path: Path) -> set[str]:
+    if not path.exists():
+        return set()
+    if path.suffix.casefold() == ".xlsx":
+        try:
+            from openpyxl import load_workbook
+        except ImportError:
+            return set()
+        workbook = load_workbook(path, read_only=True, data_only=False)
+        sheet = workbook.active
+        first_row = next(sheet.iter_rows(max_row=1), [])
+        return {str(cell.value or "").strip() for cell in first_row if str(cell.value or "").strip()}
+    with path.open(newline="", encoding="utf-8-sig") as f:
+        reader = csv.DictReader(f)
+        return {str(item or "").strip() for item in (reader.fieldnames or []) if str(item or "").strip()}
 
 
 def _merged_filled_samples(inputs: dict, filled_sample: str | Path | list[str | Path] | None, reuse_previous: bool) -> list[Path]:

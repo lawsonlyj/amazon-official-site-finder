@@ -4,6 +4,7 @@ import argparse
 import csv
 import json
 import sys
+import re
 import zipfile
 from collections import Counter
 from pathlib import Path
@@ -191,11 +192,46 @@ def verify_protected_lane_review_task(
 
 
 def _read_rows(path: Path) -> tuple[list[dict[str, str]], list[str]]:
+    if path.suffix.casefold() == ".xlsx":
+        return _read_xlsx(path)
     with path.open(newline="", encoding="utf-8-sig") as f:
         reader = csv.DictReader(f)
         rows = list(reader)
         headers = list(reader.fieldnames or [])
     return rows, headers
+
+
+def _read_xlsx(path: Path) -> tuple[list[dict[str, str]], list[str]]:
+    try:
+        from openpyxl import load_workbook
+    except ImportError:
+        return [], []
+    workbook = load_workbook(path, data_only=False, read_only=True)
+    sheet = workbook.active
+    raw_rows = list(sheet.iter_rows())
+    if not raw_rows:
+        return [], []
+    headers = [_cell_text(cell.value) for cell in raw_rows[0]]
+    rows = []
+    for cells in raw_rows[1:]:
+        row = {}
+        for idx, header in enumerate(headers):
+            if not header:
+                continue
+            value = cells[idx].value if idx < len(cells) else ""
+            row[header] = _cell_text(value)
+        if any(row.values()):
+            rows.append(row)
+    return rows, [header for header in headers if header]
+
+
+def _cell_text(value: object) -> str:
+    text = str(value or "").strip()
+    if text.upper().startswith("=HYPERLINK("):
+        match = re.search(r'HYPERLINK\("([^"]+)"', text, flags=re.IGNORECASE)
+        if match:
+            return match.group(1)
+    return text
 
 
 def _duplicate_keys(rows: list[dict[str, str]]) -> set[tuple[str, str]]:
