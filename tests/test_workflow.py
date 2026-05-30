@@ -5405,6 +5405,8 @@ class OperationalCommandTests(unittest.TestCase):
             balance = root / "balance.json"
             sample_eval = root / "filled_eval.json"
             sample_csv = root / "sample.csv"
+            label_gap_xlsx = root / "label_gap_task.xlsx"
+            label_gap_high_xlsx = root / "label_gap_high_priority_task.xlsx"
             rows = []
             for idx in range(5):
                 rows.append(
@@ -5431,7 +5433,11 @@ class OperationalCommandTests(unittest.TestCase):
                             "filled_eval_labeled_rows": 5,
                             "filled_eval_decisive_rows": 5,
                         },
-                        "outputs": {"sample_csv": str(sample_csv)},
+                        "outputs": {
+                            "sample_csv": str(sample_csv),
+                            "label_gap_xlsx": str(label_gap_xlsx),
+                            "label_gap_high_priority_xlsx": str(label_gap_high_xlsx),
+                        },
                     }
                 ),
                 encoding="utf-8",
@@ -5487,6 +5493,8 @@ class OperationalCommandTests(unittest.TestCase):
         self.assertEqual(report["review_lanes"]["decisive_rows_needed"], 3)
         self.assertEqual(by_reason["precision_second_pass_accepted_lt70"]["decisive_rows_needed"], 0)
         self.assertEqual(by_reason["precision_low_confidence_auto_match"]["decisive_rows_needed"], 3)
+        self.assertIn(str(label_gap_xlsx), report["next_actions"][0])
+        self.assertNotIn(str(label_gap_high_xlsx), report["next_actions"][0])
 
     def test_build_calibration_label_gap_task_selects_needed_unlabeled_rows(self):
         with tempfile.TemporaryDirectory() as tmp:

@@ -555,9 +555,15 @@ def _next_actions(
     sample_xlsx = artifacts.get("sample_xlsx") or "the latest calibration XLSX"
     label_gap_xlsx = artifacts.get("label_gap_xlsx") or sample_xlsx
     high_priority_xlsx = artifacts.get("label_gap_high_priority_xlsx") or label_gap_xlsx
-    high_priority = [target["review_reason"] for target in label_targets if target.get("priority") == "high"]
-    if workflow_status == "not_converged_needs_human_labels":
-        focus = ", ".join(high_priority[:3]) if high_priority else "needs_more_labels lanes"
+    open_targets = [target for target in label_targets if _to_int(target.get("decisive_rows_needed")) > 0]
+    high_priority = [target for target in open_targets if target.get("priority") == "high"]
+    if workflow_status == "not_converged_needs_human_labels" or lane_status.get("status") in {
+        "needs_human_labels",
+        "needs_more_labels",
+    }:
+        focus_targets = high_priority or open_targets
+        focus = ", ".join(str(target.get("review_reason") or "") for target in focus_targets[:3])
+        focus = focus or "needs_more_labels lanes"
         first_target = high_priority_xlsx if high_priority else label_gap_xlsx
         return [
             f"Fill {first_target} before changing thresholds or review-lane routing.",
