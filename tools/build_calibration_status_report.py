@@ -52,6 +52,7 @@ def build_calibration_status_report(
     pattern_status = _pattern_release_status(cycle_summary, balance_summary, threshold_summary)
     label_targets = _label_targets(cycle, balance, sample_eval, artifacts)
     lane_status = _lane_status(cycle_summary, balance_summary, sample_summary, label_targets)
+    lane_change_candidates = _lane_change_candidates(label_targets, lane_status)
     labeling_instructions = _labeling_instructions()
     workflow_status = _workflow_status(cycle_summary, sample_summary, threshold_status, pattern_status, lane_status)
     open_requirements = _open_requirements(cycle_summary, sample_summary, threshold_status, pattern_status, lane_status)
@@ -87,6 +88,13 @@ def build_calibration_status_report(
             ),
             "lane_needs_more_label_rows": _to_int(sample_summary.get("lane_needs_more_label_rows")),
             "lane_candidate_for_change_rows": _to_int(sample_summary.get("lane_candidate_for_change_rows")),
+            "lane_change_candidate_count": len(lane_change_candidates),
+            "deferred_lane_change_candidate_count": sum(
+                1 for item in lane_change_candidates if item.get("status") == "deferred_until_remaining_label_gaps_close"
+            ),
+            "ready_lane_change_candidate_count": sum(
+                1 for item in lane_change_candidates if item.get("status") == "ready_for_regression"
+            ),
             "pattern_release_correct_rows": _to_int(
                 _first_present(
                     cycle_summary.get("pattern_release_correct_rows"),
@@ -124,6 +132,7 @@ def build_calibration_status_report(
         "review_lanes": lane_status,
         "artifacts": artifacts,
         "label_targets": label_targets,
+        "lane_change_candidates": lane_change_candidates,
         "labeling_instructions": labeling_instructions,
         "open_requirements": open_requirements,
         "next_actions": next_actions,
@@ -278,6 +287,41 @@ def _lane_status(cycle_summary: dict, balance_summary: dict, sample_summary: dic
         "decisive_rows_needed": decisive_rows_needed,
         "high_priority_decisive_rows_needed": high_priority_decisive_rows_needed,
     }
+
+
+def _lane_change_candidates(label_targets: list[dict], lane_status: dict) -> list[dict]:
+    total_gap = _to_int(lane_status.get("decisive_rows_needed"))
+    out = []
+    for target in label_targets:
+        if target.get("recommendation") != "candidate_for_review_downgrade":
+            continue
+        own_gap = _to_int(target.get("decisive_rows_needed"))
+        if own_gap:
+            status = "needs_more_labels_for_candidate_lane"
+            action = "Fill the remaining labels for this lane before considering any routing change."
+        elif total_gap:
+            status = "deferred_until_remaining_label_gaps_close"
+            action = "Keep this candidate queued; wait for remaining label gaps and then add regression tests before applying."
+        else:
+            status = "ready_for_regression"
+            action = "Add focused regression tests and then downgrade only this exact evidence lane."
+        out.append(
+            {
+                "review_reason": str(target.get("review_reason") or ""),
+                "candidate_kind": "review_lane_downgrade",
+                "status": status,
+                "priority": str(target.get("priority") or ""),
+                "rows": _to_int(target.get("rows")),
+                "labeled_rows": _to_int(target.get("labeled_rows")),
+                "decisive_rows": _to_int(target.get("decisive_rows")),
+                "target_decisive_rows": _to_int(target.get("target_decisive_rows")),
+                "decisive_rows_needed": own_gap,
+                "blocking_decisive_rows_needed": max(0, total_gap - own_gap),
+                "recommendation": str(target.get("recommendation") or ""),
+                "required_action": action,
+            }
+        )
+    return out
 
 
 def _workflow_status(
@@ -610,6 +654,7 @@ def _render_markdown(report: dict) -> str:
         f"- Filled decisive rows: {summary['filled_decisive_rows']}",
         f"- Protected review lanes: {summary['protected_review_lane_count']}",
         f"- Lane needs-more-label rows: {summary['lane_needs_more_label_rows']}",
+        f"- Lane change candidates: {summary['lane_change_candidate_count']} total, {summary['deferred_lane_change_candidate_count']} deferred, {summary['ready_lane_change_candidate_count']} ready",
         f"- Pattern release correct/wrong rows: {summary['pattern_release_correct_rows']}/{summary['pattern_release_wrong_rows']}",
         f"- Pattern release source: {summary.get('pattern_release_source_path') or 'not_evaluated'}",
         f"- Pattern release source kind: {summary.get('pattern_release_source_kind') or 'not_evaluated'}",
@@ -632,6 +677,15 @@ def _render_markdown(report: dict) -> str:
                 "- {review_reason} ({priority}, rows={rows}, labeled={labeled_rows}, "
                 "decisive={decisive_rows}/{target_decisive_rows}, needed={decisive_rows_needed}, "
                 "recommendation={recommendation}): {label_goal}".format(**target)
+            )
+    else:
+        lines.append("- None")
+    lines.extend(["", "## Lane Change Candidates", ""])
+    if report["lane_change_candidates"]:
+        for item in report["lane_change_candidates"]:
+            lines.append(
+                "- {review_reason} ({status}, decisive={decisive_rows}/{target_decisive_rows}, "
+                "blocking_gap={blocking_decisive_rows_needed}): {required_action}".format(**item)
             )
     else:
         lines.append("- None")
