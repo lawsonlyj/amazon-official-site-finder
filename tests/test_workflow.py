@@ -4852,6 +4852,8 @@ class OperationalCommandTests(unittest.TestCase):
             batch_agent_b = root / "batch_agent_b.csv"
             output_dir = root / "calibration"
             filled_sample = root / "filled_label_gap.csv"
+            filled_policy_validation = root / "filled_policy_validation.csv"
+            followup_dir = root / "followup"
             balance_json.write_text(
                 json.dumps(
                     {
@@ -4984,27 +4986,60 @@ class OperationalCommandTests(unittest.TestCase):
                 row["manual_decision"] = "accept"
                 row["notes"] = "confirmed official site"
             _write_test_csv(filled_sample, rows)
+            _write_test_csv(
+                filled_policy_validation,
+                [
+                    {
+                        "provider_id": "p-policy",
+                        "provider_name": "Policy Candidate",
+                        "provider_detail_url": "https://amazon.example/p-policy",
+                        "candidate_policy_action": "release",
+                        "candidate_policy_pattern": "review_reason:recall_unresolved_top_candidate AND has:page_contains_exact_provider_name",
+                        "candidate_policy_source": "release_pattern",
+                        "candidate_url": "https://policy.example",
+                        "review_reason": "recall_unresolved_top_candidate",
+                        "agent_b_decision": "unsure",
+                        "known_label_status": "unlabeled",
+                        "manual_decision": "accept",
+                        "manual_url": "",
+                        "notes": "confirmed official site",
+                    }
+                ],
+            )
 
             decision = run_calibration_followup(
                 previous_summary_json=output_dir / "calibration_cycle_summary.json",
                 filled_sample=filled_sample,
+                filled_policy_validation=filled_policy_validation,
+                output_dir=followup_dir,
             )
-            decision_json_exists = (output_dir / "calibration_followup_decision.json").exists()
-            decision_md_exists = (output_dir / "calibration_followup_decision.md").exists()
-            decision_md = (output_dir / "calibration_followup_decision.md").read_text(encoding="utf-8")
-            verification_json_exists = (output_dir / "filled_protected_sample_verification.json").exists()
-            verification_md_exists = (output_dir / "filled_protected_sample_verification.md").exists()
-            verification = json.loads((output_dir / "filled_protected_sample_verification.json").read_text(encoding="utf-8"))
+            decision_json_exists = (followup_dir / "calibration_followup_decision.json").exists()
+            decision_md_exists = (followup_dir / "calibration_followup_decision.md").exists()
+            decision_md = (followup_dir / "calibration_followup_decision.md").read_text(encoding="utf-8")
+            verification_json_exists = (followup_dir / "filled_protected_sample_verification.json").exists()
+            verification_md_exists = (followup_dir / "filled_protected_sample_verification.md").exists()
+            verification = json.loads((followup_dir / "filled_protected_sample_verification.json").read_text(encoding="utf-8"))
+            policy_eval_exists = (followup_dir / "filled_policy_validation_evaluation.json").exists()
+            policy_eval_md_exists = (followup_dir / "filled_policy_validation_evaluation.md").exists()
+            policy_eval = json.loads((followup_dir / "filled_policy_validation_evaluation.json").read_text(encoding="utf-8"))
 
         self.assertTrue(decision_json_exists)
         self.assertTrue(decision_md_exists)
         self.assertTrue(verification_json_exists)
         self.assertTrue(verification_md_exists)
+        self.assertTrue(policy_eval_exists)
+        self.assertTrue(policy_eval_md_exists)
         self.assertTrue(verification["summary"]["passed"])
         self.assertEqual(decision["inputs"]["filled_samples"], [str(filled_sample)])
+        self.assertEqual(decision["inputs"]["filled_policy_validations"], [str(filled_policy_validation)])
         self.assertEqual(decision["summary"]["filled_labeled_rows"], len(rows))
         self.assertEqual(decision["summary"]["filled_protected_sample_verification_count"], 1)
         self.assertTrue(decision["summary"]["filled_protected_sample_verification_passed"])
+        self.assertEqual(decision["summary"]["filled_policy_validation_file_count"], 1)
+        self.assertEqual(decision["summary"]["filled_policy_validation_support_rows"], 1)
+        self.assertEqual(decision["summary"]["filled_policy_validation_blocking_rows"], 0)
+        self.assertEqual(decision["summary"]["filled_policy_needs_more_labels_count"], 1)
+        self.assertEqual(policy_eval["summary"]["support_rows"], 1)
         self.assertIn("filled_lane_candidate_for_change_count", decision["summary"])
         self.assertIn("filled_lane_keep_review_count", decision["summary"])
         self.assertIn("filled_rule_candidate_count", decision["summary"])
@@ -5031,16 +5066,23 @@ class OperationalCommandTests(unittest.TestCase):
         self.assertIn("protected_lanes_priority_task_verification_md", decision["outputs"])
         self.assertIn("filled_protected_sample_verification_json", decision["outputs"])
         self.assertIn("filled_protected_sample_verification_md", decision["outputs"])
+        self.assertIn("policy_validation_eval_json", decision["outputs"])
+        self.assertIn("policy_validation_eval_md", decision["outputs"])
         self.assertIn("filled_eval_json", decision["outputs"])
         self.assertIn("pattern_rule_candidates_json", decision["outputs"])
         self.assertEqual(len(decision["filled_protected_sample_verifications"]), 1)
         self.assertIn("filled_lane_recommendations", decision)
         self.assertIn("filled_pattern_rule_candidates", decision)
+        self.assertIn("filled_policy_validation_evaluations", decision)
+        self.assertIn("filled_policy_rule_candidates", decision)
+        self.assertEqual(len(decision["filled_policy_validation_evaluations"]), 1)
         self.assertGreaterEqual(len(decision["filled_lane_recommendations"]), 1)
         if decision["summary"].get("protected_lanes_priority_task_rows"):
             self.assertIn("protected_lanes_priority_task.xlsx", decision["summary"]["next_action"])
         self.assertIn("Filled Lane Recommendations", decision_md)
         self.assertIn("Filled Pattern Rule Candidates", decision_md)
+        self.assertIn("Filled Policy Validation", decision_md)
+        self.assertIn("Filled Policy Rule Candidates", decision_md)
         self.assertIn("Threshold decision", decision_md)
         self.assertIn("Next Actions", decision_md)
 

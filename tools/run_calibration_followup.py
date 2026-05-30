@@ -8,6 +8,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from tools.evaluate_policy_validation_task import evaluate_policy_validation_task
 from tools.run_calibration_cycle import run_calibration_cycle
 from tools.verify_protected_lane_review_task import verify_protected_lane_review_task
 
@@ -23,6 +24,12 @@ def main(argv: list[str] | None = None) -> int:
         default=[],
         help="Filled calibration sample or label-gap CSV/XLSX. Repeatable.",
     )
+    parser.add_argument(
+        "--filled-policy-validation",
+        action="append",
+        default=[],
+        help="Filled policy_validation_task CSV/XLSX. Repeatable.",
+    )
     parser.add_argument("--output-dir", help="Output directory. Defaults to the previous summary directory.")
     parser.add_argument("--candidate-final-csv", help="Candidate official_sites.csv for regression-gate validation.")
     parser.add_argument(
@@ -35,6 +42,7 @@ def main(argv: list[str] | None = None) -> int:
     decision = run_calibration_followup(
         previous_summary_json=args.previous_summary_json,
         filled_sample=args.filled_sample,
+        filled_policy_validation=args.filled_policy_validation,
         output_dir=args.output_dir,
         candidate_final_csv=args.candidate_final_csv,
         reuse_previous_filled=not args.no_reuse_previous_filled,
@@ -47,6 +55,7 @@ def run_calibration_followup(
     *,
     previous_summary_json: str | Path,
     filled_sample: str | Path | list[str | Path] | None = None,
+    filled_policy_validation: str | Path | list[str | Path] | None = None,
     output_dir: str | Path | None = None,
     candidate_final_csv: str | Path | None = None,
     reuse_previous_filled: bool = True,
@@ -57,8 +66,15 @@ def run_calibration_followup(
     outputs = previous.get("outputs") or {}
     summary = previous.get("summary") or {}
     out_dir = Path(output_dir) if output_dir else previous_path.parent
+    out_dir.mkdir(parents=True, exist_ok=True)
     filled_samples = _merged_filled_samples(inputs, filled_sample, reuse_previous_filled)
+    filled_policy_validations = _merged_filled_policy_validations(
+        inputs,
+        filled_policy_validation,
+        reuse_previous_filled,
+    )
     filled_sample_verifications = _verify_filled_protected_samples(filled_samples, outputs, out_dir)
+    policy_validation_evaluations = _evaluate_filled_policy_validations(filled_policy_validations, out_dir)
     candidate_final = str(candidate_final_csv or inputs.get("candidate_final_csv") or "")
     sample_prefix = str(inputs.get("sample_prefix") or _sample_prefix(outputs.get("sample_csv")))
     report = run_calibration_cycle(
@@ -85,7 +101,9 @@ def run_calibration_followup(
         report=report,
         previous_summary_json=previous_path,
         filled_samples=filled_samples,
+        filled_policy_validations=filled_policy_validations,
         filled_sample_verifications=filled_sample_verifications,
+        policy_validation_evaluations=policy_validation_evaluations,
         candidate_final_csv=candidate_final,
         output_json=decision_json,
         output_md=decision_md,
@@ -100,7 +118,9 @@ def _build_decision(
     report: dict,
     previous_summary_json: Path,
     filled_samples: list[Path],
+    filled_policy_validations: list[Path],
     filled_sample_verifications: list[dict],
+    policy_validation_evaluations: list[dict],
     candidate_final_csv: str,
     output_json: Path,
     output_md: Path,
@@ -117,7 +137,9 @@ def _build_decision(
     not_allowed = gate_summary.get("not_allowed_gates") or []
     blocked = [gate for gate in not_allowed if gate not in candidates]
     next_actions = (report.get("calibration_status") or {}).get("next_actions") or []
-    effective_next_actions = convergence_next_actions or next_actions
+    effective_next_actions = list(convergence_next_actions or next_actions)
+    effective_next_actions.extend(_policy_validation_next_actions(policy_validation_evaluations))
+    policy_summary = _policy_validation_summary(policy_validation_evaluations)
     summary = {
         "workflow_status": status.get("workflow_status", ""),
         "convergence_state": convergence_summary.get("convergence_state", ""),
@@ -135,6 +157,14 @@ def _build_decision(
         )
         if filled_sample_verifications
         else None,
+        "filled_policy_validation_file_count": len(filled_policy_validations),
+        "filled_policy_validation_labeled_rows": policy_summary["labeled_rows"],
+        "filled_policy_validation_decisive_rows": policy_summary["decisive_rows"],
+        "filled_policy_validation_support_rows": policy_summary["support_rows"],
+        "filled_policy_validation_blocking_rows": policy_summary["blocking_rows"],
+        "filled_policy_candidate_for_rule_count": policy_summary["candidate_for_rule_rows"],
+        "filled_policy_needs_more_labels_count": policy_summary["needs_more_labels_rows"],
+        "filled_policy_reject_pattern_count": policy_summary["reject_pattern_rows"],
         "filled_lane_candidate_for_change_count": (report.get("summary") or {}).get(
             "filled_lane_candidate_for_change_count"
         ),
@@ -162,6 +192,7 @@ def _build_decision(
         "inputs": {
             "previous_summary_json": str(previous_summary_json),
             "filled_samples": [str(path) for path in filled_samples],
+            "filled_policy_validations": [str(path) for path in filled_policy_validations],
             "candidate_final_csv": candidate_final_csv,
         },
         "outputs": {
@@ -206,8 +237,16 @@ def _build_decision(
             "filled_protected_sample_verification_md": str(output_md.with_name("filled_protected_sample_verification.md"))
             if filled_sample_verifications
             else "",
+            "policy_validation_eval_json": str(output_json.with_name("filled_policy_validation_evaluation.json"))
+            if policy_validation_evaluations
+            else "",
+            "policy_validation_eval_md": str(output_md.with_name("filled_policy_validation_evaluation.md"))
+            if policy_validation_evaluations
+            else "",
         },
         "filled_protected_sample_verifications": filled_sample_verifications,
+        "filled_policy_validation_evaluations": policy_validation_evaluations,
+        "filled_policy_rule_candidates": _policy_validation_rule_candidates(policy_validation_evaluations),
         "filled_lane_recommendations": report.get("filled_lane_recommendations") or [],
         "filled_pattern_rule_candidates": report.get("filled_pattern_rule_candidates") or {},
         "application_gate_checks": checks,
@@ -231,6 +270,10 @@ def _render_decision_markdown(decision: dict) -> str:
         f"- Protected-lane next review rows: {summary.get('protected_lanes_next_review_task_rows')}",
         f"- Protected-lane priority review rows: {summary.get('protected_lanes_priority_task_rows')}",
         f"- Filled protected sample verification: {summary.get('filled_protected_sample_verification_count')}/{summary.get('filled_protected_sample_verification_passed')}",
+        f"- Filled policy validation files: {summary.get('filled_policy_validation_file_count')}",
+        f"- Filled policy validation labeled/decisive rows: {summary.get('filled_policy_validation_labeled_rows')}/{summary.get('filled_policy_validation_decisive_rows')}",
+        f"- Filled policy validation support/block rows: {summary.get('filled_policy_validation_support_rows')}/{summary.get('filled_policy_validation_blocking_rows')}",
+        f"- Filled policy candidate/needs-more/reject patterns: {summary.get('filled_policy_candidate_for_rule_count')}/{summary.get('filled_policy_needs_more_labels_count')}/{summary.get('filled_policy_reject_pattern_count')}",
         f"- Filled lane candidate/keep-review counts: {summary.get('filled_lane_candidate_for_change_count')}/{summary.get('filled_lane_keep_review_count')}",
         f"- Filled pattern candidate/rejected counts: {summary.get('filled_rule_candidate_count')}/{summary.get('filled_rejected_pattern_count')}",
         f"- Filled labeled/decisive rows: {summary.get('filled_labeled_rows')}/{summary.get('filled_decisive_rows')}",
@@ -261,6 +304,37 @@ def _render_decision_markdown(decision: dict) -> str:
         )
     if not decision.get("filled_protected_sample_verifications"):
         lines.append("- None")
+    lines.extend(["", "## Filled Policy Validation", ""])
+    policy_evals = decision.get("filled_policy_validation_evaluations") or []
+    for item in policy_evals:
+        item_summary = item.get("summary") or {}
+        lines.append(
+            "- {path}: rows={rows}, decisive={decisive}, support={support}, blocking={blocking}, candidate={candidate}, needs_more={needs_more}, reject={reject}".format(
+                path=(item.get("inputs") or {}).get("task") or "",
+                rows=item_summary.get("task_rows"),
+                decisive=item_summary.get("decisive_rows"),
+                support=item_summary.get("support_rows"),
+                blocking=item_summary.get("blocking_rows"),
+                candidate=item_summary.get("candidate_for_rule_rows"),
+                needs_more=item_summary.get("needs_more_labels_rows"),
+                reject=item_summary.get("reject_pattern_rows"),
+            )
+        )
+    if not policy_evals:
+        lines.append("- None")
+    lines.extend(["", "## Filled Policy Rule Candidates", ""])
+    policy_candidates = decision.get("filled_policy_rule_candidates") or {}
+    for bucket in ["candidate_for_rule", "reject_pattern", "needs_more_labels"]:
+        rows = policy_candidates.get(bucket) or []
+        lines.append(f"- {bucket}: {len(rows)}")
+        for row in rows[:10]:
+            lines.append(
+                "  - support={support}, block={block}, pattern={pattern}".format(
+                    support=row.get("supporting_rows"),
+                    block=row.get("blocking_rows"),
+                    pattern=row.get("pattern"),
+                )
+            )
     lines.extend(["", "## Filled Lane Recommendations", ""])
     for row in decision.get("filled_lane_recommendations", []):
         lines.append(
@@ -308,6 +382,115 @@ def _render_decision_markdown(decision: dict) -> str:
         lines.append(f"- {action}")
     if not decision.get("next_actions"):
         lines.append("- None")
+    lines.append("")
+    return "\n".join(lines)
+
+
+def _evaluate_filled_policy_validations(paths: list[Path], out_dir: Path) -> list[dict]:
+    reports = []
+    for path in paths:
+        reports.append(evaluate_policy_validation_task(task=path))
+    if reports:
+        _write_policy_validation_evaluation(reports, out_dir)
+    return reports
+
+
+def _write_policy_validation_evaluation(reports: list[dict], out_dir: Path) -> None:
+    output_json = out_dir / "filled_policy_validation_evaluation.json"
+    output_md = out_dir / "filled_policy_validation_evaluation.md"
+    payload = {
+        "summary": _policy_validation_summary(reports),
+        "evaluations": reports,
+        "policy_rule_candidates": _policy_validation_rule_candidates(reports),
+    }
+    output_json.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    output_md.write_text(_render_policy_validation_evaluation(payload), encoding="utf-8")
+
+
+def _policy_validation_summary(reports: list[dict]) -> dict:
+    keys = [
+        "task_rows",
+        "labeled_rows",
+        "decisive_rows",
+        "decision_quality_issue_rows",
+        "support_rows",
+        "blocking_rows",
+        "candidate_for_rule_rows",
+        "needs_more_labels_rows",
+        "reject_pattern_rows",
+    ]
+    summary = {key: 0 for key in keys}
+    summary["file_count"] = len(reports)
+    for report in reports:
+        item = report.get("summary") or {}
+        for key in keys:
+            summary[key] += _to_int(item.get(key))
+    return summary
+
+
+def _policy_validation_rule_candidates(reports: list[dict]) -> dict[str, list[dict]]:
+    buckets = {"candidate_for_rule": [], "needs_more_labels": [], "reject_pattern": []}
+    seen: set[tuple[str, str]] = set()
+    for report in reports:
+        source = (report.get("inputs") or {}).get("task") or ""
+        candidates = report.get("policy_rule_candidates") or {}
+        for bucket in buckets:
+            for row in candidates.get(bucket) or []:
+                key = (bucket, row.get("pattern", ""))
+                if key in seen:
+                    continue
+                seen.add(key)
+                enriched = dict(row)
+                enriched["source_task"] = source
+                buckets[bucket].append(enriched)
+    return buckets
+
+
+def _policy_validation_next_actions(reports: list[dict]) -> list[str]:
+    if not reports:
+        return []
+    summary = _policy_validation_summary(reports)
+    actions = []
+    if summary["decision_quality_issue_rows"]:
+        actions.append("Fix policy-validation fill-quality issues before using those rows for rule decisions.")
+    if summary["reject_pattern_rows"] or summary["blocking_rows"]:
+        actions.append("Block policy patterns rejected by filled policy-validation labels and add regression fixtures.")
+    if summary["candidate_for_rule_rows"]:
+        actions.append("Add regression tests for candidate policy-validation patterns before enabling them.")
+    if summary["needs_more_labels_rows"]:
+        actions.append("Keep supported but thin policy-validation patterns in the next targeted validation task.")
+    return actions
+
+
+def _render_policy_validation_evaluation(payload: dict) -> str:
+    summary = payload.get("summary") or {}
+    lines = [
+        "# Filled Policy Validation Evaluation",
+        "",
+        f"- Files: {summary.get('file_count')}",
+        f"- Rows: {summary.get('task_rows')}",
+        f"- Labeled/decisive rows: {summary.get('labeled_rows')}/{summary.get('decisive_rows')}",
+        f"- Support/block rows: {summary.get('support_rows')}/{summary.get('blocking_rows')}",
+        f"- Candidate/needs-more/reject patterns: {summary.get('candidate_for_rule_rows')}/{summary.get('needs_more_labels_rows')}/{summary.get('reject_pattern_rows')}",
+        "",
+        "## Pattern Buckets",
+        "",
+    ]
+    candidates = payload.get("policy_rule_candidates") or {}
+    for bucket in ["candidate_for_rule", "reject_pattern", "needs_more_labels"]:
+        rows = candidates.get(bucket) or []
+        lines.append(f"### {bucket}")
+        if not rows:
+            lines.append("- None")
+            continue
+        for row in rows[:20]:
+            lines.append(
+                "- support={support}, block={block}: {pattern}".format(
+                    support=row.get("supporting_rows"),
+                    block=row.get("blocking_rows"),
+                    pattern=row.get("pattern"),
+                )
+            )
     lines.append("")
     return "\n".join(lines)
 
@@ -428,6 +611,32 @@ def _merged_filled_samples(inputs: dict, filled_sample: str | Path | list[str | 
             paths.append(Path(filled_sample))
         else:
             paths.extend(Path(path) for path in filled_sample if str(path))
+    deduped: list[Path] = []
+    seen = set()
+    for path in paths:
+        key = str(path)
+        if key and key not in seen:
+            seen.add(key)
+            deduped.append(path)
+    return deduped
+
+
+def _merged_filled_policy_validations(
+    inputs: dict,
+    filled_policy_validation: str | Path | list[str | Path] | None,
+    reuse_previous: bool,
+) -> list[Path]:
+    paths: list[Path] = []
+    if reuse_previous:
+        paths.extend(Path(path) for path in inputs.get("filled_policy_validations") or [] if str(path))
+        previous_single = str(inputs.get("filled_policy_validation") or "")
+        if previous_single:
+            paths.append(Path(previous_single))
+    if filled_policy_validation:
+        if isinstance(filled_policy_validation, (str, Path)):
+            paths.append(Path(filled_policy_validation))
+        else:
+            paths.extend(Path(path) for path in filled_policy_validation if str(path))
     deduped: list[Path] = []
     seen = set()
     for path in paths:
