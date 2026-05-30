@@ -18,6 +18,7 @@ from tools.build_calibration_regression_cases import build_calibration_regressio
 from tools.build_calibration_status_report import build_calibration_status_report
 from tools.check_calibration_application_gate import APPLICATION_GATES, check_calibration_application_gate
 from tools.evaluate_calibration_review_sample import evaluate_calibration_review_sample
+from tools.evaluate_workflow_balance import evaluate_balance_from_details
 from tools.mine_evidence_patterns import mine_evidence_patterns
 from tools.run_calibration_regression_gate import run_calibration_regression_gate
 from tools.simulate_pattern_release import simulate_pattern_release
@@ -152,6 +153,8 @@ def run_calibration_cycle(
     regression_overlay_gate_csv = out_dir / "calibration_regression_overlay_gate.csv"
     regression_overlay_gate_json = out_dir / "calibration_regression_overlay_gate.json"
     regression_overlay_gate_md = out_dir / "calibration_regression_overlay_gate.md"
+    regression_overlay_balance_json = out_dir / "calibration_regression_overlay_balance.json"
+    regression_overlay_balance_csv = out_dir / "calibration_regression_overlay_balance_details.csv"
     label_gap_csv = out_dir / "label_gap_task.csv"
     label_gap_xlsx = out_dir / "label_gap_task.xlsx"
     label_gap_high_csv = out_dir / "label_gap_high_priority_task.csv"
@@ -255,6 +258,7 @@ def run_calibration_cycle(
     regression_cases = {}
     regression_gate = {}
     regression_overlay = {}
+    regression_overlay_balance = {}
     if filled_eval_sample:
         filled_eval = evaluate_calibration_review_sample(
             sample=filled_eval_sample,
@@ -292,6 +296,15 @@ def run_calibration_cycle(
                 gate_json=regression_overlay_gate_json,
                 gate_md=regression_overlay_gate_md,
             )
+            if _has_labeled_details(labeled_eval_json):
+                regression_overlay_balance = evaluate_balance_from_details(
+                    labeled_details=labeled_eval_json,
+                    candidate_final=regression_overlay_csv,
+                    run_dir=Path(candidate_final_csv).parent,
+                    output_json=regression_overlay_balance_json,
+                    output_csv=regression_overlay_balance_csv,
+                    simulate_thresholds=[70, 75, 80, 85],
+                )
     pattern_recommendation_counts = _pattern_recommendation_counts(filled_eval)
     lane_recommendation_counts = _lane_recommendation_counts(filled_eval)
     report = {
@@ -398,6 +411,24 @@ def run_calibration_cycle(
             "regression_overlay_official_url_rows": regression_overlay.get("summary", {}).get("official_url_rows")
             if regression_overlay
             else None,
+            "regression_overlay_balance_accuracy": _balance_metric(regression_overlay_balance, "overall_accuracy"),
+            "regression_overlay_balance_auto_precision": _balance_metric(regression_overlay_balance, "auto_precision"),
+            "regression_overlay_balance_official_recall": _balance_metric(regression_overlay_balance, "official_recall"),
+            "regression_overlay_balance_false_official_rows": _balance_metric(
+                regression_overlay_balance, "false_official_rows"
+            ),
+            "regression_overlay_balance_over_rejected_rows": _balance_metric(
+                regression_overlay_balance, "over_rejected_rows"
+            ),
+            "regression_overlay_balance_accuracy_delta": _balance_delta(
+                labeled_eval_json, regression_overlay_balance, "overall_accuracy"
+            ),
+            "regression_overlay_balance_precision_delta": _balance_delta(
+                labeled_eval_json, regression_overlay_balance, "auto_precision"
+            ),
+            "regression_overlay_balance_recall_delta": _balance_delta(
+                labeled_eval_json, regression_overlay_balance, "official_recall"
+            ),
         },
         "inputs": {
             "labeled_eval_json": str(labeled_eval_json),
@@ -454,6 +485,8 @@ def run_calibration_cycle(
             "regression_overlay_gate_csv": str(regression_overlay_gate_csv) if regression_overlay else "",
             "regression_overlay_gate_json": str(regression_overlay_gate_json) if regression_overlay else "",
             "regression_overlay_gate_md": str(regression_overlay_gate_md) if regression_overlay else "",
+            "regression_overlay_balance_json": str(regression_overlay_balance_json) if regression_overlay_balance else "",
+            "regression_overlay_balance_csv": str(regression_overlay_balance_csv) if regression_overlay_balance else "",
             "label_gap_csv": str(label_gap_csv),
             "label_gap_xlsx": str(label_gap_xlsx),
             "label_gap_high_priority_csv": str(label_gap_high_csv),
@@ -507,6 +540,7 @@ def run_calibration_cycle(
         "filled_regression_cases": regression_cases,
         "regression_gate": regression_gate,
         "regression_overlay": regression_overlay,
+        "regression_overlay_balance": regression_overlay_balance,
     }
     summary_json.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
     summary_md.write_text(_render_markdown(report), encoding="utf-8")
@@ -715,6 +749,42 @@ def _add_empty_reuse_summary(summary: dict, prefix: str) -> None:
     summary[f"{prefix}_prefilled_verification_passed"] = None
 
 
+def _has_labeled_details(path_value: str | Path) -> bool:
+    try:
+        data = json.loads(Path(path_value).read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return False
+    details = data.get("details", []) if isinstance(data, dict) else data
+    return bool(isinstance(details, list) and details)
+
+
+def _balance_metric(balance: dict, key: str):
+    return (balance.get("overall") or {}).get(key) if balance else None
+
+
+def _balance_delta(baseline_json: str | Path, candidate_balance: dict, key: str):
+    candidate = _balance_metric(candidate_balance, key)
+    if candidate is None:
+        return None
+    baseline = _baseline_balance_metric(baseline_json, key)
+    if baseline is None:
+        return None
+    try:
+        return round(float(candidate) - float(baseline), 4)
+    except (TypeError, ValueError):
+        return None
+
+
+def _baseline_balance_metric(path_value: str | Path, key: str):
+    try:
+        data = json.loads(Path(path_value).read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    if not isinstance(data, dict):
+        return None
+    return (data.get("overall") or {}).get(key)
+
+
 def _render_markdown(report: dict) -> str:
     summary = report["summary"]
     lines = [
@@ -774,6 +844,8 @@ def _render_markdown(report: dict) -> str:
         f"- Regression overlay changed rows: {summary.get('regression_overlay_changed_rows')}",
         f"- Regression overlay gate status: {summary.get('regression_overlay_gate_status') or 'not_run'}",
         f"- Regression overlay gate fail/unverified rows: {summary.get('regression_overlay_gate_fail_rows')}/{summary.get('regression_overlay_gate_unverified_rows')}",
+        f"- Regression overlay labeled accuracy/precision/recall: {summary.get('regression_overlay_balance_accuracy')}/{summary.get('regression_overlay_balance_auto_precision')}/{summary.get('regression_overlay_balance_official_recall')}",
+        f"- Regression overlay labeled deltas accuracy/precision/recall: {summary.get('regression_overlay_balance_accuracy_delta')}/{summary.get('regression_overlay_balance_precision_delta')}/{summary.get('regression_overlay_balance_recall_delta')}",
         f"- Application gates allowed/not allowed/candidate: {summary.get('application_gate_allowed_count')}/{summary.get('application_gate_not_allowed_count')}/{summary.get('application_gate_candidate_count')}",
         f"- Convergence state: {summary.get('convergence_state') or 'not_audited'}",
         f"- Threshold decision: {summary.get('threshold_decision') or 'not_audited'}",
@@ -944,6 +1016,17 @@ def _render_markdown(report: dict) -> str:
         lines.append(
             f"- Overlay gate fail/unverified: {overlay_summary.get('regression_gate_fail_rows')}/{overlay_summary.get('regression_gate_unverified_rows')}"
         )
+    overlay_balance = report.get("regression_overlay_balance") or {}
+    if overlay_balance.get("overall"):
+        lines.extend(["", "## Regression Overlay Balance", ""])
+        overall = overlay_balance["overall"]
+        lines.append(f"- Labeled rows: {overall.get('labeled_rows')}")
+        lines.append(f"- Accuracy: {overall.get('overall_accuracy')}")
+        lines.append(f"- Auto precision: {overall.get('auto_precision')}")
+        lines.append(f"- Official recall: {overall.get('official_recall')}")
+        lines.append(f"- False official rows: {overall.get('false_official_rows')}")
+        lines.append(f"- Over-rejected rows: {overall.get('over_rejected_rows')}")
+        lines.append(f"- Accuracy delta vs labeled eval: {summary.get('regression_overlay_balance_accuracy_delta')}")
     application_gate_checks = report.get("application_gate_checks") or {}
     if application_gate_checks.get("checks"):
         lines.extend(["", "## Application Gates", ""])

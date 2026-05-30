@@ -5179,6 +5179,10 @@ class OperationalCommandTests(unittest.TestCase):
             regression_overlay_xlsx_exists = (output_dir / "calibration_regression_overlay_official_sites.xlsx").exists()
             regression_overlay_json_exists = (output_dir / "calibration_regression_overlay_application.json").exists()
             regression_overlay_gate_json_exists = (output_dir / "calibration_regression_overlay_gate.json").exists()
+            regression_overlay_balance_json_exists = (output_dir / "calibration_regression_overlay_balance.json").exists()
+            regression_overlay_balance_csv_exists = (
+                output_dir / "calibration_regression_overlay_balance_details.csv"
+            ).exists()
             rule_candidates_md = output_dir / "pattern_rule_candidates.md"
             rule_candidates_md_text = rule_candidates_md.read_text(encoding="utf-8")
             summary_text = (output_dir / "calibration_cycle_summary.md").read_text(encoding="utf-8")
@@ -5192,6 +5196,8 @@ class OperationalCommandTests(unittest.TestCase):
         self.assertTrue(regression_overlay_xlsx_exists)
         self.assertTrue(regression_overlay_json_exists)
         self.assertTrue(regression_overlay_gate_json_exists)
+        self.assertTrue(regression_overlay_balance_json_exists)
+        self.assertTrue(regression_overlay_balance_csv_exists)
         self.assertEqual(report["summary"]["filled_eval_labeled_rows"], 2)
         self.assertEqual(report["summary"]["filled_pattern_recommendation_counts"]["reject_pattern"], 1)
         self.assertEqual(report["summary"]["filled_lane_recommendation_counts"]["keep_review_lane"], 1)
@@ -5206,8 +5212,11 @@ class OperationalCommandTests(unittest.TestCase):
         self.assertEqual(report["summary"]["regression_overlay_changed_rows"], 0)
         self.assertEqual(report["summary"]["regression_overlay_gate_status"], "pass")
         self.assertEqual(report["summary"]["regression_overlay_gate_fail_rows"], 0)
+        self.assertIn("regression_overlay_balance_accuracy", report["summary"])
+        self.assertIn("regression_overlay_balance_json", report["outputs"])
         self.assertIn("regression_overlay_xlsx", report["outputs"])
         self.assertIn("regression_overlay", report)
+        self.assertIn("regression_overlay_balance", report)
         self.assertIn("run_calibration_regression_gate.py", report["summary"]["regression_gate_next_step"])
         self.assertIn("Rejected Pattern", rule_candidates_md_text)
         self.assertIn("Filled Lane Recommendations", summary_text)
@@ -5217,6 +5226,7 @@ class OperationalCommandTests(unittest.TestCase):
         self.assertIn("Regression gate next step", summary_text)
         self.assertIn("Regression Gate", summary_text)
         self.assertIn("Regression Overlay", summary_text)
+        self.assertIn("Regression Overlay Balance", summary_text)
         self.assertEqual(report["calibration_status"]["summary"]["workflow_status"], "partially_converged_keep_review_lanes")
 
     def test_run_calibration_cycle_merges_multiple_filled_samples(self):
