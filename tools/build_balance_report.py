@@ -52,6 +52,10 @@ def build_balance_report(
     threshold_recommendation = _threshold_recommendation(labeled.get("threshold_simulations", []))
     recall_release = _recall_release_recommendation(labeled.get("agent_b_recall_release_simulations", []))
     pattern_release = _pattern_release_recommendation(pattern_release_jsons or [])
+    lane_policy = _manual_review_lane_policy(
+        labeled.get("manual_review_lanes", []),
+        labeled.get("manual_review_lane_drop_simulations", []),
+    )
     batch_review = _review_summary(Path(batch_review_csv), batch_total_rows) if batch_review_csv else {}
     batch_agent_b = _agent_b_summary(Path(batch_agent_b_csv)) if batch_agent_b_csv else {}
     recommendations = _recommendations(
@@ -59,6 +63,7 @@ def build_balance_report(
         threshold_recommendation,
         recall_release,
         pattern_release,
+        lane_policy,
         batch_review,
         batch_agent_b,
     )
@@ -85,6 +90,11 @@ def build_balance_report(
             "manual_review_rows": overall.get("manual_review_rows"),
             "manual_review_false_official_capture_rate": overall.get("manual_review_false_official_capture_rate"),
             "agent_b_false_official_accept_rate": overall.get("agent_b_false_official_accept_rate"),
+            "protected_review_lane_count": lane_policy.get("protected_lane_count"),
+            "protected_review_lanes": lane_policy.get("protected_review_lanes"),
+            "protected_review_lane_rows": lane_policy.get("protected_review_lane_rows"),
+            "spot_check_candidate_lanes": lane_policy.get("spot_check_candidate_lanes"),
+            "more_label_review_lanes": lane_policy.get("more_label_review_lanes"),
             "batch_review_rows": batch_review.get("rows"),
             "batch_review_rate": batch_review.get("review_rate"),
             "batch_agent_b_rows": batch_agent_b.get("rows"),
@@ -98,6 +108,9 @@ def build_balance_report(
         "agent_b_recall_release": recall_release,
         "agent_b_recall_release_simulations": labeled.get("agent_b_recall_release_simulations", []),
         "pattern_release": pattern_release,
+        "manual_review_lane_policy": lane_policy,
+        "manual_review_lanes": labeled.get("manual_review_lanes", []),
+        "manual_review_lane_drop_simulations": labeled.get("manual_review_lane_drop_simulations", []),
         "labeled_overall": overall,
         "batch_review": batch_review,
         "batch_agent_b": batch_agent_b,
@@ -271,11 +284,71 @@ def _agent_b_summary(path: Path) -> dict:
     }
 
 
+def _manual_review_lane_policy(lanes: list[dict], drop_simulations: list[dict]) -> dict:
+    drops = {row.get("drop_review_reason", ""): row for row in drop_simulations}
+    protected = []
+    spot_check_candidates = []
+    more_labels = []
+    for lane in lanes:
+        reason = lane.get("review_reason", "")
+        if not reason:
+            continue
+        drop = drops.get(reason, {})
+        false_missed = _to_int(drop.get("known_false_official_missed_if_dropped") or lane.get("false_official_rows"))
+        over_rejected_missed = _to_int(
+            drop.get("known_over_rejected_missed_if_dropped") or lane.get("over_rejected_rows")
+        )
+        labeled_rows = _to_int(lane.get("labeled_rows"))
+        review_task_rows = _to_int(lane.get("review_task_rows"))
+        row = {
+            "review_reason": reason,
+            "review_task_rows": review_task_rows,
+            "labeled_rows": labeled_rows,
+            "false_official_rows": _to_int(lane.get("false_official_rows")),
+            "over_rejected_rows": _to_int(lane.get("over_rejected_rows")),
+            "risk_rows": _to_int(lane.get("risk_rows")),
+            "risk_share_of_labeled_lane": lane.get("risk_share_of_labeled_lane"),
+            "known_false_official_missed_if_dropped": false_missed,
+            "known_over_rejected_missed_if_dropped": over_rejected_missed,
+            "known_correct_reviews_removed_if_dropped": _to_int(
+                drop.get("known_correct_reviews_removed_if_dropped")
+            ),
+        }
+        if false_missed or over_rejected_missed:
+            reasons = []
+            if false_missed:
+                reasons.append(f"would miss {false_missed} labeled false official row(s)")
+            if over_rejected_missed:
+                reasons.append(f"would miss {over_rejected_missed} labeled over-rejected official row(s)")
+            protected.append({**row, "protection_reason": "; ".join(reasons)})
+        elif labeled_rows >= 3 and row["known_correct_reviews_removed_if_dropped"] >= labeled_rows:
+            spot_check_candidates.append(
+                {**row, "candidate_reason": "labeled rows are clean so far; keep as sampled spot-check before removing"}
+            )
+        else:
+            more_labels.append({**row, "candidate_reason": "not enough labeled evidence to remove or keep permanently"})
+
+    protected.sort(key=lambda row: (-row["risk_rows"], -row["review_task_rows"], row["review_reason"]))
+    spot_check_candidates.sort(key=lambda row: (-row["review_task_rows"], row["review_reason"]))
+    more_labels.sort(key=lambda row: (-row["review_task_rows"], row["review_reason"]))
+    return {
+        "protected_lane_count": len(protected),
+        "protected_review_lanes": [row["review_reason"] for row in protected],
+        "protected_review_lane_rows": sum(row["review_task_rows"] for row in protected),
+        "spot_check_candidate_lanes": [row["review_reason"] for row in spot_check_candidates],
+        "more_label_review_lanes": [row["review_reason"] for row in more_labels],
+        "protected": protected,
+        "spot_check_candidates": spot_check_candidates,
+        "needs_more_labels": more_labels,
+    }
+
+
 def _recommendations(
     overall: dict,
     threshold: dict,
     recall_release: dict,
     pattern_release: dict,
+    lane_policy: dict,
     batch_review: dict,
     batch_agent_b: dict,
 ) -> list[str]:
@@ -285,6 +358,21 @@ def _recommendations(
         out.append(f"Keep auto-accept threshold at {recommended}; do not globally tighten unless new labels change the tie.")
     if overall.get("manual_review_false_official_capture_rate") == 1.0:
         out.append("Keep current high-risk review lanes; labeled false official rows are fully captured.")
+    protected_lanes = lane_policy.get("protected") or []
+    if protected_lanes:
+        names = ", ".join(row["review_reason"] for row in protected_lanes[:5])
+        suffix = "" if len(protected_lanes) <= 5 else f", plus {len(protected_lanes) - 5} more"
+        out.append(
+            "Do not remove protected review lanes yet: "
+            f"{names}{suffix}. Dropping them would miss labeled false official or over-rejected rows."
+        )
+    spot_check_lanes = lane_policy.get("spot_check_candidates") or []
+    if spot_check_lanes:
+        names = ", ".join(row["review_reason"] for row in spot_check_lanes)
+        out.append(f"Treat clean lanes as spot-check candidates, not automatic removals yet: {names}.")
+    if lane_policy.get("needs_more_labels"):
+        names = ", ".join(row["review_reason"] for row in lane_policy["needs_more_labels"])
+        out.append(f"Collect more labels before changing low-evidence review lanes: {names}.")
     if overall.get("agent_b_false_official_accept_rate") == 0.0:
         out.append("Keep AgentB conservative on high-risk rows; it is not releasing labeled false official rows.")
     if recall_release.get("recommendation") == "manual_only":
@@ -334,6 +422,8 @@ def _render_markdown(report: dict) -> str:
             f"- Manual review rows: {summary.get('manual_review_rows')}",
             f"- Manual false-official capture rate: {summary.get('manual_review_false_official_capture_rate')}",
             f"- AgentB false-official accept rate: {summary.get('agent_b_false_official_accept_rate')}",
+            f"- Protected review lanes: {summary.get('protected_review_lane_count')}",
+            f"- Protected review lane rows: {summary.get('protected_review_lane_rows')}",
             "",
             "## Thresholds",
             "",
@@ -360,6 +450,41 @@ def _render_markdown(report: dict) -> str:
     )
     for reason, count in report.get("batch_review", {}).get("reason_counts", {}).items():
         lines.append(f"- {reason}: {count}")
+    lane_policy = report.get("manual_review_lane_policy", {})
+    if lane_policy.get("protected"):
+        lines.extend(["", "### Protected Lanes", ""])
+        lines.append("| Review reason | Rows | Labeled | Risk | Why protected |")
+        lines.append("| --- | ---: | ---: | ---: | --- |")
+        for row in lane_policy["protected"]:
+            lines.append(
+                "| {reason} | {rows} | {labeled} | {risk} | {why} |".format(
+                    reason=row.get("review_reason"),
+                    rows=row.get("review_task_rows"),
+                    labeled=row.get("labeled_rows"),
+                    risk=row.get("risk_rows"),
+                    why=row.get("protection_reason"),
+                )
+            )
+    if lane_policy.get("spot_check_candidates"):
+        lines.extend(["", "### Spot-Check Candidates", ""])
+        for row in lane_policy["spot_check_candidates"]:
+            lines.append(
+                "- {reason}: rows={rows}, labeled={labeled}, clean so far; keep sampled until more labels confirm.".format(
+                    reason=row.get("review_reason"),
+                    rows=row.get("review_task_rows"),
+                    labeled=row.get("labeled_rows"),
+                )
+            )
+    if lane_policy.get("needs_more_labels"):
+        lines.extend(["", "### Needs More Labels", ""])
+        for row in lane_policy["needs_more_labels"]:
+            lines.append(
+                "- {reason}: rows={rows}, labeled={labeled}".format(
+                    reason=row.get("review_reason"),
+                    rows=row.get("review_task_rows"),
+                    labeled=row.get("labeled_rows"),
+                )
+            )
     lines.extend(["", "## AgentB Decisions", ""])
     for reason, counts in report.get("batch_agent_b", {}).get("reason_decision_counts", {}).items():
         parts = ", ".join(f"{key}={value}" for key, value in counts.items())

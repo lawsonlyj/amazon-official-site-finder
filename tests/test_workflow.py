@@ -3345,6 +3345,86 @@ class OperationalCommandTests(unittest.TestCase):
                                 "release_precision": 0.25,
                             }
                         ],
+                        "manual_review_lanes": [
+                            {
+                                "review_reason": "precision_low_confidence_auto_match",
+                                "review_task_rows": 10,
+                                "labeled_rows": 3,
+                                "false_official_rows": 1,
+                                "over_rejected_rows": 0,
+                                "correct_official_rows": 2,
+                                "correct_no_official_rows": 0,
+                                "risk_rows": 1,
+                                "risk_share_of_labeled_lane": 0.3333,
+                                "correct_share_of_labeled_lane": 0.6667,
+                            },
+                            {
+                                "review_reason": "recall_unresolved_top_candidate",
+                                "review_task_rows": 8,
+                                "labeled_rows": 2,
+                                "false_official_rows": 0,
+                                "over_rejected_rows": 1,
+                                "correct_official_rows": 0,
+                                "correct_no_official_rows": 1,
+                                "risk_rows": 1,
+                                "risk_share_of_labeled_lane": 0.5,
+                                "correct_share_of_labeled_lane": 0.5,
+                            },
+                            {
+                                "review_reason": "precision_calibrated_pattern_release",
+                                "review_task_rows": 4,
+                                "labeled_rows": 4,
+                                "false_official_rows": 0,
+                                "over_rejected_rows": 0,
+                                "correct_official_rows": 4,
+                                "correct_no_official_rows": 0,
+                                "risk_rows": 0,
+                                "risk_share_of_labeled_lane": 0.0,
+                                "correct_share_of_labeled_lane": 1.0,
+                            },
+                            {
+                                "review_reason": "precision_second_pass_accepted_lt70",
+                                "review_task_rows": 3,
+                                "labeled_rows": 1,
+                                "false_official_rows": 0,
+                                "over_rejected_rows": 0,
+                                "correct_official_rows": 1,
+                                "correct_no_official_rows": 0,
+                                "risk_rows": 0,
+                                "risk_share_of_labeled_lane": 0.0,
+                                "correct_share_of_labeled_lane": 1.0,
+                            },
+                        ],
+                        "manual_review_lane_drop_simulations": [
+                            {
+                                "drop_review_reason": "precision_low_confidence_auto_match",
+                                "manual_review_rows_removed": 10,
+                                "known_false_official_missed_if_dropped": 1,
+                                "known_over_rejected_missed_if_dropped": 0,
+                                "known_correct_reviews_removed_if_dropped": 2,
+                            },
+                            {
+                                "drop_review_reason": "recall_unresolved_top_candidate",
+                                "manual_review_rows_removed": 8,
+                                "known_false_official_missed_if_dropped": 0,
+                                "known_over_rejected_missed_if_dropped": 1,
+                                "known_correct_reviews_removed_if_dropped": 1,
+                            },
+                            {
+                                "drop_review_reason": "precision_calibrated_pattern_release",
+                                "manual_review_rows_removed": 4,
+                                "known_false_official_missed_if_dropped": 0,
+                                "known_over_rejected_missed_if_dropped": 0,
+                                "known_correct_reviews_removed_if_dropped": 4,
+                            },
+                            {
+                                "drop_review_reason": "precision_second_pass_accepted_lt70",
+                                "manual_review_rows_removed": 3,
+                                "known_false_official_missed_if_dropped": 0,
+                                "known_over_rejected_missed_if_dropped": 0,
+                                "known_correct_reviews_removed_if_dropped": 1,
+                            },
+                        ],
                     }
                 ),
                 encoding="utf-8",
@@ -3420,10 +3500,21 @@ class OperationalCommandTests(unittest.TestCase):
         self.assertEqual(report["summary"]["recommended_pattern_release"], "narrow_pattern_release_candidate")
         self.assertEqual(report["summary"]["pattern_release_correct_rows"], 4)
         self.assertEqual(report["summary"]["pattern_release_wrong_rows"], 0)
+        self.assertEqual(report["summary"]["protected_review_lane_count"], 2)
+        self.assertEqual(
+            report["summary"]["protected_review_lanes"],
+            ["precision_low_confidence_auto_match", "recall_unresolved_top_candidate"],
+        )
+        self.assertEqual(report["summary"]["spot_check_candidate_lanes"], ["precision_calibrated_pattern_release"])
+        self.assertEqual(report["summary"]["more_label_review_lanes"], ["precision_second_pass_accepted_lt70"])
         self.assertEqual(report["summary"]["batch_review_rows"], 2)
         self.assertEqual(report["summary"]["batch_review_rate"], 0.5)
         self.assertEqual(report["summary"]["batch_agent_b_timeout_rows"], 1)
         self.assertIn("Keep auto-accept threshold at 75", md_text)
+        self.assertIn("Do not remove protected review lanes yet", md_text)
+        self.assertIn("Protected Lanes", md_text)
+        self.assertIn("Spot-Check Candidates", md_text)
+        self.assertIn("Needs More Labels", md_text)
         self.assertIn("AgentB Recall Release Simulation", md_text)
         self.assertIn("Prefer narrow pattern release over global threshold relaxation", md_text)
         self.assertIn("Pattern Release", md_text)
