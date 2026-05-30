@@ -5493,6 +5493,7 @@ class OperationalCommandTests(unittest.TestCase):
         self.assertEqual(report["review_lanes"]["decisive_rows_needed"], 3)
         self.assertEqual(by_reason["precision_second_pass_accepted_lt70"]["decisive_rows_needed"], 0)
         self.assertEqual(by_reason["precision_low_confidence_auto_match"]["decisive_rows_needed"], 3)
+        self.assertIn("defer_lane_downgrade_candidate", {item["id"] for item in report["open_requirements"]})
         self.assertIn(str(label_gap_xlsx), report["next_actions"][0])
         self.assertNotIn(str(label_gap_high_xlsx), report["next_actions"][0])
 

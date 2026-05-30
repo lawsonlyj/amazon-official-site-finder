@@ -375,6 +375,17 @@ def _open_requirements(
                 "action": "Prioritize calibration labels for under-labeled review lanes before reducing manual review.",
             }
         )
+    if lane_status.get("status") != "candidate_for_downgrade" and _to_int(
+        lane_status.get("candidate_for_change_rows")
+    ):
+        out.append(
+            {
+                "id": "defer_lane_downgrade_candidate",
+                "status": "candidate",
+                "reason": "At least one lane has clean filled labels, but other decisive-label gaps remain open.",
+                "action": "Keep the lane downgrade candidate queued; apply it only after remaining label gaps close and regression tests cover the exact evidence lane.",
+            }
+        )
     if lane_status["status"] == "candidate_for_downgrade":
         out.append(
             {
