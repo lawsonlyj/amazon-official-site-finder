@@ -46,6 +46,7 @@ from tools.build_calibration_label_gap_task import build_calibration_label_gap_t
 from tools.build_calibration_regression_cases import build_calibration_regression_cases
 from tools.build_calibration_review_sample import build_calibration_review_sample
 from tools.build_calibration_status_report import build_calibration_status_report
+from tools.check_calibration_application_gate import check_calibration_application_gate
 from tools.evaluate_calibration_review_sample import evaluate_calibration_review_sample
 from tools.mine_evidence_patterns import mine_evidence_patterns
 from tools.run_calibration_cycle import run_calibration_cycle
@@ -5733,6 +5734,97 @@ class OperationalCommandTests(unittest.TestCase):
         self.assertEqual(report["application_gates"]["review_lane_change"]["status"], "candidate")
         self.assertFalse(report["application_gates"]["review_lane_change"]["can_apply_now"])
         self.assertIn("Regression gate passed", report["next_actions"][0])
+
+    def test_check_calibration_application_gate_blocks_unsafe_actions(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            status = root / "calibration_status.json"
+            status.write_text(
+                json.dumps(
+                    {
+                        "application_gates": {
+                            "review_lane_change": {
+                                "status": "blocked",
+                                "can_apply_now": False,
+                                "blockers": ["fill_calibration_sample", "collect_lane_labels"],
+                                "reason": "More labels are needed.",
+                                "required_action": "Resolve blockers before applying review_lane_change.",
+                            }
+                        }
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            report = check_calibration_application_gate(status_json=status, gate="review_lane_change")
+
+        self.assertFalse(report["summary"]["allowed"])
+        self.assertEqual(report["summary"]["gate_status"], "blocked")
+        self.assertEqual(report["summary"]["decision_reason"], "gate_has_blockers")
+        self.assertIn("fill_calibration_sample", report["summary"]["blockers"])
+
+    def test_check_calibration_application_gate_allows_candidate_only_when_requested(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            status = root / "calibration_status.json"
+            status.write_text(
+                json.dumps(
+                    {
+                        "application_gates": {
+                            "review_lane_change": {
+                                "status": "candidate",
+                                "can_apply_now": False,
+                                "blockers": [],
+                                "reason": "Regression gate passed and lane evidence is clean.",
+                                "required_action": "Apply a narrow lane downgrade.",
+                            }
+                        }
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            default_report = check_calibration_application_gate(status_json=status, gate="review_lane_change")
+            allowed_report = check_calibration_application_gate(
+                status_json=status,
+                gate="review_lane_change",
+                allow_candidate=True,
+            )
+
+        self.assertFalse(default_report["summary"]["allowed"])
+        self.assertEqual(default_report["summary"]["decision_reason"], "candidate_requires_explicit_allow_candidate")
+        self.assertTrue(allowed_report["summary"]["allowed"])
+        self.assertEqual(allowed_report["summary"]["decision_reason"], "candidate_allowed_for_controlled_rollout")
+
+    def test_check_calibration_application_gate_keeps_not_recommended_blocked(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            status = root / "calibration_status.json"
+            status.write_text(
+                json.dumps(
+                    {
+                        "application_gates": {
+                            "global_threshold_change": {
+                                "status": "not_recommended",
+                                "can_apply_now": False,
+                                "blockers": [],
+                                "reason": "Current evidence recommends keeping thresholds unchanged.",
+                                "required_action": "Keep thresholds unchanged.",
+                            }
+                        }
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            report = check_calibration_application_gate(
+                status_json=status,
+                gate="global_threshold_change",
+                allow_candidate=True,
+            )
+
+        self.assertFalse(report["summary"]["allowed"])
+        self.assertEqual(report["summary"]["decision_reason"], "gate_not_recommended")
 
     def test_build_calibration_status_report_prioritizes_unrun_regression_gate(self):
         with tempfile.TemporaryDirectory() as tmp:
