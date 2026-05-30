@@ -39,9 +39,13 @@ DETAIL_FIELDS = [
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Evaluate precision/coverage balance from human review labels.")
-    parser.add_argument("--baseline-final", required=True, help="Baseline final CSV. Non-reviewed rows are treated as correct labels.")
+    parser.add_argument("--baseline-final", help="Baseline final CSV. Non-reviewed rows are treated as correct labels.")
     parser.add_argument("--candidate-final", required=True, help="Candidate workflow final CSV to evaluate.")
-    parser.add_argument("--human-review", required=True, help="Filled human review CSV/XLSX with corrected yellow rows.")
+    parser.add_argument("--human-review", help="Filled human review CSV/XLSX with corrected yellow rows.")
+    parser.add_argument(
+        "--labeled-details",
+        help="Existing balance details CSV/JSON with expected_kind/expected_domain labels; useful after old baseline artifacts are cleaned.",
+    )
     parser.add_argument("--run-dir", help="Optional candidate run dir, used to count review_task rows.")
     parser.add_argument(
         "--simulate-thresholds",
@@ -52,15 +56,27 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--output-csv")
     args = parser.parse_args(argv)
 
-    summary = evaluate_balance(
-        baseline_final=args.baseline_final,
-        candidate_final=args.candidate_final,
-        human_review=args.human_review,
-        run_dir=args.run_dir,
-        output_json=args.output_json,
-        output_csv=args.output_csv,
-        simulate_thresholds=args.simulate_thresholds,
-    )
+    if args.labeled_details:
+        summary = evaluate_balance_from_details(
+            labeled_details=args.labeled_details,
+            candidate_final=args.candidate_final,
+            run_dir=args.run_dir,
+            output_json=args.output_json,
+            output_csv=args.output_csv,
+            simulate_thresholds=args.simulate_thresholds,
+        )
+    else:
+        if not args.baseline_final or not args.human_review:
+            parser.error("--baseline-final and --human-review are required unless --labeled-details is provided.")
+        summary = evaluate_balance(
+            baseline_final=args.baseline_final,
+            candidate_final=args.candidate_final,
+            human_review=args.human_review,
+            run_dir=args.run_dir,
+            output_json=args.output_json,
+            output_csv=args.output_csv,
+            simulate_thresholds=args.simulate_thresholds,
+        )
     print(json.dumps(summary["overall"], ensure_ascii=False, indent=2))
     return 0
 
@@ -80,6 +96,61 @@ def evaluate_balance(
     review_rows = _index_rows(_read_table(Path(human_review)))
     labels = [_label_from_row(row, review_rows.get(_row_key(row), {})) for row in baseline_rows]
     labels = [label for label in labels if label]
+    return _evaluate_balance_from_labels(
+        labels=labels,
+        candidate_rows=candidate_rows,
+        candidate_final=candidate_final,
+        run_dir=run_dir,
+        output_json=output_json,
+        output_csv=output_csv,
+        simulate_thresholds=simulate_thresholds,
+        inputs={
+            "baseline_final": str(baseline_final),
+            "candidate_final": str(candidate_final),
+            "human_review": str(human_review),
+        },
+    )
+
+
+def evaluate_balance_from_details(
+    *,
+    labeled_details: str | Path,
+    candidate_final: str | Path,
+    run_dir: str | Path | None = None,
+    output_json: str | Path | None = None,
+    output_csv: str | Path | None = None,
+    simulate_thresholds: str | list[int] | None = None,
+) -> dict:
+    detail_rows = _read_details(Path(labeled_details))
+    labels = [_label_from_detail_row(row) for row in detail_rows]
+    labels = [label for label in labels if label]
+    candidate_rows = _index_rows(_read_rows(Path(candidate_final)))
+    return _evaluate_balance_from_labels(
+        labels=labels,
+        candidate_rows=candidate_rows,
+        candidate_final=candidate_final,
+        run_dir=run_dir,
+        output_json=output_json,
+        output_csv=output_csv,
+        simulate_thresholds=simulate_thresholds,
+        inputs={
+            "labeled_details": str(labeled_details),
+            "candidate_final": str(candidate_final),
+        },
+    )
+
+
+def _evaluate_balance_from_labels(
+    *,
+    labels: list[dict[str, str]],
+    candidate_rows: dict[str, dict[str, str]],
+    candidate_final: str | Path,
+    run_dir: str | Path | None,
+    output_json: str | Path | None,
+    output_csv: str | Path | None,
+    simulate_thresholds: str | list[int] | None,
+    inputs: dict[str, str],
+) -> dict:
     details = [_evaluate_label(label, _candidate_for_label(label, candidate_rows)) for label in labels]
     review_task_rows = None
     review_task_path = None
@@ -111,9 +182,8 @@ def evaluate_balance(
         "threshold_simulations": _threshold_simulations(labels, candidate_rows, simulate_thresholds),
         "agent_b_recall_release_simulations": agent_b_recall_release_simulations,
         "inputs": {
-            "baseline_final": str(baseline_final),
             "candidate_final": str(candidate_final),
-            "human_review": str(human_review),
+            **inputs,
             "run_dir": str(run_dir) if run_dir else "",
             "review_task": str(review_task_path) if review_task_path else "",
             "agent_b": str(agent_b_path) if agent_b_path else "",
@@ -211,6 +281,30 @@ def _label(provider_id: str, provider_name: str, source: str, kind: str, url: st
         "expected_kind": kind,
         "expected_url": url,
         "expected_domain": domain_from_url(url) if url else "",
+    }
+
+
+def _label_from_detail_row(row: dict[str, str]) -> dict[str, str] | None:
+    provider_id = row.get("provider_id", "")
+    provider_name = row.get("provider_name", "")
+    source = row.get("label_source", "") or "labeled_details"
+    expected_url = _normalize_url(row.get("expected_url", ""))
+    expected_domain = domain_from_url(row.get("expected_domain", "") or expected_url)
+    expected_kind = (row.get("expected_kind") or "").strip().casefold()
+    if expected_kind not in {"official", "no_official"}:
+        expected_kind = "official" if expected_domain else "no_official"
+    if expected_kind == "official" and not expected_domain:
+        return None
+    if expected_kind == "no_official":
+        expected_url = ""
+        expected_domain = ""
+    return {
+        "provider_id": provider_id,
+        "provider_name": provider_name,
+        "label_source": source,
+        "expected_kind": expected_kind,
+        "expected_url": expected_url,
+        "expected_domain": expected_domain,
     }
 
 
@@ -489,6 +583,16 @@ def _read_rows(path: Path) -> list[dict[str, str]]:
 def _read_table(path: Path) -> list[dict[str, str]]:
     if path.suffix.casefold() == ".xlsx":
         return _read_xlsx(path)
+    return _read_rows(path)
+
+
+def _read_details(path: Path) -> list[dict[str, str]]:
+    if path.suffix.casefold() == ".json":
+        data = json.loads(path.read_text(encoding="utf-8"))
+        if isinstance(data, dict):
+            rows = data.get("details", [])
+            return rows if isinstance(rows, list) else []
+        return data if isinstance(data, list) else []
     return _read_rows(path)
 
 

@@ -40,7 +40,7 @@ from tools.configure_env_from_key_files import extract_key_from_file, main as co
 from tools.run_agent_b_verification import run_agent_b_verification
 from tools.run_agent_c_recommendations import run_agent_c_recommendations
 from tools.apply_agent_optimizations import apply_agent_optimizations
-from tools.evaluate_workflow_balance import evaluate_balance
+from tools.evaluate_workflow_balance import evaluate_balance, evaluate_balance_from_details
 from tools.build_balance_report import build_balance_report
 from tools.build_calibration_review_sample import build_calibration_review_sample
 from tools.evaluate_calibration_review_sample import evaluate_calibration_review_sample
@@ -2338,6 +2338,80 @@ class OperationalCommandTests(unittest.TestCase):
         detail_by_id = {row["provider_id"]: row for row in summary["details"]}
         self.assertEqual(detail_by_id["p-4"]["manual_review_reason"], "identity_weak_or_conflicting")
         self.assertEqual(detail_by_id["p-3"]["agent_b_suggested_domain"], "three.example")
+
+    def test_evaluate_workflow_balance_can_reuse_labeled_details(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            run_dir = root / "run"
+            details = root / "details.csv"
+            candidate = root / "candidate.csv"
+            review_task = run_dir / "review_task.csv"
+            _write_test_csv(
+                details,
+                [
+                    {
+                        "provider_id": "p-1",
+                        "provider_name": "One",
+                        "label_source": "baseline_unmarked_correct",
+                        "expected_kind": "official",
+                        "expected_domain": "one.example",
+                        "expected_url": "https://one.example",
+                    },
+                    {
+                        "provider_id": "p-2",
+                        "provider_name": "Two",
+                        "label_source": "human_reject",
+                        "expected_kind": "no_official",
+                        "expected_domain": "",
+                        "expected_url": "",
+                    },
+                    {
+                        "provider_id": "p-3",
+                        "provider_name": "Three",
+                        "label_source": "baseline_unmarked_correct",
+                        "expected_kind": "official",
+                        "expected_domain": "three.example",
+                        "expected_url": "https://three.example",
+                    },
+                ],
+            )
+            _write_test_csv(
+                candidate,
+                [
+                    {"provider_id": "p-1", "provider_name": "One", "official_url": "https://one.example", "official_domain": "one.example", "status": "matched", "confidence": "92"},
+                    {"provider_id": "p-2", "provider_name": "Two", "official_url": "https://wrong.example", "official_domain": "wrong.example", "status": "matched", "confidence": "82"},
+                    {"provider_id": "p-3", "provider_name": "Three", "official_url": "", "official_domain": "", "status": "unresolved", "confidence": "68"},
+                ],
+            )
+            _write_test_csv(
+                review_task,
+                [
+                    {"provider_id": "p-2", "provider_name": "Two", "review_reason": "precision_low_confidence_auto_match"},
+                    {"provider_id": "p-3", "provider_name": "Three", "review_reason": "recall_unresolved_top_candidate"},
+                ],
+            )
+
+            summary = evaluate_balance_from_details(
+                labeled_details=details,
+                candidate_final=candidate,
+                run_dir=run_dir,
+                simulate_thresholds=[83],
+            )
+
+        overall = summary["overall"]
+        self.assertEqual(overall["labeled_rows"], 3)
+        self.assertEqual(overall["correct_official_rows"], 1)
+        self.assertEqual(overall["false_official_rows"], 1)
+        self.assertEqual(overall["over_rejected_rows"], 1)
+        self.assertEqual(overall["manual_review_rows"], 2)
+        self.assertEqual(overall["manual_review_false_official_rows"], 1)
+        self.assertEqual(overall["manual_review_over_rejected_rows"], 1)
+        self.assertEqual(overall["manual_review_false_official_capture_rate"], 1.0)
+        self.assertEqual(summary["threshold_simulations"][0]["threshold"], 83)
+        self.assertEqual(summary["threshold_simulations"][0]["false_official_rows"], 0)
+        self.assertEqual(summary["threshold_simulations"][0]["over_rejected_rows"], 1)
+        self.assertEqual(summary["threshold_simulations"][0]["correct_no_official_rows"], 1)
+        self.assertEqual(summary["inputs"]["labeled_details"], str(details))
 
     def test_evaluate_workflow_balance_simulates_agent_b_recall_release_risk(self):
         with tempfile.TemporaryDirectory() as tmp:

@@ -199,7 +199,7 @@ Codex receives filled manual review workbook
 | `tools/apply_agent_optimizations.py` | A 的安全应用器，只自动写入可解释、可回滚的 excluded_domains 配置，并生成 human/identity/no_official/reachability 回归样例。 |
 | `tools/build_linked_workbook.py` | 生成链接可点击的 XLSX。 |
 | `tools/verify_run_outputs.py` | 检查最终 CSV、unresolved CSV、质量 JSON、XLSX 链接公式是否正常。 |
-| `tools/evaluate_workflow_balance.py` | 调参评估工具。用基线结果、候选结果和人工标黄复核表计算 false official、over-reject、precision、recall、manual review rows，并模拟 AgentB unresolved recall 候选在不同证据阈值下自动放行会恢复多少正确官网、放出多少错误官网。 |
+| `tools/evaluate_workflow_balance.py` | 调参评估工具。用基线结果、候选结果和人工标黄复核表计算 false official、over-reject、precision、recall、manual review rows，并模拟 AgentB unresolved recall 候选在不同证据阈值下自动放行会恢复多少正确官网、放出多少错误官网。旧基线目录已清理时，可用 `--labeled-details` 读取已保存的 `balance_eval_details.csv/json` 标签，对当前候选结果重新复算同一组指标。 |
 | `tools/build_balance_report.py` | 汇总 100 条有标签评估、300/全量无标签 AgentB 分布和 `simulate_pattern_release.py` 的 pattern-release 结果，生成可重复的阈值、review lane、AgentB recall 是否只能人工处理、以及是否可采用窄口证据组合放行的建议报告。 |
 | `tools/build_release_policy_report.py` | 汇总基线/候选有标签评估、pattern-release 模拟和 100/300 条应用结果，生成最终发布策略报告：阈值是否保持、原始 AgentB recall 是否只能人工处理、窄口 pattern release 是否可在风险子域 guard 下启用。 |
 | `tools/build_threshold_boundary_report.py` | 汇总阈值模拟、AgentB recall 模拟和 pattern-release 结果，明确全局接受阈值、precision watch 复核分数段，以及哪些放宽只能进入人工/AgentB 证据而不能直接自动接受。 |
