@@ -9,6 +9,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from tools.build_calibration_review_sample import build_calibration_review_sample
 from tools.build_balance_report import build_balance_report
+from tools.build_calibration_status_report import build_calibration_status_report
 from tools.evaluate_calibration_review_sample import evaluate_calibration_review_sample
 from tools.mine_evidence_patterns import mine_evidence_patterns
 from tools.simulate_pattern_release import simulate_pattern_release
@@ -106,6 +107,8 @@ def run_calibration_cycle(
     rule_candidates_md = out_dir / "pattern_rule_candidates.md"
     summary_json = out_dir / "calibration_cycle_summary.json"
     summary_md = out_dir / "calibration_cycle_summary.md"
+    status_json = out_dir / "calibration_status.json"
+    status_md = out_dir / "calibration_status.md"
 
     recall_report = mine_evidence_patterns(
         balance_json=labeled_eval_json,
@@ -280,6 +283,8 @@ def run_calibration_cycle(
             "rule_candidates_md": str(rule_candidates_md) if filled_sample else "",
             "summary_json": str(summary_json),
             "summary_md": str(summary_md),
+            "status_json": str(status_json),
+            "status_md": str(status_md),
         },
         "recall_recommendations": recall_report.get("recommendations", []),
         "precision_recommendations": precision_report.get("recommendations", []),
@@ -298,6 +303,16 @@ def run_calibration_cycle(
     }
     summary_json.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
     summary_md.write_text(_render_markdown(report), encoding="utf-8")
+    status_report = build_calibration_status_report(
+        calibration_cycle_json=summary_json,
+        balance_report_json=balance_report_json,
+        threshold_boundary_json=threshold_boundary_json,
+        sample_eval_json=filled_eval_json if filled_sample else eval_json,
+        output_json=status_json,
+        output_md=status_md,
+    )
+    report["calibration_status"] = status_report
+    summary_json.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
     return report
 
 

@@ -43,6 +43,7 @@ from tools.apply_agent_optimizations import apply_agent_optimizations
 from tools.evaluate_workflow_balance import evaluate_balance, evaluate_balance_from_details
 from tools.build_balance_report import build_balance_report
 from tools.build_calibration_review_sample import build_calibration_review_sample
+from tools.build_calibration_status_report import build_calibration_status_report
 from tools.evaluate_calibration_review_sample import evaluate_calibration_review_sample
 from tools.mine_evidence_patterns import mine_evidence_patterns
 from tools.run_calibration_cycle import run_calibration_cycle
@@ -4515,6 +4516,8 @@ class OperationalCommandTests(unittest.TestCase):
                 "sample_xlsx": (output_dir / "pattern_validation_sample_50.xlsx").exists(),
                 "eval_json": (output_dir / "pattern_validation_sample_50_eval_empty.json").exists(),
                 "summary_md": (output_dir / "calibration_cycle_summary.md").exists(),
+                "status_json": (output_dir / "calibration_status.json").exists(),
+                "status_md": (output_dir / "calibration_status.md").exists(),
             }
 
         self.assertEqual(report["summary"]["sample_rows"], 2)
@@ -4528,6 +4531,8 @@ class OperationalCommandTests(unittest.TestCase):
         self.assertTrue(output_exists["sample_xlsx"])
         self.assertTrue(output_exists["eval_json"])
         self.assertTrue(output_exists["summary_md"])
+        self.assertTrue(output_exists["status_json"])
+        self.assertTrue(output_exists["status_md"])
         self.assertEqual(report["summary"]["empty_eval_labeled_rows"], 0)
         self.assertIn("release_actionable_safe_patterns", report["summary"])
         self.assertEqual(report["summary"]["actionable_release_validation_rows"], 1)
@@ -4547,6 +4552,7 @@ class OperationalCommandTests(unittest.TestCase):
         )
         self.assertIn("balance_report", report)
         self.assertIn("threshold_boundary", report)
+        self.assertEqual(report["calibration_status"]["summary"]["workflow_status"], "not_converged_needs_human_labels")
         self.assertEqual(report["inputs"]["pattern_release_jsons"], [str(pattern_release)])
         self.assertEqual(report["inputs"]["preferred_pattern_release_json"], str(pattern_release))
         self.assertEqual(report["inputs"]["policy_report_json"], str(policy_report))
@@ -4705,6 +4711,7 @@ class OperationalCommandTests(unittest.TestCase):
         self.assertIn("Filled Lane Recommendations", summary_text)
         self.assertIn("Filled Pattern Recommendations", summary_text)
         self.assertIn("Filled Candidate Rule Export", summary_text)
+        self.assertEqual(report["calibration_status"]["summary"]["workflow_status"], "partially_converged_keep_review_lanes")
 
     def test_evaluate_calibration_review_sample_turns_labels_into_rule_guidance(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -4922,6 +4929,132 @@ class OperationalCommandTests(unittest.TestCase):
         self.assertEqual(report["lane_recommendations"][0]["recommendation"], "candidate_for_review_downgrade")
         self.assertEqual(report["lane_recommendations"][0]["candidate_correct_rows"], 5)
         self.assertIn("spot-check", report["lane_recommendations"][0]["required_action"])
+
+    def test_build_calibration_status_report_requires_labels_before_converging(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            cycle = root / "cycle.json"
+            balance = root / "balance.json"
+            threshold = root / "threshold.json"
+            sample_eval = root / "sample_eval.json"
+            out_md = root / "status.md"
+            cycle.write_text(
+                json.dumps(
+                    {
+                        "summary": {
+                            "recommended_global_accept_threshold": 75,
+                            "recommended_second_pass_threshold": 75,
+                            "recommended_pattern_release": "narrow_pattern_release_candidate",
+                            "pattern_release_correct_rows": 4,
+                            "pattern_release_wrong_rows": 0,
+                            "protected_review_lane_count": 5,
+                            "filled_eval_labeled_rows": None,
+                        }
+                    }
+                ),
+                encoding="utf-8",
+            )
+            balance.write_text(
+                json.dumps(
+                    {
+                        "summary": {
+                            "protected_review_lane_count": 5,
+                            "recommended_pattern_release": "narrow_pattern_release_candidate",
+                            "pattern_release_correct_rows": 4,
+                            "pattern_release_wrong_rows": 0,
+                        }
+                    }
+                ),
+                encoding="utf-8",
+            )
+            threshold.write_text(
+                json.dumps(
+                    {
+                        "summary": {
+                            "recommended_global_accept_threshold": 75,
+                            "recommended_second_pass_threshold": 75,
+                            "global_threshold_change": "keep_current",
+                            "selected_actionable_correct_rows": 4,
+                            "selected_actionable_wrong_rows": 0,
+                        }
+                    }
+                ),
+                encoding="utf-8",
+            )
+            sample_eval.write_text(
+                json.dumps(
+                    {
+                        "summary": {
+                            "sample_rows": 48,
+                            "labeled_rows": 0,
+                            "decisive_rows": 0,
+                            "lane_needs_more_label_rows": 7,
+                        }
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            report = build_calibration_status_report(
+                calibration_cycle_json=cycle,
+                balance_report_json=balance,
+                threshold_boundary_json=threshold,
+                sample_eval_json=sample_eval,
+                output_md=out_md,
+            )
+            md_text = out_md.read_text(encoding="utf-8")
+
+        self.assertEqual(report["summary"]["workflow_status"], "not_converged_needs_human_labels")
+        self.assertEqual(report["summary"]["threshold_status"], "stable_keep_current")
+        self.assertEqual(report["summary"]["pattern_release_status"], "guarded_candidate")
+        self.assertEqual(report["summary"]["review_lane_status"], "needs_human_labels")
+        self.assertIn("fill_calibration_sample", {item["id"] for item in report["open_requirements"]})
+        self.assertIn("Fill the latest calibration XLSX", md_text)
+
+    def test_build_calibration_status_report_flags_candidate_changes_after_labels(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            cycle = root / "cycle.json"
+            sample_eval = root / "sample_eval.json"
+            cycle.write_text(
+                json.dumps(
+                    {
+                        "summary": {
+                            "recommended_global_accept_threshold": 75,
+                            "recommended_second_pass_threshold": 75,
+                            "filled_eval_labeled_rows": 8,
+                            "filled_eval_decisive_rows": 8,
+                            "recommended_pattern_release": "narrow_pattern_release_candidate",
+                            "pattern_release_correct_rows": 4,
+                            "pattern_release_wrong_rows": 0,
+                        }
+                    }
+                ),
+                encoding="utf-8",
+            )
+            sample_eval.write_text(
+                json.dumps(
+                    {
+                        "summary": {
+                            "labeled_rows": 8,
+                            "decisive_rows": 8,
+                            "lane_candidate_for_change_rows": 1,
+                            "lane_keep_review_rows": 0,
+                            "lane_needs_more_label_rows": 0,
+                        }
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            report = build_calibration_status_report(
+                calibration_cycle_json=cycle,
+                sample_eval_json=sample_eval,
+            )
+
+        self.assertEqual(report["summary"]["workflow_status"], "candidate_changes_require_regression")
+        self.assertEqual(report["summary"]["review_lane_status"], "candidate_for_downgrade")
+        self.assertIn("lane_downgrade_candidate", {item["id"] for item in report["open_requirements"]})
 
     def test_scoring_tries_www_variant_before_giving_up_on_candidate(self):
         config = load_config("config/scoring.json")
