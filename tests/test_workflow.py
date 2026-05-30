@@ -44,6 +44,7 @@ from tools.evaluate_workflow_balance import evaluate_balance, evaluate_balance_f
 from tools.build_balance_report import build_balance_report
 from tools.build_calibration_label_gap_task import build_calibration_label_gap_task
 from tools.build_protected_lane_review_task import build_protected_lane_review_task
+from tools.build_convergence_audit import build_convergence_audit
 from tools.build_calibration_regression_cases import build_calibration_regression_cases
 from tools.build_calibration_review_sample import build_calibration_review_sample
 from tools.build_calibration_status_report import build_calibration_status_report
@@ -4613,6 +4614,8 @@ class OperationalCommandTests(unittest.TestCase):
                 "protected_lane_csv": (output_dir / "protected_lanes_next_review_task.csv").exists(),
                 "protected_lane_xlsx": (output_dir / "protected_lanes_next_review_task.xlsx").exists(),
                 "protected_lane_json": (output_dir / "protected_lanes_next_review_task_summary.json").exists(),
+                "convergence_audit_json": (output_dir / "convergence_audit.json").exists(),
+                "convergence_audit_md": (output_dir / "convergence_audit.md").exists(),
             }
             with (output_dir / "label_gap_high_priority_task.csv").open(newline="", encoding="utf-8") as f:
                 high_gap_rows = list(csv.DictReader(f))
@@ -4620,6 +4623,7 @@ class OperationalCommandTests(unittest.TestCase):
                 protected_lane_rows = list(csv.DictReader(f))
             status_data = json.loads((output_dir / "calibration_status.json").read_text(encoding="utf-8"))
             gate_data = json.loads((output_dir / "calibration_application_gates.json").read_text(encoding="utf-8"))
+            convergence_data = json.loads((output_dir / "convergence_audit.json").read_text(encoding="utf-8"))
 
         self.assertEqual(report["summary"]["sample_rows"], 2)
         self.assertTrue(output_exists["recall_json"])
@@ -4643,13 +4647,18 @@ class OperationalCommandTests(unittest.TestCase):
         self.assertTrue(output_exists["protected_lane_csv"])
         self.assertTrue(output_exists["protected_lane_xlsx"])
         self.assertTrue(output_exists["protected_lane_json"])
+        self.assertTrue(output_exists["convergence_audit_json"])
+        self.assertTrue(output_exists["convergence_audit_md"])
         self.assertEqual(report["summary"]["empty_eval_labeled_rows"], 0)
         self.assertIn("label_gap_task_rows", report["summary"])
         self.assertIn("label_gap_high_priority_task_rows", report["summary"])
         self.assertIn("protected_lanes_next_review_task_rows", report["summary"])
+        self.assertIn("convergence_state", report["summary"])
+        self.assertIn("threshold_decision", report["summary"])
         self.assertIn("label_gap_task", report)
         self.assertIn("label_gap_high_priority_task", report)
         self.assertIn("protected_lanes_next_review_task", report)
+        self.assertIn("convergence_audit", report)
         self.assertEqual(report["summary"]["label_gap_high_priority_task_rows"], 0)
         self.assertEqual(report["summary"]["protected_lanes_next_review_task_rows"], 2)
         self.assertEqual({row["provider_id"] for row in protected_lane_rows}, {"batch-recall", "batch-precision"})
@@ -4684,6 +4693,8 @@ class OperationalCommandTests(unittest.TestCase):
         self.assertEqual(report["summary"]["application_gate_allowed_count"], 0)
         self.assertIn("review_lane_change", gate_data["summary"]["not_allowed_gates"])
         self.assertEqual(report["calibration_status"]["summary"]["workflow_status"], "not_converged_needs_human_labels")
+        self.assertEqual(report["summary"]["convergence_state"], convergence_data["summary"]["convergence_state"])
+        self.assertEqual(report["summary"]["threshold_decision"], convergence_data["summary"]["threshold_decision"])
         self.assertEqual(report["inputs"]["pattern_release_jsons"], [str(pattern_release)])
         self.assertEqual(report["inputs"]["preferred_pattern_release_json"], str(pattern_release))
         self.assertEqual(report["inputs"]["policy_report_json"], str(policy_report))
@@ -6912,6 +6923,132 @@ class OperationalCommandTests(unittest.TestCase):
         self.assertIn("provider_detail_url", out_rows[0])
         self.assertIn("HYPERLINK", sheet_xml)
         self.assertEqual(summary["excluded_filled_rows"], 2)
+
+    def test_build_convergence_audit_keeps_75_75_and_routes_next_protected_labels(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            status = root / "status.json"
+            balance = root / "balance.json"
+            protected_summary = root / "protected_summary.json"
+            output_json = root / "convergence.json"
+            output_md = root / "convergence.md"
+            status.write_text(
+                json.dumps(
+                    {
+                        "summary": {
+                            "workflow_status": "partially_converged_keep_review_lanes",
+                            "threshold_status": "stable_keep_current",
+                            "pattern_release_status": "current_guarded_candidate",
+                            "review_lane_status": "protected_by_filled_labels",
+                            "recommended_global_accept_threshold": 75,
+                            "recommended_second_pass_threshold": 75,
+                            "filled_decisive_rows": 22,
+                            "protected_review_lane_count": 5,
+                            "pattern_release_correct_rows": 4,
+                            "pattern_release_wrong_rows": 0,
+                            "pattern_release_source_path": "prior/pattern_release.json",
+                            "pattern_release_source_kind": "supplied_prior",
+                            "regression_gate_status": "pass",
+                        },
+                        "application_gates": {
+                            "global_threshold_change": {
+                                "status": "not_recommended",
+                                "can_apply_now": False,
+                                "blockers": [],
+                                "reason": "Current evidence recommends keeping thresholds unchanged.",
+                            },
+                            "review_lane_change": {
+                                "status": "blocked",
+                                "can_apply_now": False,
+                                "blockers": [],
+                                "reason": "Filled labels still show a protected lane.",
+                            },
+                            "pattern_release_change": {
+                                "status": "candidate",
+                                "can_apply_now": False,
+                                "blockers": [],
+                                "reason": "Current spot checks are clean.",
+                                "required_action": "Keep guarded.",
+                            },
+                        },
+                        "next_actions": ["Keep protected review lanes active."],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            balance.write_text(
+                json.dumps(
+                    {
+                        "threshold_simulations": [
+                            {
+                                "threshold": 70,
+                                "overall_accuracy": 0.85,
+                                "auto_precision": 0.908,
+                                "official_recall": 0.908,
+                                "false_official_rows": 8,
+                                "over_rejected_rows": 7,
+                                "official_output_rows": 87,
+                            },
+                            {
+                                "threshold": 75,
+                                "overall_accuracy": 0.85,
+                                "auto_precision": 0.908,
+                                "official_recall": 0.908,
+                                "false_official_rows": 8,
+                                "over_rejected_rows": 7,
+                                "official_output_rows": 87,
+                            },
+                            {
+                                "threshold": 80,
+                                "overall_accuracy": 0.84,
+                                "auto_precision": 0.9167,
+                                "official_recall": 0.8851,
+                                "false_official_rows": 7,
+                                "over_rejected_rows": 9,
+                                "official_output_rows": 84,
+                            },
+                        ]
+                    }
+                ),
+                encoding="utf-8",
+            )
+            protected_summary.write_text(
+                json.dumps(
+                    {
+                        "task_rows": 32,
+                        "output_csv": "protected.csv",
+                        "output_xlsx": "protected.xlsx",
+                        "reason_counts": {
+                            "precision_low_confidence_auto_match": 10,
+                            "recall_unresolved_top_candidate": 10,
+                        },
+                        "agent_b_decision_counts": {"unsure": 29, "accept": 3},
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            report = build_convergence_audit(
+                status_json=status,
+                labeled_balance_json=balance,
+                protected_task_summary_json=protected_summary,
+                output_json=output_json,
+                output_md=output_md,
+            )
+            saved = json.loads(output_json.read_text(encoding="utf-8"))
+            md_text = output_md.read_text(encoding="utf-8")
+
+        self.assertEqual(report["summary"]["convergence_state"], "partially_converged_keep_protected_lanes")
+        self.assertEqual(report["summary"]["threshold_decision"], "keep_current_75_75")
+        self.assertTrue(report["summary"]["current_threshold_ties_best_accuracy"])
+        self.assertEqual(report["threshold"]["best_accuracy_thresholds"], [70, 75])
+        self.assertEqual(report["review_lanes"]["decision"], "keep_protected_lanes")
+        self.assertEqual(report["review_lanes"]["next_task_rows"], 32)
+        self.assertEqual(report["pattern_release"]["decision"], "guarded_candidate_requires_explicit_allow")
+        self.assertIn("protected.xlsx", report["next_actions"][1])
+        self.assertEqual(saved["summary"]["threshold_decision"], "keep_current_75_75")
+        self.assertIn("Convergence Audit", md_text)
+        self.assertIn("75/75", md_text)
 
     def test_scoring_tries_www_variant_before_giving_up_on_candidate(self):
         config = load_config("config/scoring.json")

@@ -12,6 +12,7 @@ from tools.build_calibration_review_sample import build_calibration_review_sampl
 from tools.build_balance_report import build_balance_report
 from tools.build_calibration_label_gap_task import build_calibration_label_gap_task
 from tools.build_protected_lane_review_task import build_protected_lane_review_task
+from tools.build_convergence_audit import build_convergence_audit
 from tools.build_calibration_regression_cases import build_calibration_regression_cases
 from tools.build_calibration_status_report import build_calibration_status_report
 from tools.check_calibration_application_gate import APPLICATION_GATES, check_calibration_application_gate
@@ -142,6 +143,8 @@ def run_calibration_cycle(
     status_md = out_dir / "calibration_status.md"
     application_gates_json = out_dir / "calibration_application_gates.json"
     application_gates_md = out_dir / "calibration_application_gates.md"
+    convergence_audit_json = out_dir / "convergence_audit.json"
+    convergence_audit_md = out_dir / "convergence_audit.md"
 
     recall_report = mine_evidence_patterns(
         balance_json=labeled_eval_json,
@@ -382,6 +385,8 @@ def run_calibration_cycle(
             "status_md": str(status_md),
             "application_gates_json": str(application_gates_json),
             "application_gates_md": str(application_gates_md),
+            "convergence_audit_json": str(convergence_audit_json),
+            "convergence_audit_md": str(convergence_audit_md),
         },
         "recall_recommendations": recall_report.get("recommendations", []),
         "precision_recommendations": precision_report.get("recommendations", []),
@@ -456,6 +461,18 @@ def run_calibration_cycle(
     report["summary"]["application_gate_allowed_count"] = application_gate_checks["summary"]["allowed_gate_count"]
     report["summary"]["application_gate_not_allowed_count"] = application_gate_checks["summary"]["not_allowed_gate_count"]
     report["summary"]["application_gate_candidate_count"] = application_gate_checks["summary"]["candidate_gate_count"]
+    convergence_audit = build_convergence_audit(
+        status_json=status_json,
+        labeled_balance_json=labeled_eval_json,
+        protected_task_summary_json=protected_lane_task_json,
+        output_json=convergence_audit_json,
+        output_md=convergence_audit_md,
+    )
+    report["convergence_audit"] = convergence_audit
+    report["summary"]["convergence_state"] = convergence_audit["summary"].get("convergence_state")
+    report["summary"]["threshold_decision"] = convergence_audit["summary"].get("threshold_decision")
+    report["summary"]["review_lane_decision"] = convergence_audit["summary"].get("review_lane_decision")
+    report["summary"]["pattern_release_decision"] = convergence_audit["summary"].get("pattern_release_decision")
     summary_json.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
     summary_md.write_text(_render_markdown(report), encoding="utf-8")
     return report
@@ -517,6 +534,10 @@ def _render_markdown(report: dict) -> str:
         f"- Regression gate status: {summary.get('regression_gate_status') or 'not_run'}",
         f"- Regression gate fail/unverified rows: {summary.get('regression_gate_fail_rows')}/{summary.get('regression_gate_unverified_rows')}",
         f"- Application gates allowed/not allowed/candidate: {summary.get('application_gate_allowed_count')}/{summary.get('application_gate_not_allowed_count')}/{summary.get('application_gate_candidate_count')}",
+        f"- Convergence state: {summary.get('convergence_state') or 'not_audited'}",
+        f"- Threshold decision: {summary.get('threshold_decision') or 'not_audited'}",
+        f"- Review-lane decision: {summary.get('review_lane_decision') or 'not_audited'}",
+        f"- Pattern-release decision: {summary.get('pattern_release_decision') or 'not_audited'}",
         "",
         "## Outputs",
         "",
