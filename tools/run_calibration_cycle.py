@@ -182,6 +182,7 @@ def run_calibration_cycle(
             rule_candidates_md,
         )
     pattern_recommendation_counts = _pattern_recommendation_counts(filled_eval)
+    lane_recommendation_counts = _lane_recommendation_counts(filled_eval)
     report = {
         "summary": {
             "recall_durable_safe_patterns": recall_report["summary"].get("durable_safe_patterns"),
@@ -227,6 +228,13 @@ def run_calibration_cycle(
             "filled_eval_labeled_rows": filled_eval.get("summary", {}).get("labeled_rows") if filled_eval else None,
             "filled_eval_decisive_rows": filled_eval.get("summary", {}).get("decisive_rows") if filled_eval else None,
             "filled_pattern_recommendation_counts": pattern_recommendation_counts,
+            "filled_lane_recommendation_counts": lane_recommendation_counts,
+            "filled_lane_candidate_for_change_count": filled_eval.get("summary", {}).get("lane_candidate_for_change_rows")
+            if filled_eval
+            else None,
+            "filled_lane_keep_review_count": filled_eval.get("summary", {}).get("lane_keep_review_rows")
+            if filled_eval
+            else None,
             "filled_rule_candidate_count": len(
                 filled_eval.get("pattern_rule_candidates", {}).get("candidate_for_rule", [])
             )
@@ -284,6 +292,7 @@ def run_calibration_cycle(
         "sample": sample_summary,
         "empty_evaluation_summary": empty_eval.get("summary", {}),
         "filled_evaluation_summary": filled_eval.get("summary", {}) if filled_eval else {},
+        "filled_lane_recommendations": filled_eval.get("lane_recommendations", []) if filled_eval else [],
         "filled_pattern_recommendations": filled_eval.get("pattern_recommendations", []) if filled_eval else [],
         "filled_pattern_rule_candidates": filled_eval.get("pattern_rule_candidates", {}) if filled_eval else {},
     }
@@ -331,6 +340,8 @@ def _render_markdown(report: dict) -> str:
         f"- Empty evaluation labeled rows: {summary['empty_eval_labeled_rows']}",
         f"- Filled evaluation labeled rows: {summary['filled_eval_labeled_rows']}",
         f"- Filled evaluation decisive rows: {summary['filled_eval_decisive_rows']}",
+        f"- Filled lane candidate-for-change count: {summary['filled_lane_candidate_for_change_count']}",
+        f"- Filled lane keep-review count: {summary['filled_lane_keep_review_count']}",
         f"- Filled candidate-for-rule patterns: {summary['filled_rule_candidate_count']}",
         f"- Filled rejected patterns: {summary['filled_rejected_pattern_count']}",
         "",
@@ -402,6 +413,25 @@ def _render_markdown(report: dict) -> str:
                     wrong=item.get("wrong_release_rows"),
                     accuracy=item.get("simulated_overall", {}).get("overall_accuracy"),
                     pattern=item.get("pattern"),
+                )
+            )
+    if report.get("filled_lane_recommendations"):
+        lines.extend(["", "## Filled Lane Recommendations", ""])
+        counts = summary.get("filled_lane_recommendation_counts", {})
+        for key, value in sorted(counts.items()):
+            lines.append(f"- {key}: {value}")
+        lines.append("")
+        for item in report["filled_lane_recommendations"][:20]:
+            lines.append(
+                "- {recommendation}: rows={rows}, decisive={decisive}, good={good}, bad={bad}, recall_useful={recall_useful}, recall_bad={recall_bad} :: {reason}".format(
+                    recommendation=item.get("recommendation"),
+                    rows=item.get("rows"),
+                    decisive=item.get("decisive_rows"),
+                    good=item.get("candidate_correct_rows"),
+                    bad=item.get("candidate_incorrect_rows"),
+                    recall_useful=item.get("recall_useful_rows"),
+                    recall_bad=item.get("recall_not_useful_rows"),
+                    reason=item.get("review_reason"),
                 )
             )
     if report.get("filled_pattern_recommendations"):
@@ -490,6 +520,15 @@ def _render_rule_candidates_markdown(rule_candidates: dict) -> str:
 def _pattern_recommendation_counts(filled_eval: dict) -> dict[str, int]:
     counts: dict[str, int] = {}
     for item in filled_eval.get("pattern_recommendations", []) if filled_eval else []:
+        recommendation = str(item.get("recommendation") or "")
+        if recommendation:
+            counts[recommendation] = counts.get(recommendation, 0) + 1
+    return counts
+
+
+def _lane_recommendation_counts(filled_eval: dict) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for item in filled_eval.get("lane_recommendations", []) if filled_eval else []:
         recommendation = str(item.get("recommendation") or "")
         if recommendation:
             counts[recommendation] = counts.get(recommendation, 0) + 1

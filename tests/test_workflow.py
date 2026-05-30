@@ -4698,8 +4698,11 @@ class OperationalCommandTests(unittest.TestCase):
         self.assertTrue(rule_candidates_json_exists)
         self.assertEqual(report["summary"]["filled_eval_labeled_rows"], 2)
         self.assertEqual(report["summary"]["filled_pattern_recommendation_counts"]["reject_pattern"], 1)
+        self.assertEqual(report["summary"]["filled_lane_recommendation_counts"]["keep_review_lane"], 1)
+        self.assertEqual(report["summary"]["filled_lane_keep_review_count"], 1)
         self.assertEqual(report["summary"]["filled_rejected_pattern_count"], 1)
         self.assertIn("Rejected Pattern", rule_candidates_md_text)
+        self.assertIn("Filled Lane Recommendations", summary_text)
         self.assertIn("Filled Pattern Recommendations", summary_text)
         self.assertIn("Filled Candidate Rule Export", summary_text)
 
@@ -4794,11 +4797,14 @@ class OperationalCommandTests(unittest.TestCase):
         self.assertEqual(report["summary"]["candidate_incorrect_rows"], 1)
         self.assertEqual(report["summary"]["recall_useful_rows"], 1)
         self.assertEqual(report["by_sample_reason"]["agent_b_accept_risky_lane"]["outcome_counts"]["candidate_incorrect"], 1)
+        self.assertEqual(report["lane_recommendations"][0]["recommendation"], "keep_review_lane")
+        self.assertEqual(report["lane_recommendations"][0]["review_reason"], "precision_generic_identity_term_risk")
         self.assertEqual(report["pattern_recommendations"][0]["pattern"], "has:schema_org_organization_seen")
         self.assertEqual(report["pattern_recommendations"][0]["recommendation"], "needs_more_labels")
         self.assertEqual(report["pattern_rule_candidates"]["needs_more_labels"][0]["pattern"], "has:schema_org_organization_seen")
         self.assertIn("Keep this pattern in calibration samples", report["pattern_rule_candidates"]["needs_more_labels"][0]["required_action"])
         self.assertIn("Keep AgentB risky accepts in manual review", md_text)
+        self.assertIn("Review Lane Guidance", md_text)
         self.assertIn("Pattern Validation", md_text)
         self.assertIn("Candidate Rule Export", md_text)
         self.assertTrue(out_json_exists)
@@ -4883,6 +4889,39 @@ class OperationalCommandTests(unittest.TestCase):
         self.assertEqual(candidates[0]["supporting_rows"], 5)
         self.assertEqual(candidates[0]["blocking_rows"], 0)
         self.assertIn("narrow recall recovery rule", candidates[0]["required_action"])
+
+    def test_evaluate_calibration_review_sample_exports_lane_downgrade_candidates(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            sample = root / "lane_sample.csv"
+            rows = []
+            for idx in range(5):
+                rows.append(
+                    {
+                        "provider_id": f"p-{idx}",
+                        "provider_name": f"Clean {idx}",
+                        "sample_reason": "second_pass_threshold_label",
+                        "pattern_scope": "",
+                        "pattern_match": "",
+                        "review_reason": "precision_second_pass_accepted_lt70",
+                        "agent_b_decision": "accept",
+                        "reason_for_unsure": "",
+                        "official_url": f"https://clean{idx}.example",
+                        "candidate_url": f"https://clean{idx}.example",
+                        "manual_decision": "accept",
+                        "manual_url": "",
+                        "notes": "",
+                    }
+                )
+            _write_test_csv(sample, rows)
+
+            report = evaluate_calibration_review_sample(sample=sample)
+
+        self.assertEqual(report["summary"]["lane_candidate_for_change_rows"], 1)
+        self.assertEqual(report["summary"]["lane_keep_review_rows"], 0)
+        self.assertEqual(report["lane_recommendations"][0]["recommendation"], "candidate_for_review_downgrade")
+        self.assertEqual(report["lane_recommendations"][0]["candidate_correct_rows"], 5)
+        self.assertIn("spot-check", report["lane_recommendations"][0]["required_action"])
 
     def test_scoring_tries_www_variant_before_giving_up_on_candidate(self):
         config = load_config("config/scoring.json")

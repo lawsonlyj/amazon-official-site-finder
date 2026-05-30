@@ -74,15 +74,23 @@ def evaluate_calibration_review_sample(
     }
     pattern_recommendations = _pattern_recommendations(details)
     pattern_rule_candidates = _pattern_rule_candidates(pattern_recommendations)
+    lane_recommendations = _lane_recommendations(details)
     summary["pattern_rule_candidate_rows"] = len(pattern_rule_candidates["candidate_for_rule"])
     summary["pattern_rejected_rows"] = len(pattern_rule_candidates["reject_pattern"])
     summary["pattern_needs_more_label_rows"] = len(pattern_rule_candidates["needs_more_labels"])
+    lane_counts = Counter(row["recommendation"] for row in lane_recommendations)
+    summary["lane_keep_review_rows"] = lane_counts.get("keep_review_lane", 0)
+    summary["lane_candidate_for_change_rows"] = lane_counts.get("candidate_for_review_downgrade", 0) + lane_counts.get(
+        "candidate_for_narrow_recall_rule", 0
+    )
+    summary["lane_needs_more_label_rows"] = lane_counts.get("needs_more_labels", 0)
     report = {
         "summary": summary,
         "by_sample_reason": _group_stats(details, "sample_reason"),
         "by_review_reason": _group_stats(details, "review_reason"),
         "by_agent_b_decision": _group_stats(details, "agent_b_decision"),
         "by_pattern_match": _group_stats(details, "pattern_match"),
+        "lane_recommendations": lane_recommendations,
         "pattern_recommendations": pattern_recommendations,
         "pattern_rule_candidates": pattern_rule_candidates,
         "recommendations": _recommendations(details),
@@ -311,6 +319,98 @@ def _pattern_recommendations(details: list[dict[str, str]]) -> list[dict]:
     return out
 
 
+def _lane_recommendations(details: list[dict[str, str]]) -> list[dict]:
+    groups: dict[str, list[dict[str, str]]] = defaultdict(list)
+    for row in details:
+        if row.get("review_reason"):
+            groups[row["review_reason"]].append(row)
+    out = []
+    for reason, rows in sorted(groups.items()):
+        labeled = [row for row in rows if row["normalized_decision"]]
+        decisive = [row for row in labeled if row["normalized_decision"] != "unsure"]
+        outcomes = Counter(row["calibration_outcome"] for row in decisive)
+        lane_kind = _first(rows[0], "lane_kind")
+        recommendation, explanation, required_action = _lane_decision(reason, lane_kind, outcomes, len(decisive))
+        out.append(
+            {
+                "review_reason": reason,
+                "lane_kind": lane_kind,
+                "rows": len(rows),
+                "labeled_rows": len(labeled),
+                "decisive_rows": len(decisive),
+                "candidate_correct_rows": outcomes.get("candidate_correct", 0),
+                "candidate_incorrect_rows": outcomes.get("candidate_incorrect", 0),
+                "recall_useful_rows": outcomes.get("recall_candidate_useful", 0),
+                "recall_not_useful_rows": outcomes.get("recall_candidate_not_useful", 0),
+                "manual_unsure_rows": Counter(row["calibration_outcome"] for row in labeled).get("manual_unsure", 0),
+                "recommendation": recommendation,
+                "reason": explanation,
+                "required_action": required_action,
+            }
+        )
+    out.sort(
+        key=lambda row: (
+            {"keep_review_lane": 0, "candidate_for_review_downgrade": 1, "candidate_for_narrow_recall_rule": 2, "needs_more_labels": 3}.get(
+                row["recommendation"], 9
+            ),
+            -row["decisive_rows"],
+            row["review_reason"],
+        )
+    )
+    return out
+
+
+def _lane_decision(reason: str, lane_kind: str, outcomes: Counter[str], decisive_rows: int) -> tuple[str, str, str]:
+    candidate_bad = outcomes.get("candidate_incorrect", 0)
+    candidate_good = outcomes.get("candidate_correct", 0)
+    recall_useful = outcomes.get("recall_candidate_useful", 0)
+    recall_bad = outcomes.get("recall_candidate_not_useful", 0)
+    if decisive_rows == 0:
+        return (
+            "needs_more_labels",
+            "No decisive labels for this review lane yet.",
+            "Keep this lane in calibration samples before changing routing.",
+        )
+    if lane_kind == "recall":
+        if recall_bad:
+            return (
+                "keep_review_lane",
+                "At least one labeled recall candidate was not useful.",
+                "Keep this recall lane manual-only and use good rows as evidence, not broad auto-release.",
+            )
+        if recall_useful >= 5:
+            return (
+                "candidate_for_narrow_recall_rule",
+                "Five or more decisive recall labels were useful with no blockers.",
+                "Mine the exact supporting evidence pattern and add regression tests before any recall release rule.",
+            )
+        return (
+            "needs_more_labels",
+            "Recall labels are supportive but below the five-label promotion threshold.",
+            "Keep this lane in calibration samples until it reaches five useful decisive labels with zero blockers.",
+        )
+    if candidate_bad:
+        return (
+            "keep_review_lane",
+            "At least one labeled candidate in this precision lane was wrong.",
+            "Keep this precision lane in manual review and add blocking regression fixtures for wrong rows.",
+        )
+    if candidate_good >= 5:
+        action = "Consider downgrading this lane to spot-check only after adding regression tests for the clean evidence pattern."
+        if reason == "precision_calibrated_pattern_release":
+            action = "Keep this as a sampled spot-check lane until it stays clean across another labeled batch."
+        return (
+            "candidate_for_review_downgrade",
+            "Five or more decisive precision labels were correct with no blockers.",
+            action,
+        )
+    return (
+        "needs_more_labels",
+        "Precision labels are clean so far but below the five-label promotion threshold.",
+        "Keep this lane in calibration samples before reducing manual review.",
+    )
+
+
 def _pattern_rule_candidates(pattern_recommendations: list[dict]) -> dict[str, list[dict]]:
     buckets = {
         "candidate_for_rule": [],
@@ -443,6 +543,22 @@ def _render_markdown(report: dict) -> str:
     for reason, stats in report["by_review_reason"].items():
         outcomes = ", ".join(f"{key}={value}" for key, value in stats["outcome_counts"].items()) or "none"
         lines.append(f"- {reason}: rows={stats['rows']}, labeled={stats['labeled_rows']}, outcomes=({outcomes})")
+    if report.get("lane_recommendations"):
+        lines.extend(["", "## Review Lane Guidance", ""])
+        for row in report["lane_recommendations"]:
+            lines.append(
+                "- {recommendation}: rows={rows}, decisive={decisive}, good={good}, bad={bad}, recall_useful={recall_useful}, recall_bad={recall_bad} :: {reason}".format(
+                    recommendation=row["recommendation"],
+                    rows=row["rows"],
+                    decisive=row["decisive_rows"],
+                    good=row["candidate_correct_rows"],
+                    bad=row["candidate_incorrect_rows"],
+                    recall_useful=row["recall_useful_rows"],
+                    recall_bad=row["recall_not_useful_rows"],
+                    reason=row["review_reason"],
+                )
+            )
+            lines.append(f"  Action: {row['required_action']}")
     if report.get("pattern_recommendations"):
         lines.extend(["", "## Pattern Validation", ""])
         for row in report["pattern_recommendations"][:25]:
