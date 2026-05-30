@@ -577,21 +577,28 @@ def _has_verified_second_pass_reason(result: dict, *, min_score: int) -> bool:
         reasons = set(candidate.get("reasons") or [])
         source = candidate.get("source", "")
         page_ok = bool(reasons & {"http_ok_home", "http_ok_supporting_page"})
-        domain_identity = bool(
+        strong_domain_identity = bool(
             reasons
             & {
                 "domain_exact_provider_slug",
                 "domain_contains_provider_slug",
                 "domain_fuzzy_provider_match",
             }
-        ) or any(reason.startswith("domain_token_match:") for reason in reasons)
-        page_identity = bool(
+        )
+        token_domain_identity = any(reason.startswith("domain_token_match:") for reason in reasons)
+        domain_identity = strong_domain_identity or token_domain_identity
+        strong_page_identity = bool(
             reasons
             & {
                 "page_contains_exact_provider_name",
-                "page_contains_provider_name_tokens",
                 "page_fuzzy_provider_name_match",
                 "listing_logo_visual_match",
+            }
+        )
+        page_identity = strong_page_identity or bool(
+            reasons
+            & {
+                "page_contains_provider_name_tokens",
             }
         )
         search_identity = bool(
@@ -614,7 +621,13 @@ def _has_verified_second_pass_reason(result: dict, *, min_score: int) -> bool:
         top_result = "top_search_result" in reasons
         search_source = _is_search_evidence_source(source)
 
-        if page_ok and domain_identity and (page_identity or service_identity or (search_identity and official_query)):
+        if page_ok and strong_domain_identity and (
+            page_identity or service_identity or (search_identity and official_query)
+        ):
+            return True
+        if page_ok and token_domain_identity and (strong_page_identity or service_identity) and (
+            search_identity or official_query or top_result
+        ):
             return True
         if page_ok and service_identity and (page_identity or search_identity) and domain_identity:
             return True

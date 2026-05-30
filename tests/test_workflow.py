@@ -6943,6 +6943,54 @@ class OperationalCommandTests(unittest.TestCase):
         self.assertFalse(_accepted(guessed_58, config, 70))
         self.assertFalse(_accepted(platform_58, config, 70))
 
+    def test_second_pass_rejects_subthreshold_token_only_name_match(self):
+        config = load_config()
+        token_only_name_match = {
+            "official_url": "https://www.studiodelfiume.it/",
+            "status": "needs_review",
+            "confidence": "66",
+            "evidence_summary": "domain_token_match:del,fiume; page_contains_provider_name_tokens; page_contains_some_service_keywords; search_result_contains_name_tokens; top_search_result",
+            "candidates": [
+                {
+                    "url": "https://www.studiodelfiume.it/",
+                    "reject": False,
+                    "source": "exa",
+                    "reasons": [
+                        "domain_token_match:del,fiume",
+                        "http_ok_home",
+                        "page_contains_provider_name_tokens",
+                        "page_contains_some_service_keywords",
+                        "search_result_contains_name_tokens",
+                        "top_search_result",
+                    ],
+                }
+            ],
+        }
+        fuzzy_with_service = {
+            "official_url": "https://www.expertsecretsacademy.com/",
+            "status": "needs_review",
+            "confidence": "66",
+            "evidence_summary": "domain_token_match:experts,secrets,academy; page_fuzzy_provider_name_match; page_contains_amazon_service_keywords; search_result_contains_name_tokens; top_search_result",
+            "candidates": [
+                {
+                    "url": "https://www.expertsecretsacademy.com/",
+                    "reject": False,
+                    "source": "second_pass_top_candidate",
+                    "reasons": [
+                        "domain_token_match:experts,secrets,academy",
+                        "http_ok_home",
+                        "page_fuzzy_provider_name_match",
+                        "page_contains_amazon_service_keywords",
+                        "search_result_contains_name_tokens",
+                        "top_search_result",
+                    ],
+                }
+            ],
+        }
+
+        self.assertFalse(_accepted(token_only_name_match, config, 75))
+        self.assertTrue(_accepted(fuzzy_with_service, config, 75))
+
     def test_second_pass_rejects_borderline_without_strong_evidence_and_parking_urls(self):
         config = load_config()
         weak_74 = {
