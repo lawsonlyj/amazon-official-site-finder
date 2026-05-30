@@ -115,6 +115,8 @@ def run_calibration_cycle(
     rule_candidates_md = out_dir / "pattern_rule_candidates.md"
     label_gap_csv = out_dir / "label_gap_task.csv"
     label_gap_xlsx = out_dir / "label_gap_task.xlsx"
+    label_gap_high_csv = out_dir / "label_gap_high_priority_task.csv"
+    label_gap_high_xlsx = out_dir / "label_gap_high_priority_task.xlsx"
     summary_json = out_dir / "calibration_cycle_summary.json"
     summary_md = out_dir / "calibration_cycle_summary.md"
     status_json = out_dir / "calibration_status.json"
@@ -303,6 +305,8 @@ def run_calibration_cycle(
             "rule_candidates_md": str(rule_candidates_md) if filled_eval_sample else "",
             "label_gap_csv": str(label_gap_csv),
             "label_gap_xlsx": str(label_gap_xlsx),
+            "label_gap_high_priority_csv": str(label_gap_high_csv),
+            "label_gap_high_priority_xlsx": str(label_gap_high_xlsx),
             "summary_json": str(summary_json),
             "summary_md": str(summary_md),
             "status_json": str(status_json),
@@ -340,10 +344,20 @@ def run_calibration_cycle(
         output_csv=label_gap_csv,
         output_xlsx=label_gap_xlsx,
     )
+    high_priority_label_gap_task = build_calibration_label_gap_task(
+        status_json=status_json,
+        sample_csv=sample_csv,
+        filled_sample=filled_eval_sample,
+        output_csv=label_gap_high_csv,
+        output_xlsx=label_gap_high_xlsx,
+        priorities=["high"],
+    )
     report["calibration_status"] = status_report
     report["label_gap_task"] = label_gap_task
+    report["label_gap_high_priority_task"] = high_priority_label_gap_task
     report["summary"]["label_gap_task_rows"] = label_gap_task.get("task_rows")
     report["summary"]["label_gap_high_priority_rows"] = label_gap_task.get("priority_counts", {}).get("high", 0)
+    report["summary"]["label_gap_high_priority_task_rows"] = high_priority_label_gap_task.get("task_rows")
     summary_json.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
     summary_md.write_text(_render_markdown(report), encoding="utf-8")
     return report
@@ -383,6 +397,7 @@ def _render_markdown(report: dict) -> str:
         f"- Sample rows: {summary['sample_rows']}",
         f"- Label-gap task rows: {summary.get('label_gap_task_rows')}",
         f"- Label-gap high-priority rows: {summary.get('label_gap_high_priority_rows')}",
+        f"- Label-gap high-priority task rows: {summary.get('label_gap_high_priority_task_rows')}",
         f"- Actionable release validation rows: {summary['actionable_release_validation_rows']}",
         f"- Pattern candidate validation rows: {summary['pattern_validation_rows']}",
         f"- Pattern control validation rows: {summary['pattern_control_rows']}",

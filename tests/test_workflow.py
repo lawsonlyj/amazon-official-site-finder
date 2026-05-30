@@ -4523,7 +4523,11 @@ class OperationalCommandTests(unittest.TestCase):
                 "status_md": (output_dir / "calibration_status.md").exists(),
                 "label_gap_csv": (output_dir / "label_gap_task.csv").exists(),
                 "label_gap_xlsx": (output_dir / "label_gap_task.xlsx").exists(),
+                "label_gap_high_csv": (output_dir / "label_gap_high_priority_task.csv").exists(),
+                "label_gap_high_xlsx": (output_dir / "label_gap_high_priority_task.xlsx").exists(),
             }
+            with (output_dir / "label_gap_high_priority_task.csv").open(newline="", encoding="utf-8") as f:
+                high_gap_rows = list(csv.DictReader(f))
 
         self.assertEqual(report["summary"]["sample_rows"], 2)
         self.assertTrue(output_exists["recall_json"])
@@ -4540,9 +4544,15 @@ class OperationalCommandTests(unittest.TestCase):
         self.assertTrue(output_exists["status_md"])
         self.assertTrue(output_exists["label_gap_csv"])
         self.assertTrue(output_exists["label_gap_xlsx"])
+        self.assertTrue(output_exists["label_gap_high_csv"])
+        self.assertTrue(output_exists["label_gap_high_xlsx"])
         self.assertEqual(report["summary"]["empty_eval_labeled_rows"], 0)
         self.assertIn("label_gap_task_rows", report["summary"])
+        self.assertIn("label_gap_high_priority_task_rows", report["summary"])
         self.assertIn("label_gap_task", report)
+        self.assertIn("label_gap_high_priority_task", report)
+        self.assertEqual(report["summary"]["label_gap_high_priority_task_rows"], 0)
+        self.assertEqual(high_gap_rows, [])
         self.assertIn("release_actionable_safe_patterns", report["summary"])
         self.assertEqual(report["summary"]["actionable_release_validation_rows"], 1)
         self.assertEqual(report["summary"]["recommended_global_accept_threshold"], DEFAULT_SECOND_PASS_ACCEPT_THRESHOLD)
@@ -5552,8 +5562,17 @@ class OperationalCommandTests(unittest.TestCase):
                 output_csv=output_csv,
                 output_xlsx=output_xlsx,
             )
+            high_only_csv = root / "label_gap_high.csv"
+            high_only_summary = build_calibration_label_gap_task(
+                status_json=status,
+                filled_sample=filled,
+                output_csv=high_only_csv,
+                priorities=["high"],
+            )
             with output_csv.open(newline="", encoding="utf-8") as f:
                 out_rows = list(csv.DictReader(f))
+            with high_only_csv.open(newline="", encoding="utf-8") as f:
+                high_only_rows = list(csv.DictReader(f))
             xlsx_exists = output_xlsx.exists()
 
         self.assertEqual(summary["task_rows"], 7)
@@ -5571,6 +5590,8 @@ class OperationalCommandTests(unittest.TestCase):
         self.assertEqual(spot_rows[0]["label_evidence_source_kind"], "supplied_prior")
         self.assertEqual(spot_rows[0]["label_evidence_source_path"], "prior/pattern_release.json")
         self.assertIn("blocks wider automatic release", spot_rows[0]["label_decision_hint"])
+        self.assertEqual(high_only_summary["task_rows"], 4)
+        self.assertEqual({row["label_priority"] for row in high_only_rows}, {"high"})
 
     def test_scoring_tries_www_variant_before_giving_up_on_candidate(self):
         config = load_config("config/scoring.json")
