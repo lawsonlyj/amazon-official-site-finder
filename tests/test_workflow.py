@@ -3903,6 +3903,7 @@ class OperationalCommandTests(unittest.TestCase):
             labeled_agent_b = root / "labeled_agent_b.csv"
             review = root / "review.csv"
             batch_agent_b = root / "batch_agent_b.csv"
+            policy_report = root / "policy_report.json"
             output_dir = root / "calibration"
             balance_json.write_text(
                 json.dumps(
@@ -4045,6 +4046,19 @@ class OperationalCommandTests(unittest.TestCase):
                     },
                 ],
             )
+            policy_report.write_text(
+                json.dumps(
+                    {
+                        "summary": {
+                            "recommended_first_pass_threshold": 75,
+                            "recommended_second_pass_threshold": 75,
+                            "raw_agent_b_recall_release": "manual_only",
+                            "calibrated_pattern_release": "enabled_with_guard_no_batch_release",
+                        }
+                    }
+                ),
+                encoding="utf-8",
+            )
 
             report = run_calibration_cycle(
                 labeled_eval_json=balance_json,
@@ -4054,6 +4068,7 @@ class OperationalCommandTests(unittest.TestCase):
                 output_dir=output_dir,
                 max_rows=2,
                 max_per_pattern=1,
+                policy_report_json=policy_report,
             )
             output_exists = {
                 "recall_json": (output_dir / "evidence_patterns_recall.json").exists(),
@@ -4079,7 +4094,9 @@ class OperationalCommandTests(unittest.TestCase):
         self.assertIn("release_actionable_safe_patterns", report["summary"])
         self.assertIn("actionable_release_validation_rows", report["summary"])
         self.assertEqual(report["summary"]["recommended_global_accept_threshold"], DEFAULT_SECOND_PASS_ACCEPT_THRESHOLD)
+        self.assertEqual(report["summary"]["calibrated_pattern_release"], "enabled_with_guard_no_batch_release")
         self.assertIn("threshold_boundary", report)
+        self.assertEqual(report["inputs"]["policy_report_json"], str(policy_report))
 
     def test_run_calibration_cycle_can_evaluate_filled_pattern_sample(self):
         with tempfile.TemporaryDirectory() as tmp:

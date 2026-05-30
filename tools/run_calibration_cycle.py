@@ -28,6 +28,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--min-support", type=int, default=2)
     parser.add_argument("--max-pattern-size", type=int, default=3)
     parser.add_argument("--filled-sample", help="Optional filled calibration sample CSV/XLSX to evaluate in the same cycle.")
+    parser.add_argument(
+        "--policy-report-json",
+        help="Optional final release policy JSON from tools/build_release_policy_report.py.",
+    )
     args = parser.parse_args(argv)
 
     report = run_calibration_cycle(
@@ -43,6 +47,7 @@ def main(argv: list[str] | None = None) -> int:
         min_support=args.min_support,
         max_pattern_size=args.max_pattern_size,
         filled_sample=args.filled_sample,
+        policy_report_json=args.policy_report_json,
     )
     print(json.dumps(report["summary"], ensure_ascii=False, indent=2))
     return 0
@@ -62,6 +67,7 @@ def run_calibration_cycle(
     min_support: int = 2,
     max_pattern_size: int = 3,
     filled_sample: str | Path | None = None,
+    policy_report_json: str | Path | None = None,
 ) -> dict:
     out_dir = Path(output_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -117,6 +123,7 @@ def run_calibration_cycle(
     threshold_boundary = build_threshold_boundary_report(
         labeled_eval_json=labeled_eval_json,
         pattern_release_json=release_sim_json,
+        policy_report_json=policy_report_json,
         output_json=threshold_boundary_json,
         output_md=threshold_boundary_md,
     )
@@ -202,6 +209,7 @@ def run_calibration_cycle(
             "review_csv": str(review_csv),
             "batch_agent_b_csv": str(batch_agent_b_csv),
             "filled_sample": str(filled_sample or ""),
+            "policy_report_json": str(policy_report_json or ""),
         },
         "outputs": {
             "recall_json": str(recall_json),
