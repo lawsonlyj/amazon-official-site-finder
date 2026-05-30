@@ -4160,6 +4160,79 @@ class OperationalCommandTests(unittest.TestCase):
             summary["pattern_match_counts"]["agent_b_score<45 AND has:schema_org_organization_seen"], 1
         )
 
+    def test_build_calibration_review_sample_respects_reason_cap_when_refilling(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            review = root / "review.csv"
+            agent_b = root / "agent_b.csv"
+            output_csv = root / "sample.csv"
+            review_rows = []
+            agent_rows = []
+            for idx in range(5):
+                provider_id = f"low-{idx}"
+                review_rows.append(
+                    {
+                        "provider_id": provider_id,
+                        "provider_name": f"Low {idx}",
+                        "provider_detail_url": f"https://amazon.example/{provider_id}",
+                        "official_url": f"https://low{idx}.example",
+                        "official_domain": f"low{idx}.example",
+                        "top_candidate_url": "",
+                        "top_candidate_domain": "",
+                        "review_reason": "precision_low_confidence_auto_match",
+                    }
+                )
+                agent_rows.append(
+                    {
+                        "provider_id": provider_id,
+                        "provider_name": f"Low {idx}",
+                        "candidate_url": f"https://low{idx}.example",
+                        "candidate_domain": f"low{idx}.example",
+                        "agent_b_decision": "unsure",
+                        "confidence": "70",
+                        "evidence_score": "70",
+                        "reason_for_unsure": "",
+                    }
+                )
+            review_rows.append(
+                {
+                    "provider_id": "recall",
+                    "provider_name": "Recall",
+                    "provider_detail_url": "https://amazon.example/recall",
+                    "official_url": "",
+                    "official_domain": "",
+                    "top_candidate_url": "https://recall.example",
+                    "top_candidate_domain": "recall.example",
+                    "review_reason": "recall_unresolved_top_candidate",
+                }
+            )
+            agent_rows.append(
+                {
+                    "provider_id": "recall",
+                    "provider_name": "Recall",
+                    "candidate_url": "https://recall.example",
+                    "candidate_domain": "recall.example",
+                    "agent_b_decision": "unsure",
+                    "confidence": "69",
+                    "evidence_score": "50",
+                    "reason_for_unsure": "recall_candidate_needs_human_confirmation",
+                }
+            )
+            _write_test_csv(review, review_rows)
+            _write_test_csv(agent_b, agent_rows)
+
+            summary = build_calibration_review_sample(
+                review_csv=review,
+                agent_b_csv=agent_b,
+                output_csv=output_csv,
+                max_rows=6,
+                max_per_reason=2,
+            )
+
+        self.assertLessEqual(summary["reason_counts"]["precision_low_confidence_auto_match"], 2)
+        self.assertLessEqual(summary["reason_counts"]["recall_unresolved_top_candidate"], 2)
+        self.assertEqual(summary["sample_rows"], 3)
+
     def test_run_calibration_cycle_writes_patterns_sample_and_empty_eval(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -4202,7 +4275,62 @@ class OperationalCommandTests(unittest.TestCase):
                                 "outcome": "correct_official",
                                 "manual_review_reason": "precision_low_confidence_auto_match",
                             },
-                        ]
+                        ],
+                        "manual_review_lanes": [
+                            {
+                                "review_reason": "recall_unresolved_top_candidate",
+                                "review_task_rows": 1,
+                                "labeled_rows": 1,
+                                "false_official_rows": 0,
+                                "over_rejected_rows": 1,
+                                "correct_official_rows": 0,
+                                "correct_no_official_rows": 0,
+                                "risk_rows": 1,
+                            },
+                            {
+                                "review_reason": "precision_low_confidence_auto_match",
+                                "review_task_rows": 1,
+                                "labeled_rows": 1,
+                                "false_official_rows": 1,
+                                "over_rejected_rows": 0,
+                                "correct_official_rows": 0,
+                                "correct_no_official_rows": 0,
+                                "risk_rows": 1,
+                            },
+                            {
+                                "review_reason": "precision_calibrated_pattern_release",
+                                "review_task_rows": 1,
+                                "labeled_rows": 3,
+                                "false_official_rows": 0,
+                                "over_rejected_rows": 0,
+                                "correct_official_rows": 3,
+                                "correct_no_official_rows": 0,
+                                "risk_rows": 0,
+                            },
+                        ],
+                        "manual_review_lane_drop_simulations": [
+                            {
+                                "drop_review_reason": "recall_unresolved_top_candidate",
+                                "manual_review_rows_removed": 1,
+                                "known_false_official_missed_if_dropped": 0,
+                                "known_over_rejected_missed_if_dropped": 1,
+                                "known_correct_reviews_removed_if_dropped": 0,
+                            },
+                            {
+                                "drop_review_reason": "precision_low_confidence_auto_match",
+                                "manual_review_rows_removed": 1,
+                                "known_false_official_missed_if_dropped": 1,
+                                "known_over_rejected_missed_if_dropped": 0,
+                                "known_correct_reviews_removed_if_dropped": 0,
+                            },
+                            {
+                                "drop_review_reason": "precision_calibrated_pattern_release",
+                                "manual_review_rows_removed": 1,
+                                "known_false_official_missed_if_dropped": 0,
+                                "known_over_rejected_missed_if_dropped": 0,
+                                "known_correct_reviews_removed_if_dropped": 3,
+                            },
+                        ],
                     }
                 ),
                 encoding="utf-8",
@@ -4329,6 +4457,7 @@ class OperationalCommandTests(unittest.TestCase):
                 labeled_agent_b_csv=labeled_agent_b,
                 review_csv=review,
                 batch_agent_b_csv=batch_agent_b,
+                batch_total_rows=2,
                 output_dir=output_dir,
                 max_rows=2,
                 max_per_pattern=1,
@@ -4338,6 +4467,8 @@ class OperationalCommandTests(unittest.TestCase):
                 "recall_json": (output_dir / "evidence_patterns_recall.json").exists(),
                 "precision_md": (output_dir / "evidence_patterns_precision.md").exists(),
                 "release_simulation_md": (output_dir / "pattern_release_simulation.md").exists(),
+                "balance_report_json": (output_dir / "balance_report.json").exists(),
+                "balance_report_md": (output_dir / "balance_report.md").exists(),
                 "threshold_boundary_json": (output_dir / "threshold_boundary_report.json").exists(),
                 "threshold_boundary_md": (output_dir / "threshold_boundary_report.md").exists(),
                 "sample_xlsx": (output_dir / "pattern_validation_sample_50.xlsx").exists(),
@@ -4349,6 +4480,8 @@ class OperationalCommandTests(unittest.TestCase):
         self.assertTrue(output_exists["recall_json"])
         self.assertTrue(output_exists["precision_md"])
         self.assertTrue(output_exists["release_simulation_md"])
+        self.assertTrue(output_exists["balance_report_json"])
+        self.assertTrue(output_exists["balance_report_md"])
         self.assertTrue(output_exists["threshold_boundary_json"])
         self.assertTrue(output_exists["threshold_boundary_md"])
         self.assertTrue(output_exists["sample_xlsx"])
@@ -4363,8 +4496,15 @@ class OperationalCommandTests(unittest.TestCase):
             DEFAULT_MATCHED_REVIEW_CONFIDENCE_CUTOFF,
         )
         self.assertEqual(report["summary"]["calibrated_pattern_release"], "enabled_with_guard_no_batch_release")
+        self.assertEqual(report["summary"]["protected_review_lane_count"], 2)
+        self.assertEqual(
+            report["summary"]["spot_check_candidate_lanes"],
+            ["precision_calibrated_pattern_release"],
+        )
+        self.assertIn("balance_report", report)
         self.assertIn("threshold_boundary", report)
         self.assertEqual(report["inputs"]["policy_report_json"], str(policy_report))
+        self.assertEqual(report["inputs"]["batch_total_rows"], "2")
 
     def test_run_calibration_cycle_can_evaluate_filled_pattern_sample(self):
         with tempfile.TemporaryDirectory() as tmp:

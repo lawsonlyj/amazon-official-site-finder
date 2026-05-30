@@ -283,7 +283,7 @@ def _select_balanced(
         if len(selected) >= max_rows:
             break
         reason = row.get("review_reason", "")
-        if reason_counts[reason] >= max_per_reason:
+        if _reason_limit_reached(reason_counts, reason, max_per_reason):
             continue
         pattern = row.get("pattern_match", "")
         if max_per_pattern > 0 and pattern and pattern_counts[pattern] >= max_per_pattern:
@@ -301,10 +301,14 @@ def _select_balanced(
             pattern = row.get("pattern_match", "")
             if key in selected_keys:
                 continue
+            reason = row.get("review_reason", "")
+            if _reason_limit_reached(reason_counts, reason, max_per_reason):
+                continue
             if max_per_pattern > 0 and pattern and pattern_counts[pattern] >= max_per_pattern:
                 continue
             selected.append(row)
             selected_keys.add(key)
+            reason_counts[reason] += 1
             if pattern:
                 pattern_counts[pattern] += 1
     if len(selected) < max_rows:
@@ -312,10 +316,17 @@ def _select_balanced(
             if len(selected) >= max_rows:
                 break
             key = _row_key(row)
-            if key not in selected_keys:
-                selected.append(row)
-                selected_keys.add(key)
+            reason = row.get("review_reason", "")
+            if key in selected_keys or _reason_limit_reached(reason_counts, reason, max_per_reason):
+                continue
+            selected.append(row)
+            selected_keys.add(key)
+            reason_counts[reason] += 1
     return selected
+
+
+def _reason_limit_reached(reason_counts: Counter[str], reason: str, max_per_reason: int) -> bool:
+    return max_per_reason > 0 and reason_counts[reason] >= max_per_reason
 
 
 def _sort_key(row: dict[str, str]) -> tuple[int, int, str, str]:

@@ -8,6 +8,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from tools.build_calibration_review_sample import build_calibration_review_sample
+from tools.build_balance_report import build_balance_report
 from tools.evaluate_calibration_review_sample import evaluate_calibration_review_sample
 from tools.mine_evidence_patterns import mine_evidence_patterns
 from tools.simulate_pattern_release import simulate_pattern_release
@@ -20,6 +21,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--labeled-agent-b-csv", required=True, help="AgentB check.csv for the labeled calibration run.")
     parser.add_argument("--review-csv", required=True, help="Target batch review_task.csv.")
     parser.add_argument("--batch-agent-b-csv", required=True, help="Target batch agent_b/check.csv.")
+    parser.add_argument("--batch-total-rows", type=int, default=0, help="Total rows in the target batch.")
     parser.add_argument("--output-dir", required=True)
     parser.add_argument("--sample-prefix", default="pattern_validation_sample_50")
     parser.add_argument("--max-rows", type=int, default=50)
@@ -39,6 +41,7 @@ def main(argv: list[str] | None = None) -> int:
         labeled_agent_b_csv=args.labeled_agent_b_csv,
         review_csv=args.review_csv,
         batch_agent_b_csv=args.batch_agent_b_csv,
+        batch_total_rows=args.batch_total_rows,
         output_dir=args.output_dir,
         sample_prefix=args.sample_prefix,
         max_rows=args.max_rows,
@@ -60,6 +63,7 @@ def run_calibration_cycle(
     review_csv: str | Path,
     batch_agent_b_csv: str | Path,
     output_dir: str | Path,
+    batch_total_rows: int = 0,
     sample_prefix: str = "pattern_validation_sample_50",
     max_rows: int = 50,
     max_per_reason: int = 12,
@@ -78,6 +82,8 @@ def run_calibration_cycle(
     precision_md = out_dir / "evidence_patterns_precision.md"
     release_sim_json = out_dir / "pattern_release_simulation.json"
     release_sim_md = out_dir / "pattern_release_simulation.md"
+    balance_report_json = out_dir / "balance_report.json"
+    balance_report_md = out_dir / "balance_report.md"
     threshold_boundary_json = out_dir / "threshold_boundary_report.json"
     threshold_boundary_md = out_dir / "threshold_boundary_report.md"
     sample_csv = out_dir / f"{sample_prefix}.csv"
@@ -119,6 +125,15 @@ def run_calibration_cycle(
         min_support=min_support,
         output_json=release_sim_json,
         output_md=release_sim_md,
+    )
+    balance_report = build_balance_report(
+        labeled_eval_json=labeled_eval_json,
+        batch_review_csv=review_csv,
+        batch_agent_b_csv=batch_agent_b_csv,
+        batch_total_rows=batch_total_rows,
+        pattern_release_jsons=[release_sim_json],
+        output_json=balance_report_json,
+        output_md=balance_report_md,
     )
     threshold_boundary = build_threshold_boundary_report(
         labeled_eval_json=labeled_eval_json,
@@ -182,6 +197,10 @@ def run_calibration_cycle(
             ),
             "raw_agent_b_recall_release": threshold_boundary["summary"].get("raw_agent_b_recall_release"),
             "calibrated_pattern_release": threshold_boundary["summary"].get("calibrated_pattern_release"),
+            "protected_review_lane_count": balance_report["summary"].get("protected_review_lane_count"),
+            "protected_review_lane_rows": balance_report["summary"].get("protected_review_lane_rows"),
+            "spot_check_candidate_lanes": balance_report["summary"].get("spot_check_candidate_lanes"),
+            "more_label_review_lanes": balance_report["summary"].get("more_label_review_lanes"),
             "sample_rows": sample_summary.get("sample_rows"),
             "actionable_release_validation_rows": sample_summary.get("sample_reason_counts", {}).get(
                 "actionable_release_validation", 0
@@ -211,6 +230,7 @@ def run_calibration_cycle(
             "labeled_agent_b_csv": str(labeled_agent_b_csv),
             "review_csv": str(review_csv),
             "batch_agent_b_csv": str(batch_agent_b_csv),
+            "batch_total_rows": str(batch_total_rows),
             "filled_sample": str(filled_sample or ""),
             "policy_report_json": str(policy_report_json or ""),
         },
@@ -221,6 +241,8 @@ def run_calibration_cycle(
             "precision_md": str(precision_md),
             "release_simulation_json": str(release_sim_json),
             "release_simulation_md": str(release_sim_md),
+            "balance_report_json": str(balance_report_json),
+            "balance_report_md": str(balance_report_md),
             "threshold_boundary_json": str(threshold_boundary_json),
             "threshold_boundary_md": str(threshold_boundary_md),
             "sample_csv": str(sample_csv),
@@ -239,6 +261,7 @@ def run_calibration_cycle(
         "recall_recommendations": recall_report.get("recommendations", []),
         "precision_recommendations": precision_report.get("recommendations", []),
         "release_simulation_summary": release_simulation.get("summary", {}),
+        "balance_report": balance_report,
         "threshold_boundary": threshold_boundary,
         "actionable_release_patterns": release_simulation.get("actionable_safe_patterns", []),
         "selected_actionable_release_patterns": release_simulation.get("selected_actionable_pattern_set", []),
@@ -276,6 +299,10 @@ def _render_markdown(report: dict) -> str:
         f"- Matched-review confidence cutoff: <{summary['recommended_matched_review_confidence_below']}",
         f"- Raw AgentB recall release: {summary['raw_agent_b_recall_release']}",
         f"- Calibrated pattern release: {summary['calibrated_pattern_release']}",
+        f"- Protected review lanes: {summary['protected_review_lane_count']}",
+        f"- Protected review lane rows: {summary['protected_review_lane_rows']}",
+        f"- Spot-check candidate lanes: {', '.join(summary.get('spot_check_candidate_lanes') or []) or 'None'}",
+        f"- More-label review lanes: {', '.join(summary.get('more_label_review_lanes') or []) or 'None'}",
         f"- Sample rows: {summary['sample_rows']}",
         f"- Actionable release validation rows: {summary['actionable_release_validation_rows']}",
         f"- Pattern candidate validation rows: {summary['pattern_validation_rows']}",
@@ -300,6 +327,43 @@ def _render_markdown(report: dict) -> str:
     lines.extend(["", "## Precision Recommendations", ""])
     for item in report.get("precision_recommendations", []):
         lines.append(f"- {item}")
+    lane_policy = (report.get("balance_report") or {}).get("manual_review_lane_policy") or {}
+    if lane_policy:
+        lines.extend(["", "## Review Lane Policy", ""])
+        protected = lane_policy.get("protected") or []
+        if protected:
+            lines.append("### Protected")
+            for row in protected:
+                lines.append(
+                    "- {reason}: rows={rows}, risk={risk}, {why}".format(
+                        reason=row.get("review_reason"),
+                        rows=row.get("review_task_rows"),
+                        risk=row.get("risk_rows"),
+                        why=row.get("protection_reason"),
+                    )
+                )
+        spot_check = lane_policy.get("spot_check_candidates") or []
+        if spot_check:
+            lines.append("### Spot-Check Candidates")
+            for row in spot_check:
+                lines.append(
+                    "- {reason}: rows={rows}, labeled={labeled}".format(
+                        reason=row.get("review_reason"),
+                        rows=row.get("review_task_rows"),
+                        labeled=row.get("labeled_rows"),
+                    )
+                )
+        needs_more = lane_policy.get("needs_more_labels") or []
+        if needs_more:
+            lines.append("### Needs More Labels")
+            for row in needs_more:
+                lines.append(
+                    "- {reason}: rows={rows}, labeled={labeled}".format(
+                        reason=row.get("review_reason"),
+                        rows=row.get("review_task_rows"),
+                        labeled=row.get("labeled_rows"),
+                    )
+                )
     if report.get("actionable_release_patterns"):
         lines.extend(["", "## Actionable Recall Release Patterns", ""])
         for item in report["actionable_release_patterns"][:10]:
