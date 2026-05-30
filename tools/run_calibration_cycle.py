@@ -289,6 +289,7 @@ def run_calibration_cycle(
             "filled_positive_fixture_rows": regression_cases.get("summary", {}).get("positive_fixture_rows")
             if regression_cases
             else None,
+            "regression_gate_next_step": _regression_gate_next_step(regression_cases_csv) if regression_cases else "",
         },
         "inputs": {
             "labeled_eval_json": str(labeled_eval_json),
@@ -588,6 +589,8 @@ def _render_markdown(report: dict) -> str:
         lines.append(f"- Precision blocking fixtures: {case_summary.get('precision_blocking_fixture_rows')}")
         lines.append(f"- Recall blocking fixtures: {case_summary.get('recall_blocking_fixture_rows')}")
         lines.append(f"- Positive fixtures: {case_summary.get('positive_fixture_rows')}")
+        if summary.get("regression_gate_next_step"):
+            lines.append(f"- Regression gate next step: {summary.get('regression_gate_next_step')}")
     lines.append("")
     return "\n".join(lines)
 
@@ -595,6 +598,13 @@ def _render_markdown(report: dict) -> str:
 def _write_rule_candidates(rule_candidates: dict, output_json: Path, output_md: Path) -> None:
     output_json.write_text(json.dumps(rule_candidates, ensure_ascii=False, indent=2), encoding="utf-8")
     output_md.write_text(_render_rule_candidates_markdown(rule_candidates), encoding="utf-8")
+
+
+def _regression_gate_next_step(regression_cases_csv: Path) -> str:
+    return (
+        "Run tools/run_calibration_regression_gate.py with "
+        f"--cases-csv {regression_cases_csv} and --candidate-final-csv <candidate official_sites.csv> before applying threshold or routing changes."
+    )
 
 
 def _render_rule_candidates_markdown(rule_candidates: dict) -> str:

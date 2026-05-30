@@ -49,6 +49,7 @@ from tools.build_calibration_status_report import build_calibration_status_repor
 from tools.evaluate_calibration_review_sample import evaluate_calibration_review_sample
 from tools.mine_evidence_patterns import mine_evidence_patterns
 from tools.run_calibration_cycle import run_calibration_cycle
+from tools.run_calibration_regression_gate import run_calibration_regression_gate
 from tools.simulate_pattern_release import simulate_pattern_release
 from tools.apply_pattern_release_experiment import apply_pattern_release_experiment
 from tools.apply_pattern_release_to_run import apply_pattern_release_to_run
@@ -4739,11 +4740,13 @@ class OperationalCommandTests(unittest.TestCase):
         self.assertEqual(report["summary"]["filled_regression_case_rows"], 2)
         self.assertEqual(report["summary"]["filled_recall_blocking_fixture_rows"], 1)
         self.assertEqual(report["summary"]["filled_positive_fixture_rows"], 1)
+        self.assertIn("run_calibration_regression_gate.py", report["summary"]["regression_gate_next_step"])
         self.assertIn("Rejected Pattern", rule_candidates_md_text)
         self.assertIn("Filled Lane Recommendations", summary_text)
         self.assertIn("Filled Pattern Recommendations", summary_text)
         self.assertIn("Filled Candidate Rule Export", summary_text)
         self.assertIn("Filled Regression Cases", summary_text)
+        self.assertIn("Regression gate next step", summary_text)
         self.assertEqual(report["calibration_status"]["summary"]["workflow_status"], "partially_converged_keep_review_lanes")
 
     def test_run_calibration_cycle_merges_multiple_filled_samples(self):
@@ -5139,6 +5142,111 @@ class OperationalCommandTests(unittest.TestCase):
         self.assertEqual(by_id["precision-bad"]["expected_url"], "https://real.example")
         self.assertEqual(by_id["precision-bad"]["assertion"], "candidate_url_or_official_url_must_not_auto_accept")
         self.assertIn("Precision blocking fixtures: 1", md_text)
+
+    def test_run_calibration_regression_gate_flags_blocked_and_over_rejected_cases(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            cases = root / "cases.csv"
+            candidate = root / "official_sites.csv"
+            out_csv = root / "gate.csv"
+            out_json = root / "gate.json"
+            out_md = root / "gate.md"
+            _write_test_csv(
+                cases,
+                [
+                    {
+                        "case_type": "precision_blocking_fixture",
+                        "provider_id": "bad-accepted",
+                        "provider_name": "Bad Accepted",
+                        "review_reason": "precision_low_confidence_auto_match",
+                        "candidate_url": "https://wrong.example",
+                        "official_url": "https://wrong.example",
+                        "expected_url": "https://right.example",
+                        "assertion": "candidate_url_or_official_url_must_not_auto_accept",
+                    },
+                    {
+                        "case_type": "precision_blocking_fixture",
+                        "provider_id": "bad-corrected",
+                        "provider_name": "Bad Corrected",
+                        "review_reason": "precision_low_confidence_auto_match",
+                        "candidate_url": "https://wrong2.example",
+                        "official_url": "https://wrong2.example",
+                        "expected_url": "https://right2.example",
+                        "assertion": "candidate_url_or_official_url_must_not_auto_accept",
+                    },
+                    {
+                        "case_type": "precision_positive_fixture",
+                        "provider_id": "good-overrejected",
+                        "provider_name": "Good Overrejected",
+                        "review_reason": "precision_second_pass_accepted_lt70",
+                        "candidate_url": "https://good.example",
+                        "official_url": "https://good.example",
+                        "expected_url": "https://good.example",
+                        "assertion": "candidate_should_remain_accepted_for_same_evidence_lane",
+                    },
+                    {
+                        "case_type": "recall_positive_fixture",
+                        "provider_id": "good-www",
+                        "provider_name": "Good WWW",
+                        "review_reason": "recall_unresolved_top_candidate",
+                        "candidate_url": "https://example.com",
+                        "official_url": "",
+                        "expected_url": "https://example.com",
+                        "assertion": "candidate_can_seed_recall_pattern_only_with_same_evidence",
+                    },
+                ],
+            )
+            _write_test_csv(
+                candidate,
+                [
+                    {
+                        "provider_id": "bad-accepted",
+                        "provider_name": "Bad Accepted",
+                        "official_url": "https://wrong.example/",
+                        "status": "matched",
+                    },
+                    {
+                        "provider_id": "bad-corrected",
+                        "provider_name": "Bad Corrected",
+                        "official_url": "https://right2.example/",
+                        "status": "matched",
+                    },
+                    {
+                        "provider_id": "good-overrejected",
+                        "provider_name": "Good Overrejected",
+                        "official_url": "",
+                        "status": "unresolved",
+                    },
+                    {
+                        "provider_id": "good-www",
+                        "provider_name": "Good WWW",
+                        "official_url": "https://www.example.com/",
+                        "status": "matched",
+                    },
+                ],
+            )
+
+            report = run_calibration_regression_gate(
+                cases_csv=cases,
+                candidate_final_csv=candidate,
+                output_csv=out_csv,
+                output_json=out_json,
+                output_md=out_md,
+            )
+            with out_csv.open(newline="", encoding="utf-8") as f:
+                rows = list(csv.DictReader(f))
+            md_text = out_md.read_text(encoding="utf-8")
+
+        self.assertEqual(report["summary"]["gate_status"], "fail")
+        self.assertEqual(report["summary"]["case_rows"], 4)
+        self.assertEqual(report["summary"]["pass_rows"], 2)
+        self.assertEqual(report["summary"]["fail_rows"], 2)
+        by_id = {row["provider_id"]: row for row in rows}
+        self.assertEqual(by_id["bad-accepted"]["failure_reason"], "blocked_candidate_was_auto_accepted")
+        self.assertEqual(by_id["bad-corrected"]["gate_result"], "pass")
+        self.assertEqual(by_id["good-overrejected"]["failure_reason"], "positive_fixture_over_rejected")
+        self.assertEqual(by_id["good-www"]["gate_result"], "pass")
+        self.assertIn("Gate status: fail", md_text)
 
     def test_evaluate_calibration_review_sample_rejects_pattern_when_label_blocks_it(self):
         with tempfile.TemporaryDirectory() as tmp:
