@@ -12,7 +12,9 @@ Usage:
 Optional:
   --run-dir outputs/my_run
   --labels /path/to/golden_expected_websites.csv
+  --openai-key-file /path/to/openai_key.txt
   --run-agent-b
+  --agent-b-llm-review
   --apply-agent-optimizations
   --agent-b-limit N
   --human-review /path/to/filled_review.xlsx
@@ -22,10 +24,12 @@ USAGE
 
 BRAVE_KEY_FILE=""
 EXA_KEY_FILE=""
+OPENAI_KEY_FILE=""
 SOURCE_CSV=""
 RUN_DIR=""
 LABELS_CSV=""
 RUN_AGENT_B=0
+AGENT_B_LLM_REVIEW=0
 APPLY_AGENT_OPTIMIZATIONS=0
 AGENT_B_LIMIT=0
 HUMAN_REVIEW_FILE=""
@@ -41,6 +45,10 @@ while [[ $# -gt 0 ]]; do
       EXA_KEY_FILE="${2:-}"
       shift 2
       ;;
+    --openai-key-file)
+      OPENAI_KEY_FILE="${2:-}"
+      shift 2
+      ;;
     --source)
       SOURCE_CSV="${2:-}"
       shift 2
@@ -54,6 +62,11 @@ while [[ $# -gt 0 ]]; do
       shift 2
       ;;
     --run-agent-b)
+      RUN_AGENT_B=1
+      shift
+      ;;
+    --agent-b-llm-review)
+      AGENT_B_LLM_REVIEW=1
       RUN_AGENT_B=1
       shift
       ;;
@@ -103,6 +116,9 @@ CONFIGURE_ARGS=(--brave-key-file "$BRAVE_KEY_FILE" --env .env)
 if [[ -n "$EXA_KEY_FILE" ]]; then
   CONFIGURE_ARGS+=(--exa-key-file "$EXA_KEY_FILE")
 fi
+if [[ -n "$OPENAI_KEY_FILE" ]]; then
+  CONFIGURE_ARGS+=(--openai-key-file "$OPENAI_KEY_FILE")
+fi
 
 python3 tools/configure_env_from_key_files.py "${CONFIGURE_ARGS[@]}"
 
@@ -112,6 +128,9 @@ if [[ -n "$LABELS_CSV" ]]; then
 fi
 if [[ "$RUN_AGENT_B" == "1" ]]; then
   WORKFLOW_ARGS+=(--run-agent-b)
+  if [[ "$AGENT_B_LLM_REVIEW" == "1" ]]; then
+    WORKFLOW_ARGS+=(--agent-b-llm-review)
+  fi
   if [[ "$APPLY_AGENT_OPTIMIZATIONS" == "1" ]]; then
     WORKFLOW_ARGS+=(--apply-agent-optimizations)
   fi

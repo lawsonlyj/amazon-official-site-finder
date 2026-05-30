@@ -17,6 +17,7 @@ from finder.doctor import doctor
 from finder.finalize import finalize_results, finalize_rows
 from finder.input_normalizer import normalize_provider_rows
 from finder.query_builder import build_queries
+from finder.html_extract import extract_html
 from finder.scoring import choose_best, is_excluded_domain, load_config, _extract_page, _text_similarity, _urls_to_fetch
 from finder import search_sources
 from finder.search_sources import SearchCandidate
@@ -88,10 +89,12 @@ class WorkflowTests(unittest.TestCase):
             root = Path(tmp)
             brave_file = root / "brave.txt"
             exa_file = root / "exa.env"
+            openai_file = root / "openaikey.rtf"
             env_file = root / ".env"
             example_file = root / ".env.example"
             brave_file.write_text("brave-secret-key\n", encoding="utf-8")
             exa_file.write_text("EXA_API_KEY='exa-secret-key'\n", encoding="utf-8")
+            openai_file.write_text(r"{\rtf1\ansi OPENAI_API_KEY=openai-secret-key-123\par}", encoding="utf-8")
             example_file.write_text("BRAVE_API_KEY=\nEXA_API_KEY=\nDDGS_ENABLED=1\nFINDER_HTTP_TIMEOUT=12\n", encoding="utf-8")
 
             out = io.StringIO()
@@ -102,6 +105,8 @@ class WorkflowTests(unittest.TestCase):
                         str(brave_file),
                         "--exa-key-file",
                         str(exa_file),
+                        "--openai-key-file",
+                        str(openai_file),
                         "--env",
                         str(env_file),
                         "--example",
@@ -112,9 +117,12 @@ class WorkflowTests(unittest.TestCase):
             text = env_file.read_text(encoding="utf-8")
             self.assertIn("BRAVE_API_KEY=brave-secret-key", text)
             self.assertIn("EXA_API_KEY=exa-secret-key", text)
+            self.assertIn("OPENAI_API_KEY=openai-secret-key-123", text)
+            self.assertIn("FINDER_AGENT_B_LLM_REVIEW=0", text)
             self.assertIn("FINDER_HTTP_TIMEOUT=12", text)
             self.assertNotIn("brave-secret-key", out.getvalue())
             self.assertNotIn("exa-secret-key", out.getvalue())
+            self.assertNotIn("openai-secret-key-123", out.getvalue())
 
     def test_extract_key_from_json_key_file(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -210,6 +218,47 @@ class WorkflowTests(unittest.TestCase):
         self.assertIn('"Akkountweb" "sito ufficiale"', queries)
         self.assertIn('"Akkountweb" "contatti"', queries)
         self.assertIn('"Akkountweb" "agenzia amazon"', queries)
+
+    def test_html_extractor_reads_structured_dom_and_json_ld_organization(self):
+        html = """
+        <html>
+          <head>
+            <title>Example Agency</title>
+            <meta name="description" content="Amazon marketplace support">
+            <script type="application/ld+json">
+              {
+                "@context": "https://schema.org",
+                "@type": "Organization",
+                "name": "Example Agency LLC",
+                "legalName": "Example Agency Limited",
+                "url": "https://exampleagency.com",
+                "logo": "https://exampleagency.com/logo.png",
+                "address": {"streetAddress": "1 High Street", "addressCountry": "United Kingdom"},
+                "contactPoint": {"email": "hello@exampleagency.com", "telephone": "+44 20 0000 0000"}
+              }
+            </script>
+          </head>
+          <body>
+            <nav>Home Services Contact</nav>
+            <h1>Example Agency LLC</h1>
+            <h2>Amazon Seller Central Services</h2>
+            <a href="mailto:hello@exampleagency.com">Email</a>
+            <a href="tel:+442000000000">Call</a>
+            <footer>Registered in the United Kingdom</footer>
+          </body>
+        </html>
+        """
+        extracted = extract_html(html, "https://exampleagency.com/")
+
+        self.assertEqual(extracted["title"], "Example Agency")
+        self.assertIn("Example Agency LLC", extracted["h1"])
+        self.assertIn("Amazon Seller Central Services", extracted["h2"])
+        self.assertIn("Home Services Contact", extracted["nav"])
+        self.assertIn("Registered in the United Kingdom", extracted["footer"])
+        self.assertEqual(extracted["mailto_links"], ["mailto:hello@exampleagency.com"])
+        self.assertEqual(extracted["tel_links"], ["tel:+442000000000"])
+        self.assertEqual(extracted["organizations"][0]["name"], "Example Agency LLC")
+        self.assertIn("United Kingdom", extracted["organizations"][0]["address"])
 
     def test_scoring_rejects_excluded_domains_and_selects_official_site(self):
         provider = {
@@ -1636,6 +1685,160 @@ class OperationalCommandTests(unittest.TestCase):
         self.assertIn("https://amazon.example/p-1", rows["p-1"]["provider_detail_url"])
         self.assertEqual(summary["workflow_version"], WORKFLOW_VERSION)
         self.assertFalse(legacy_xlsx_exists)
+
+    def test_agent_b_uses_structured_dom_evidence_without_researching_strong_candidate(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            run_dir = Path(tmp)
+            rows = [
+                {
+                    "provider_id": "p-1",
+                    "provider_name": "Deep Evidence Agency LLC",
+                    "provider_detail_url": "https://amazon.example/p-1",
+                    "official_url": "https://deep.example",
+                    "provider_locations": json.dumps(["United Kingdom"]),
+                    "confidence": "81",
+                    "status": "manual_accepted",
+                }
+            ]
+            _write_test_csv(run_dir / "review_task.csv", rows)
+            _write_test_csv(run_dir / "official_sites.csv", rows)
+
+            def fake_fetch(url):
+                html = """
+                <html><head><title>Deep Evidence Agency LLC</title>
+                <meta name="description" content="Amazon marketplace account management">
+                <script type="application/ld+json">
+                {"@type":"Organization","name":"Deep Evidence Agency LLC",
+                "legalName":"Deep Evidence Agency Limited",
+                "address":{"addressCountry":"United Kingdom"},
+                "contactPoint":{"email":"hello@deep.example","telephone":"+44 20 0000 0000"}}
+                </script></head>
+                <body><nav>Home Services Contact</nav><h1>Deep Evidence Agency LLC</h1>
+                <h2>Amazon Seller Central and ecommerce advertising services</h2>
+                <a href="mailto:hello@deep.example">Email</a>
+                <footer>Registered office in the United Kingdom</footer>
+                About us. Contact us. Privacy policy. Terms and conditions.</body></html>
+                """
+                return {"ok": True, "status": 200, "final_url": url, "text": html}
+
+            with patch("tools.run_agent_b_verification.fetch_text", side_effect=fake_fetch), patch(
+                "tools.run_agent_b_verification.collect_candidates_for_queries"
+            ) as collect:
+                summary = run_agent_b_verification(run_dir=run_dir, write_xlsx=False)
+            with (run_dir / "agent_b/check.csv").open(newline="", encoding="utf-8") as f:
+                out = list(csv.DictReader(f))[0]
+            details = [json.loads(line) for line in (run_dir / "agent_b/check.jsonl").read_text(encoding="utf-8").splitlines()]
+
+        self.assertEqual(summary["decision_counts"], {"accept": 1})
+        self.assertEqual(out["agent_b_decision"], "accept")
+        self.assertIn("schema_org_name_matches_provider", out["supporting_facts"])
+        self.assertIn("schema_org_contact_point_seen", out["supporting_facts"])
+        self.assertIn("page_role:contact", out["supporting_facts"])
+        self.assertEqual(details[0]["independent_search_ran"], False)
+        collect.assert_not_called()
+
+    def test_agent_b_rejects_structured_platform_or_parked_page_risks(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            run_dir = Path(tmp)
+            rows = [
+                {
+                    "provider_id": "p-1",
+                    "provider_name": "Profile Risk Agency",
+                    "provider_detail_url": "https://amazon.example/p-1",
+                    "official_url": "https://vendorhub.example/profile/profile-risk-agency",
+                    "provider_locations": json.dumps(["United States"]),
+                    "confidence": "80",
+                    "status": "manual_accepted",
+                },
+                {
+                    "provider_id": "p-2",
+                    "provider_name": "Parked Risk Agency",
+                    "provider_detail_url": "https://amazon.example/p-2",
+                    "official_url": "https://parked.example",
+                    "provider_locations": json.dumps(["United States"]),
+                    "confidence": "80",
+                    "status": "manual_accepted",
+                },
+            ]
+            _write_test_csv(run_dir / "review_task.csv", rows)
+            _write_test_csv(run_dir / "official_sites.csv", rows)
+
+            def fake_fetch(url):
+                if "parked.example" in url:
+                    html = "<html><body>Parked Risk Agency. This domain may be for sale. Buy this domain.</body></html>"
+                else:
+                    html = "<html><body>Profile Risk Agency company profile. Claim this profile. View profile.</body></html>"
+                return {"ok": True, "status": 200, "final_url": url, "text": html}
+
+            with patch("tools.run_agent_b_verification.fetch_text", side_effect=fake_fetch), patch(
+                "tools.run_agent_b_verification.collect_candidates_for_queries", return_value=[]
+            ):
+                summary = run_agent_b_verification(run_dir=run_dir, write_xlsx=False)
+            with (run_dir / "agent_b/check.csv").open(newline="", encoding="utf-8") as f:
+                out = {row["provider_id"]: row for row in csv.DictReader(f)}
+
+        self.assertEqual(summary["decision_counts"], {"reject": 2})
+        self.assertIn("candidate_looks_platform_profile", out["p-1"]["counter_evidence"])
+        self.assertIn("candidate_looks_directory_page", out["p-1"]["counter_evidence"])
+        self.assertIn("candidate_looks_parked_or_domain_sale", out["p-2"]["counter_evidence"])
+
+    def test_agent_b_llm_review_is_optional_and_writes_separate_outputs(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            run_dir = Path(tmp)
+            rows = [
+                {
+                    "provider_id": "p-1",
+                    "provider_name": "LLM Agency",
+                    "provider_detail_url": "https://amazon.example/p-1",
+                    "official_url": "https://llm.example",
+                    "provider_locations": json.dumps(["Germany"]),
+                    "confidence": "81",
+                    "status": "manual_accepted",
+                }
+            ]
+            _write_test_csv(run_dir / "review_task.csv", rows)
+            _write_test_csv(run_dir / "official_sites.csv", rows)
+
+            def fake_fetch(url):
+                html = "<html><body>LLM Agency GmbH Amazon marketplace ecommerce services Germany. Contact us.</body></html>"
+                return {"ok": True, "status": 200, "final_url": url, "text": html}
+
+            with patch("tools.run_agent_b_verification.fetch_text", side_effect=fake_fetch), patch(
+                "tools.run_agent_b_verification.collect_candidates_for_queries", return_value=[]
+            ):
+                default_summary = run_agent_b_verification(run_dir=run_dir, write_xlsx=False)
+            self.assertEqual(default_summary["llm_review"], {})
+            self.assertFalse((run_dir / "agent_b/llm_check.csv").exists())
+
+            fake_response = {
+                "choices": [
+                    {
+                        "message": {
+                            "content": json.dumps(
+                                {
+                                    "decision": "accept",
+                                    "confidence": 91,
+                                    "supporting_facts": ["provider identity confirmed"],
+                                    "counter_evidence": [],
+                                    "reason_for_unsure": "",
+                                }
+                            )
+                        }
+                    }
+                ]
+            }
+            with patch.dict(os.environ, {"OPENAI_API_KEY": "test-openai-key"}, clear=False), patch(
+                "tools.run_agent_b_verification.fetch_text", side_effect=fake_fetch
+            ), patch("tools.run_agent_b_verification.collect_candidates_for_queries", return_value=[]), patch(
+                "tools.run_agent_b_verification._call_llm", return_value=fake_response
+            ):
+                llm_summary = run_agent_b_verification(run_dir=run_dir, write_xlsx=False, llm_review=True)
+            with (run_dir / "agent_b/llm_check.csv").open(newline="", encoding="utf-8") as f:
+                llm_rows = list(csv.DictReader(f))
+
+        self.assertEqual(llm_summary["llm_review"]["status"], "complete")
+        self.assertEqual(llm_rows[0]["llm_decision"], "accept")
+        self.assertEqual(llm_rows[0]["agent_b_decision"], "accept")
 
     def test_agent_b_defaults_to_high_risk_rows_without_manual_task(self):
         with tempfile.TemporaryDirectory() as tmp:

@@ -10,6 +10,8 @@ import queue
 import sys
 from pathlib import Path
 from urllib.parse import urlparse
+from urllib import error as urllib_error
+from urllib import request as urllib_request
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
@@ -26,6 +28,7 @@ from tools.output_layout import (
     DEFAULT_MATCHED_REVIEW_CONFIDENCE_CUTOFF,
     DEFAULT_SECOND_PASS_REVIEW_CONFIDENCE_CUTOFF,
     WORKFLOW_VERSION,
+    agent_b_llm_paths,
     agent_b_paths,
     first_existing,
     publish_agent_b_aliases,
@@ -56,6 +59,21 @@ AGENT_B_FIELDS = [
     "review_reason",
 ]
 
+AGENT_B_LLM_FIELDS = [
+    "provider_id",
+    "provider_name",
+    "candidate_url",
+    "agent_b_decision",
+    "agent_b_confidence",
+    "evidence_score",
+    "llm_decision",
+    "llm_confidence",
+    "llm_supporting_facts",
+    "llm_counter_evidence",
+    "llm_reason_for_unsure",
+    "llm_error",
+]
+
 SUPPORTING_PATHS = ["/", "/about", "/contact", "/services", "/privacy", "/terms", "/about-us", "/contact-us"]
 
 
@@ -70,6 +88,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--per-query", type=int, default=2)
     parser.add_argument("--write-xlsx", action="store_true")
     parser.add_argument("--include-all-final", action="store_true")
+    parser.add_argument("--llm-review", action="store_true", help="Write optional AgentB LLM review files without changing default decisions.")
+    parser.add_argument("--llm-model", default=os.getenv("FINDER_AGENT_B_LLM_MODEL", "gpt-4.1-mini"))
     parser.add_argument("--resume", action="store_true", help="Reuse existing output rows and keep incremental progress.")
     parser.add_argument(
         "--row-timeout",
@@ -90,6 +110,8 @@ def main(argv: list[str] | None = None) -> int:
         per_query=args.per_query,
         write_xlsx=args.write_xlsx,
         include_all_final=args.include_all_final,
+        llm_review=args.llm_review,
+        llm_model=args.llm_model,
         resume=args.resume,
         row_timeout=args.row_timeout,
     )
@@ -108,6 +130,8 @@ def run_agent_b_verification(
     per_query: int = 2,
     write_xlsx: bool = True,
     include_all_final: bool = False,
+    llm_review: bool | None = None,
+    llm_model: str | None = None,
     resume: bool = False,
     row_timeout: int = 0,
 ) -> dict:
@@ -150,6 +174,17 @@ def run_agent_b_verification(
     if write_xlsx:
         xlsx_summary = build_workbook([("AgentB_Verification", output_csv_path)], output_xlsx_path)
 
+    llm_summary = {}
+    if llm_review is None:
+        llm_review = _env_flag("FINDER_AGENT_B_LLM_REVIEW")
+    if llm_review:
+        llm_summary = _write_llm_review(
+            run_dir=run_dir,
+            rows=result_rows,
+            details=json_rows,
+            model=llm_model or os.getenv("FINDER_AGENT_B_LLM_MODEL", "gpt-4.1-mini"),
+        )
+
     summary = {
         "workflow_version": WORKFLOW_VERSION,
         "input_rows": len(rows),
@@ -164,6 +199,7 @@ def run_agent_b_verification(
             "xlsx": str(output_xlsx_path) if write_xlsx else "",
         },
         "xlsx": xlsx_summary,
+        "llm_review": llm_summary,
     }
     summary_path = canonical["summary"] if not output_csv else run_dir / "agent_b_verification_summary.json"
     summary_path.parent.mkdir(parents=True, exist_ok=True)
@@ -191,7 +227,10 @@ def verify_row(row: dict[str, str], *, config: dict, per_query: int = 2) -> dict
     provider_locations = _parse_locations(row.get("provider_locations", ""))
     candidate = _verify_url(candidate_url, row, config) if candidate_url else _empty_verification()
     search_queries = _independent_queries(provider_name, provider_locations)
-    search_candidates = _safe_collect(search_queries, per_query=per_query)
+    if _should_run_independent_search(candidate, row):
+        search_candidates = _safe_collect(search_queries, per_query=per_query)
+    else:
+        search_candidates = []
     replacement = _best_replacement(row, search_candidates, candidate_url, config)
 
     review_reason = row.get("review_reason", "")
@@ -228,6 +267,7 @@ def verify_row(row: dict[str, str], *, config: dict, per_query: int = 2) -> dict
             "candidate": candidate,
             "replacement": replacement,
             "search_queries": search_queries,
+            "independent_search_ran": bool(search_candidates),
             "decision": decision,
         },
     }
@@ -426,7 +466,9 @@ def _verify_url(url: str, provider: dict[str, str], config: dict) -> dict:
     supporting_facts: list[str] = []
     counter_evidence: list[str] = []
     evidence_urls: list[str] = []
-    schema_org = False
+    counter_evidence.extend(_page_risks(url, {}))
+    page_roles: list[str] = []
+    organizations: list[dict[str, str]] = []
     texts = []
     logo_checked = False
     max_pages = _max_pages_to_fetch()
@@ -448,11 +490,37 @@ def _verify_url(url: str, provider: dict[str, str], config: dict) -> dict:
                     supporting_facts.append("listing_logo_visual_match")
                 elif float(logo.get("score") or 0) >= 0.78:
                     supporting_facts.append("listing_logo_visual_near_match")
-            extracted = extract_html(fetched.get("text", ""), final_url)
-            page_text = " ".join([str(extracted.get("title") or ""), str(extracted.get("meta") or ""), str(extracted.get("text") or "")])
+            html = fetched.get("text", "")
+            extracted = extract_html(html, final_url)
+            page_text = " ".join(
+                [
+                    str(extracted.get("title") or ""),
+                    str(extracted.get("meta") or ""),
+                    str(extracted.get("h1") or ""),
+                    str(extracted.get("h2") or ""),
+                    str(extracted.get("nav") or ""),
+                    str(extracted.get("footer") or ""),
+                    str(extracted.get("text") or ""),
+                    _organizations_text(extracted.get("organizations") or []),
+                ]
+            )
             texts.append(page_text)
-            if "schema.org/organization" in fetched.get("text", "").casefold() or '"@type"' in fetched.get("text", "").casefold():
-                schema_org = True
+            if extracted.get("h1"):
+                supporting_facts.append("page_h1_seen")
+            if extracted.get("footer"):
+                supporting_facts.append("footer_text_seen")
+            if extracted.get("mailto_links"):
+                supporting_facts.append("mailto_link_found")
+            if extracted.get("tel_links"):
+                supporting_facts.append("telephone_link_found")
+            for role in _page_roles(final_url, extracted):
+                supporting_facts.append(f"page_role:{role}")
+                page_roles.append(role)
+            for risk in _page_risks(final_url, extracted):
+                counter_evidence.append(risk)
+            orgs = extracted.get("organizations") or []
+            if orgs:
+                organizations.extend([org for org in orgs if isinstance(org, dict)])
         if root_had_fetch:
             if domain_from_url(root) != domain_from_url(url):
                 supporting_facts.append("canonical_domain_variant_fetch_ok")
@@ -481,9 +549,16 @@ def _verify_url(url: str, provider: dict[str, str], config: dict) -> dict:
     if re.search(r"[\w.+-]+@[\w.-]+\.[a-z]{2,}", combined):
         score += 8
         supporting_facts.append("contact_email_found")
+    if "mailto_link_found" in supporting_facts:
+        score += 5
+    if "telephone_link_found" in supporting_facts:
+        score += 3
     if any(term in combined for term in ["contact us", "about us", "privacy policy", "terms of service", "terms and conditions"]):
         score += 8
         supporting_facts.append("standard_company_pages_found")
+    if {"page_role:about", "page_role:contact"} <= set(supporting_facts):
+        score += 5
+        supporting_facts.append("about_and_contact_pages_found")
     service_hits = [kw for kw in config.get("service_keywords", []) if normalize_text(kw) in combined]
     if len(service_hits) >= 3:
         score += 15
@@ -496,7 +571,11 @@ def _verify_url(url: str, provider: dict[str, str], config: dict) -> dict:
             score += 7
             supporting_facts.append(f"location_matches:{location}")
             break
-    if schema_org:
+    org_facts = _organization_facts(organizations, provider, combined)
+    supporting_facts.extend(org_facts["supporting_facts"])
+    counter_evidence.extend(org_facts["counter_evidence"])
+    score += org_facts["score"]
+    if organizations:
         score += 5
         supporting_facts.append("schema_org_organization_seen")
     if "listing_logo_visual_match" in supporting_facts:
@@ -506,6 +585,8 @@ def _verify_url(url: str, provider: dict[str, str], config: dict) -> dict:
     if _looks_non_independent(url):
         score -= 35
         counter_evidence.append("candidate_not_independent_official_site")
+    if _has_blocking_page_risk(counter_evidence):
+        score -= 35
     if _has_identity_gap(provider, combined, supporting_facts):
         score -= 12
         counter_evidence.append("identity_gap_location_or_service_context_missing")
@@ -516,7 +597,154 @@ def _verify_url(url: str, provider: dict[str, str], config: dict) -> dict:
         "evidence_urls": _dedupe(evidence_urls)[:12],
         "supporting_facts": _dedupe(supporting_facts),
         "counter_evidence": _dedupe(counter_evidence),
+        "page_roles": _dedupe(page_roles),
+        "organizations": organizations[:10],
     }
+
+
+def _should_run_independent_search(candidate: dict, row: dict[str, str]) -> bool:
+    if not _candidate_url(row):
+        return True
+    score = int(candidate.get("score") or 0)
+    counters = set(candidate.get("counter_evidence") or [])
+    if score < 70:
+        return True
+    if counters & {
+        "candidate_pages_not_fetchable",
+        "provider_name_not_found_on_candidate_pages",
+        "candidate_not_independent_official_site",
+        "candidate_looks_platform_profile",
+        "candidate_looks_directory_page",
+        "candidate_looks_parked_or_domain_sale",
+        "identity_gap_location_or_service_context_missing",
+    }:
+        return True
+    return False
+
+
+def _organizations_text(organizations: list[dict[str, str]]) -> str:
+    parts = []
+    for org in organizations:
+        for key in ["name", "legalName", "url", "address", "contactPoint"]:
+            value = org.get(key)
+            if value:
+                parts.append(str(value))
+    return " ".join(parts)
+
+
+def _organization_facts(organizations: list[dict[str, str]], provider: dict[str, str], combined_text: str) -> dict:
+    if not organizations:
+        return {"score": 0, "supporting_facts": [], "counter_evidence": []}
+    supporting: list[str] = []
+    counters: list[str] = []
+    score = 0
+    name_norm = normalize_text(provider.get("provider_name", ""))
+    provider_tokens = tokens(provider.get("provider_name", ""))
+    org_blob = normalize_text(_organizations_text(organizations))
+    if name_norm and name_norm in org_blob:
+        supporting.append("schema_org_name_matches_provider")
+        score += 15
+    elif provider_tokens and sum(1 for token in provider_tokens if token in org_blob) >= min(2, len(provider_tokens)):
+        supporting.append("schema_org_name_token_match")
+        score += 8
+    if any(org.get("legalName") for org in organizations):
+        supporting.append("schema_org_legal_name_seen")
+        score += 6
+    if any(org.get("address") for org in organizations):
+        supporting.append("schema_org_address_seen")
+        score += 5
+    if any(org.get("contactPoint") for org in organizations):
+        supporting.append("schema_org_contact_point_seen")
+        score += 5
+    for location in _parse_locations(provider.get("provider_locations", "")):
+        loc = normalize_text(location)
+        if loc and (loc in org_blob or loc in combined_text):
+            supporting.append(f"schema_or_page_location_matches:{location}")
+            score += 5
+            break
+    if org_blob and name_norm and name_norm not in org_blob and "schema_org_name_matches_provider" not in supporting:
+        counters.append("schema_org_name_does_not_confirm_provider")
+    return {"score": score, "supporting_facts": supporting, "counter_evidence": counters}
+
+
+def _page_roles(url: str, extracted: dict[str, object]) -> list[str]:
+    path = urlparse(url if "://" in url else f"https://{url}").path.casefold()
+    text = normalize_text(
+        " ".join(
+            [
+                str(extracted.get("title") or ""),
+                str(extracted.get("h1") or ""),
+                str(extracted.get("nav") or ""),
+                str(extracted.get("footer") or ""),
+            ]
+        )
+    )
+    roles = []
+    if path in {"", "/"}:
+        roles.append("home")
+    if "about" in path or "about us" in text:
+        roles.append("about")
+    if "contact" in path or "contact us" in text or extracted.get("mailto_links"):
+        roles.append("contact")
+    if "service" in path or "services" in text:
+        roles.append("services")
+    if "privacy" in path or "privacy policy" in text:
+        roles.append("privacy")
+    if "terms" in path or "terms and conditions" in text or "terms of service" in text:
+        roles.append("terms")
+    return _dedupe(roles)
+
+
+def _page_risks(url: str, extracted: dict[str, object]) -> list[str]:
+    parsed = urlparse(url if "://" in url else f"https://{url}")
+    path = parsed.path.casefold()
+    domain = domain_from_url(url)
+    text = normalize_text(
+        " ".join(
+            [
+                str(extracted.get("title") or ""),
+                str(extracted.get("meta") or ""),
+                str(extracted.get("h1") or ""),
+                str(extracted.get("h2") or ""),
+                str(extracted.get("footer") or ""),
+                str(extracted.get("text") or "")[:6000],
+            ]
+        )
+    )
+    risks = []
+    if any(marker in path for marker in ["/profile", "/profiles/", "/company/", "/companies/"]):
+        risks.append("candidate_looks_platform_profile")
+    if any(marker in path for marker in ["/login", "/signin", "/sign-in", "/app", "/dashboard"]):
+        risks.append("candidate_looks_login_or_app_page")
+    if any(marker in path for marker in ["/docs", "/documentation", "/help", "/support", "/kb", "/api"]):
+        risks.append("candidate_looks_docs_help_support_page")
+    if any(marker in text for marker in ["domain for sale", "buy this domain", "this domain may be for sale", "sedo domain parking", "hugedomains"]):
+        risks.append("candidate_looks_parked_or_domain_sale")
+    directory_markers = [
+        "claim this profile",
+        "company profile",
+        "business directory",
+        "supplier profile",
+        "view profile",
+        "review this company",
+    ]
+    if any(marker in text for marker in directory_markers):
+        risks.append("candidate_looks_directory_page")
+    directory_domains = {"clutch.co", "goodfirms.co", "crunchbase.com", "trustpilot.com", "indiamart.com", "kompass.com"}
+    if domain in directory_domains or any(domain.endswith(f".{item}") for item in directory_domains):
+        risks.append("candidate_looks_directory_page")
+    return _dedupe(risks)
+
+
+def _has_blocking_page_risk(counter_evidence: list[str]) -> bool:
+    blocking = {
+        "candidate_looks_platform_profile",
+        "candidate_looks_directory_page",
+        "candidate_looks_login_or_app_page",
+        "candidate_looks_docs_help_support_page",
+        "candidate_looks_parked_or_domain_sale",
+    }
+    return bool(blocking & set(counter_evidence))
 
 
 def _best_replacement(
@@ -555,15 +783,17 @@ def _decide(candidate: dict, replacement: dict[str, str], review_reason: str = "
         replacement_score = _to_int(replacement.get("score"))
         confidence = max(score, replacement_score)
         return "unsure", "", max(0, min(69, confidence)), "recall_candidate_needs_human_confirmation"
-    if _is_precision_high_risk_reason(review_reason) and 70 <= score < DEFAULT_SECOND_PASS_REVIEW_CONFIDENCE_CUTOFF and "listing_logo_visual_match" not in facts:
+    if replacement.get("url") and review_reason:
+        replacement_score = _to_int(replacement.get("score"))
+        confidence = max(score, replacement_score)
+        return "unsure", "", max(0, min(69, confidence)), "replacement_candidate_needs_human_confirmation"
+    if review_reason and counters:
+        return "unsure", "", min(69, max(0, score)), "high_risk_counter_evidence_needs_human_confirmation"
+    if _is_precision_high_risk_reason(review_reason) and "listing_logo_visual_match" not in facts:
         return "unsure", "", min(69, score), "high_risk_identity_needs_human_confirmation"
-    if score >= 70 and "candidate_not_independent_official_site" not in counters:
+    if score >= 70 and "candidate_not_independent_official_site" not in counters and not _has_blocking_page_risk(list(counters)):
         return "accept", "", min(100, score), ""
     if replacement.get("url"):
-        if review_reason:
-            replacement_score = _to_int(replacement.get("score"))
-            confidence = max(score, replacement_score)
-            return "unsure", "", max(0, min(69, confidence)), "replacement_candidate_needs_human_confirmation"
         confidence = max(70, min(95, int(float(replacement.get("score") or 70))))
         return "replace", replacement["url"], confidence, ""
     if score <= 20 and counters:
@@ -616,7 +846,16 @@ def _candidate_url(row: dict[str, str]) -> str:
 
 
 def _empty_verification() -> dict:
-    return {"url": "", "domain": "", "score": 0, "evidence_urls": [], "supporting_facts": [], "counter_evidence": []}
+    return {
+        "url": "",
+        "domain": "",
+        "score": 0,
+        "evidence_urls": [],
+        "supporting_facts": [],
+        "counter_evidence": [],
+        "page_roles": [],
+        "organizations": [],
+    }
 
 
 def _root_url(url: str) -> str:
@@ -764,6 +1003,161 @@ def _write_jsonl(path: Path, rows: list[dict]) -> None:
             f.write(json.dumps(row, ensure_ascii=False) + "\n")
 
 
+def _write_llm_review(*, run_dir: Path, rows: list[dict[str, str]], details: list[dict], model: str) -> dict:
+    paths = agent_b_llm_paths(run_dir)
+    api_key = os.getenv("OPENAI_API_KEY", "").strip()
+    output_rows: list[dict[str, str]] = []
+    json_rows: list[dict] = []
+    if not api_key:
+        summary = {
+            "enabled": True,
+            "status": "skipped_missing_openai_api_key",
+            "model": model,
+            "output_rows": 0,
+            "outputs": {"csv": str(paths["csv"]), "jsonl": str(paths["jsonl"]), "summary": str(paths["summary"])},
+        }
+        paths["summary"].parent.mkdir(parents=True, exist_ok=True)
+        paths["summary"].write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
+        return summary
+    details_by_key = {_row_key(item): item for item in details if _row_key(item)}
+    for row in rows:
+        detail = details_by_key.get(_row_key(row), {})
+        payload = _llm_payload(row, detail)
+        response = _call_llm(payload, model=model, api_key=api_key)
+        parsed = _parse_llm_response(response)
+        out_row = {
+            "provider_id": row.get("provider_id", ""),
+            "provider_name": row.get("provider_name", ""),
+            "candidate_url": row.get("candidate_url", ""),
+            "agent_b_decision": row.get("agent_b_decision", ""),
+            "agent_b_confidence": row.get("confidence", ""),
+            "evidence_score": row.get("evidence_score", ""),
+            "llm_decision": parsed.get("decision", "unsure"),
+            "llm_confidence": str(parsed.get("confidence", "")),
+            "llm_supporting_facts": "; ".join(parsed.get("supporting_facts", []) or []),
+            "llm_counter_evidence": "; ".join(parsed.get("counter_evidence", []) or []),
+            "llm_reason_for_unsure": parsed.get("reason_for_unsure", ""),
+            "llm_error": parsed.get("error", ""),
+        }
+        output_rows.append(out_row)
+        json_rows.append({"provider_id": row.get("provider_id", ""), "payload": payload, "response": response, "parsed": parsed})
+    _write_rows(paths["csv"], output_rows, AGENT_B_LLM_FIELDS)
+    _write_jsonl(paths["jsonl"], json_rows)
+    summary = {
+        "enabled": True,
+        "status": "complete",
+        "model": model,
+        "output_rows": len(output_rows),
+        "decision_counts": _counts(output_rows, "llm_decision"),
+        "error_rows": sum(1 for row in output_rows if row.get("llm_error")),
+        "outputs": {"csv": str(paths["csv"]), "jsonl": str(paths["jsonl"]), "summary": str(paths["summary"])},
+    }
+    paths["summary"].write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
+    return summary
+
+
+def _llm_payload(row: dict[str, str], detail: dict) -> dict:
+    candidate = detail.get("candidate") or {}
+    return {
+        "provider": {
+            "provider_id": row.get("provider_id", ""),
+            "provider_name": row.get("provider_name", ""),
+            "provider_detail_url": row.get("provider_detail_url", ""),
+            "locations": _parse_locations(row.get("provider_locations", "")),
+        },
+        "candidate": {
+            "url": row.get("candidate_url", ""),
+            "domain": row.get("candidate_domain", ""),
+            "agent_b_score": row.get("evidence_score", ""),
+            "evidence_urls": candidate.get("evidence_urls", []),
+            "supporting_facts": candidate.get("supporting_facts", []),
+            "counter_evidence": candidate.get("counter_evidence", []),
+            "page_roles": candidate.get("page_roles", []),
+            "organizations": candidate.get("organizations", []),
+        },
+        "agent_b": {
+            "decision": row.get("agent_b_decision", ""),
+            "confidence": row.get("confidence", ""),
+            "reason_for_unsure": row.get("reason_for_unsure", ""),
+        },
+    }
+
+
+def _call_llm(payload: dict, *, model: str, api_key: str) -> dict:
+    system = (
+        "You verify whether a candidate URL is the independent official website for an Amazon service provider. "
+        "Use only the supplied structured evidence. Return compact JSON with keys decision, confidence, "
+        "supporting_facts, counter_evidence, reason_for_unsure. decision must be accept, reject, unsure, or possible_replace."
+    )
+    user = json.dumps(payload, ensure_ascii=False)
+    body = json.dumps(
+        {
+            "model": model,
+            "temperature": 0,
+            "response_format": {"type": "json_object"},
+            "messages": [
+                {"role": "system", "content": system},
+                {"role": "user", "content": user},
+            ],
+        }
+    ).encode("utf-8")
+    base_url = os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1").rstrip("/")
+    request = urllib_request.Request(
+        f"{base_url}/chat/completions",
+        data=body,
+        headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        with urllib_request.urlopen(request, timeout=_llm_timeout()) as response:
+            return json.loads(response.read().decode("utf-8"))
+    except (urllib_error.URLError, TimeoutError, json.JSONDecodeError) as exc:
+        return {"error": type(exc).__name__, "message": str(exc)}
+
+
+def _parse_llm_response(response: dict) -> dict:
+    if response.get("error"):
+        return {"decision": "unsure", "confidence": 0, "supporting_facts": [], "counter_evidence": [], "reason_for_unsure": "llm_call_failed", "error": response.get("message") or response.get("error", "")}
+    try:
+        content = response["choices"][0]["message"]["content"]
+    except (KeyError, IndexError, TypeError):
+        return {"decision": "unsure", "confidence": 0, "supporting_facts": [], "counter_evidence": [], "reason_for_unsure": "llm_response_unparseable", "error": "missing_content"}
+    try:
+        data = json.loads(content)
+    except json.JSONDecodeError:
+        return {"decision": "unsure", "confidence": 0, "supporting_facts": [], "counter_evidence": [], "reason_for_unsure": "llm_response_unparseable", "error": "invalid_json"}
+    decision = str(data.get("decision", "unsure")).strip().lower()
+    if decision not in {"accept", "reject", "unsure", "possible_replace"}:
+        decision = "unsure"
+    return {
+        "decision": decision,
+        "confidence": max(0, min(100, _to_int(data.get("confidence")))),
+        "supporting_facts": _list_values(data.get("supporting_facts")),
+        "counter_evidence": _list_values(data.get("counter_evidence")),
+        "reason_for_unsure": str(data.get("reason_for_unsure", ""))[:500],
+        "error": "",
+    }
+
+
+def _list_values(value: object) -> list[str]:
+    if isinstance(value, list):
+        return [str(item)[:300] for item in value if str(item).strip()]
+    if isinstance(value, str) and value.strip():
+        return [value.strip()[:300]]
+    return []
+
+
+def _llm_timeout() -> int:
+    try:
+        return max(5, int(os.getenv("FINDER_AGENT_B_LLM_TIMEOUT", "30")))
+    except ValueError:
+        return 30
+
+
+def _env_flag(name: str) -> bool:
+    return os.getenv(name, "").strip().casefold() in {"1", "true", "yes", "on"}
+
+
 def _index_existing_rows(path: Path) -> dict[str, dict[str, str]]:
     return {_row_key(row): row for row in _read_rows(path) if _row_key(row)}
 
@@ -795,6 +1189,8 @@ def _details_from_output_row(row: dict[str, str]) -> dict:
             "evidence_urls": [item.strip() for item in row.get("evidence_urls", "").split(";") if item.strip()],
             "supporting_facts": [item.strip() for item in row.get("supporting_facts", "").split(";") if item.strip()],
             "counter_evidence": [item.strip() for item in row.get("counter_evidence", "").split(";") if item.strip()],
+            "page_roles": [],
+            "organizations": [],
         },
         "replacement": {
             "url": row.get("replacement_url", ""),
