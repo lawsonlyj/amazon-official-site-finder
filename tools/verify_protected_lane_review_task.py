@@ -24,6 +24,7 @@ REQUIRED_FIELDS = [
     "review_instruction",
     "optimization_use",
 ]
+VALID_MANUAL_DECISIONS = {"accept", "replace", "reject", "unsure"}
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -38,6 +39,11 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="Allow non-empty manual_decision values when verifying a returned filled task.",
     )
+    parser.add_argument(
+        "--require-filled",
+        action="store_true",
+        help="Require every row to have a valid manual_decision. Implies --allow-filled.",
+    )
     args = parser.parse_args(argv)
 
     report = verify_protected_lane_review_task(
@@ -46,7 +52,8 @@ def main(argv: list[str] | None = None) -> int:
         xlsx_path=args.xlsx,
         output_json=args.output_json,
         output_md=args.output_md,
-        allow_filled=args.allow_filled,
+        allow_filled=args.allow_filled or args.require_filled,
+        require_filled=args.require_filled,
     )
     print(json.dumps(report["summary"], ensure_ascii=False, indent=2))
     return 0 if report["summary"]["passed"] else 1
@@ -60,6 +67,7 @@ def verify_protected_lane_review_task(
     output_json: str | Path | None = None,
     output_md: str | Path | None = None,
     allow_filled: bool = False,
+    require_filled: bool = False,
 ) -> dict:
     csv_file = Path(csv_path)
     rows, headers = _read_rows(csv_file)
@@ -92,8 +100,36 @@ def verify_protected_lane_review_task(
         )
 
     filled_rows = [row for row in rows if str(row.get("manual_decision") or "").strip()]
+    blank_decision_rows = [row for row in rows if not str(row.get("manual_decision") or "").strip()]
+    invalid_decision_rows = [
+        row
+        for row in filled_rows
+        if str(row.get("manual_decision") or "").strip().casefold() not in VALID_MANUAL_DECISIONS
+    ]
+    replace_missing_url_rows = [
+        row
+        for row in rows
+        if str(row.get("manual_decision") or "").strip().casefold() == "replace"
+        and not str(row.get("manual_url") or "").strip()
+    ]
     if filled_rows and not allow_filled:
         failures.append({"check": "manual_decision_blank", "message": f"Manual decision already filled: {len(filled_rows)}"})
+    if require_filled and blank_decision_rows:
+        failures.append({"check": "manual_decision_required", "message": f"Rows missing manual_decision: {len(blank_decision_rows)}"})
+    if allow_filled and invalid_decision_rows:
+        failures.append(
+            {
+                "check": "invalid_manual_decision",
+                "message": f"Rows with invalid manual_decision: {len(invalid_decision_rows)}",
+            }
+        )
+    if allow_filled and replace_missing_url_rows:
+        failures.append(
+            {
+                "check": "replace_missing_manual_url",
+                "message": f"Replace rows missing manual_url: {len(replace_missing_url_rows)}",
+            }
+        )
 
     summary_task_rows = _to_int(summary.get("task_rows"))
     if summary_json and summary_task_rows != len(rows):
@@ -125,6 +161,10 @@ def verify_protected_lane_review_task(
             "missing_provider_detail_url_rows": len(missing_provider_detail),
             "missing_candidate_or_official_url_rows": len(missing_candidate_or_official),
             "filled_manual_decision_rows": len(filled_rows),
+            "blank_manual_decision_rows": len(blank_decision_rows),
+            "invalid_manual_decision_rows": len(invalid_decision_rows),
+            "replace_missing_manual_url_rows": len(replace_missing_url_rows),
+            "valid_manual_decision_values": sorted(VALID_MANUAL_DECISIONS),
             "reason_counts": reason_counts,
             "summary_task_rows": summary_task_rows if summary_json else None,
             "xlsx_hyperlink_formula_count": hyperlink_count if xlsx_path else None,
@@ -136,6 +176,7 @@ def verify_protected_lane_review_task(
             "summary_json": str(summary_json or ""),
             "xlsx": str(xlsx_path or ""),
             "allow_filled": bool(allow_filled),
+            "require_filled": bool(require_filled),
         },
     }
     if output_json:
@@ -198,6 +239,9 @@ def _render_markdown(report: dict) -> str:
         f"- Missing provider_detail_url rows: {summary['missing_provider_detail_url_rows']}",
         f"- Missing candidate/official URL rows: {summary['missing_candidate_or_official_url_rows']}",
         f"- Filled manual_decision rows: {summary['filled_manual_decision_rows']}",
+        f"- Blank manual_decision rows: {summary['blank_manual_decision_rows']}",
+        f"- Invalid manual_decision rows: {summary['invalid_manual_decision_rows']}",
+        f"- Replace rows missing manual_url: {summary['replace_missing_manual_url_rows']}",
         f"- XLSX hyperlink formulas: {summary['xlsx_hyperlink_formula_count']}",
         "",
         "## Failures",

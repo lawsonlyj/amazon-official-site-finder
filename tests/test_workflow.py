@@ -7149,17 +7149,51 @@ class OperationalCommandTests(unittest.TestCase):
                 xlsx_path=task_xlsx,
                 allow_filled=True,
             )
+            filled_rows = [dict(row) for row in rows[:2]]
+            filled_rows[0]["manual_decision"] = "replace"
+            filled_rows[0]["manual_url"] = ""
+            filled_rows[1]["manual_decision"] = "maybe"
+            filled_bad_csv = root / "filled_bad.csv"
+            _write_test_csv(filled_bad_csv, filled_rows)
+            filled_bad_report = verify_protected_lane_review_task(
+                csv_path=filled_bad_csv,
+                summary_json=summary_json,
+                xlsx_path=task_xlsx,
+                allow_filled=True,
+                require_filled=True,
+            )
+            filled_rows[0]["manual_url"] = "https://replacement.example"
+            filled_rows[1]["manual_decision"] = "accept"
+            filled_good_csv = root / "filled_good.csv"
+            _write_test_csv(filled_good_csv, filled_rows)
+            filled_good_report = verify_protected_lane_review_task(
+                csv_path=filled_good_csv,
+                summary_json=summary_json,
+                xlsx_path=task_xlsx,
+                allow_filled=True,
+                require_filled=True,
+            )
             saved = json.loads(output_json.read_text(encoding="utf-8"))
 
         self.assertTrue(report["summary"]["passed"])
         self.assertEqual(report["summary"]["row_count"], 2)
         self.assertGreater(report["summary"]["xlsx_hyperlink_formula_count"], 0)
+        self.assertEqual(report["summary"]["blank_manual_decision_rows"], 2)
+        self.assertEqual(report["summary"]["invalid_manual_decision_rows"], 0)
+        self.assertEqual(report["summary"]["replace_missing_manual_url_rows"], 0)
         self.assertEqual(saved["summary"]["failure_count"], 0)
         self.assertFalse(bad_report["summary"]["passed"])
         self.assertGreaterEqual(bad_report["summary"]["duplicate_key_count"], 1)
         self.assertGreaterEqual(bad_report["summary"]["filled_manual_decision_rows"], 1)
         self.assertFalse(allow_filled_report["summary"]["passed"])
         self.assertTrue(any(item["check"] == "duplicate_provider_reason" for item in allow_filled_report["failures"]))
+        self.assertFalse(filled_bad_report["summary"]["passed"])
+        self.assertEqual(filled_bad_report["summary"]["invalid_manual_decision_rows"], 1)
+        self.assertEqual(filled_bad_report["summary"]["replace_missing_manual_url_rows"], 1)
+        self.assertTrue(any(item["check"] == "invalid_manual_decision" for item in filled_bad_report["failures"]))
+        self.assertTrue(any(item["check"] == "replace_missing_manual_url" for item in filled_bad_report["failures"]))
+        self.assertTrue(filled_good_report["summary"]["passed"])
+        self.assertEqual(filled_good_report["summary"]["blank_manual_decision_rows"], 0)
 
     def test_scoring_tries_www_variant_before_giving_up_on_candidate(self):
         config = load_config("config/scoring.json")
