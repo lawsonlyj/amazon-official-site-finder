@@ -4528,6 +4528,7 @@ class OperationalCommandTests(unittest.TestCase):
             }
             with (output_dir / "label_gap_high_priority_task.csv").open(newline="", encoding="utf-8") as f:
                 high_gap_rows = list(csv.DictReader(f))
+            status_data = json.loads((output_dir / "calibration_status.json").read_text(encoding="utf-8"))
 
         self.assertEqual(report["summary"]["sample_rows"], 2)
         self.assertTrue(output_exists["recall_json"])
@@ -4552,6 +4553,8 @@ class OperationalCommandTests(unittest.TestCase):
         self.assertIn("label_gap_task", report)
         self.assertIn("label_gap_high_priority_task", report)
         self.assertEqual(report["summary"]["label_gap_high_priority_task_rows"], 0)
+        self.assertEqual(status_data["summary"]["label_gap_task_rows"], report["summary"]["label_gap_task_rows"])
+        self.assertEqual(status_data["summary"]["label_gap_high_priority_task_rows"], 0)
         self.assertEqual(high_gap_rows, [])
         self.assertIn("release_actionable_safe_patterns", report["summary"])
         self.assertEqual(report["summary"]["actionable_release_validation_rows"], 1)
@@ -5181,6 +5184,8 @@ class OperationalCommandTests(unittest.TestCase):
                             "more_label_review_lanes": ["precision_second_pass_accepted_lt70"],
                             "spot_check_candidate_lanes": ["precision_calibrated_pattern_release"],
                             "filled_eval_labeled_rows": None,
+                            "label_gap_task_rows": 7,
+                            "label_gap_high_priority_task_rows": 5,
                         },
                         "outputs": {
                             "sample_csv": str(sample_csv),
@@ -5281,6 +5286,8 @@ class OperationalCommandTests(unittest.TestCase):
         self.assertEqual(high_priority[0]["target_decisive_rows"], 5)
         self.assertEqual(high_priority[0]["decisive_rows_needed"], 5)
         self.assertEqual(report["summary"]["high_priority_decisive_rows_needed"], 5)
+        self.assertEqual(report["summary"]["label_gap_task_rows"], 7)
+        self.assertEqual(report["summary"]["label_gap_high_priority_task_rows"], 5)
         by_reason = {item["review_reason"]: item for item in report["label_targets"]}
         self.assertEqual(by_reason["precision_calibrated_pattern_release"]["target_decisive_rows"], 3)
         self.assertEqual(by_reason["precision_low_confidence_auto_match"]["target_decisive_rows"], 3)
@@ -5290,6 +5297,7 @@ class OperationalCommandTests(unittest.TestCase):
         self.assertIn("precision_second_pass_accepted_lt70", md_text)
         self.assertIn("prior/pattern_release.json", md_text)
         self.assertIn("supplied_prior", md_text)
+        self.assertIn("Label-gap task rows: 7 total, 5 high priority", md_text)
         self.assertIn("decisive=0/5", md_text)
 
     def test_build_calibration_status_report_flags_candidate_changes_after_labels(self):

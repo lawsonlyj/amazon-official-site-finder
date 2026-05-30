@@ -359,6 +359,16 @@ def run_calibration_cycle(
     report["summary"]["label_gap_high_priority_rows"] = label_gap_task.get("priority_counts", {}).get("high", 0)
     report["summary"]["label_gap_high_priority_task_rows"] = high_priority_label_gap_task.get("task_rows")
     summary_json.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
+    status_report = build_calibration_status_report(
+        calibration_cycle_json=summary_json,
+        balance_report_json=balance_report_json,
+        threshold_boundary_json=threshold_boundary_json,
+        sample_eval_json=filled_eval_json if filled_eval_sample else eval_json,
+        output_json=status_json,
+        output_md=status_md,
+    )
+    report["calibration_status"] = status_report
+    summary_json.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
     summary_md.write_text(_render_markdown(report), encoding="utf-8")
     return report
 

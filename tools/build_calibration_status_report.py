@@ -126,6 +126,8 @@ def build_calibration_status_report(
             "high_priority_decisive_rows_needed": sum(
                 _to_int(target.get("decisive_rows_needed")) for target in label_targets if target.get("priority") == "high"
             ),
+            "label_gap_task_rows": _to_int(cycle_summary.get("label_gap_task_rows")),
+            "label_gap_high_priority_task_rows": _to_int(cycle_summary.get("label_gap_high_priority_task_rows")),
         },
         "threshold": threshold_status,
         "pattern_release": pattern_status,
@@ -660,6 +662,7 @@ def _render_markdown(report: dict) -> str:
         f"- Pattern release source kind: {summary.get('pattern_release_source_kind') or 'not_evaluated'}",
         f"- Label targets: {summary['label_target_count']} total, {summary['high_priority_label_target_count']} high priority",
         f"- Decisive labels still needed: {summary['decisive_rows_needed']} total, {summary['high_priority_decisive_rows_needed']} high priority",
+        f"- Label-gap task rows: {summary['label_gap_task_rows']} total, {summary['label_gap_high_priority_task_rows']} high priority",
         "",
         "## Artifacts",
         "",
