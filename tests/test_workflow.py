@@ -5391,6 +5391,48 @@ class OperationalCommandTests(unittest.TestCase):
         self.assertEqual(report["summary"]["review_lane_status"], "candidate_for_downgrade")
         self.assertIn("lane_downgrade_candidate", {item["id"] for item in report["open_requirements"]})
 
+    def test_build_calibration_status_report_blocks_on_fill_quality_issues(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            cycle = root / "cycle.json"
+            sample_eval = root / "sample_eval.json"
+            cycle.write_text(
+                json.dumps(
+                    {
+                        "summary": {
+                            "recommended_global_accept_threshold": 75,
+                            "recommended_second_pass_threshold": 75,
+                            "filled_eval_labeled_rows": 3,
+                            "filled_eval_decisive_rows": 2,
+                        }
+                    }
+                ),
+                encoding="utf-8",
+            )
+            sample_eval.write_text(
+                json.dumps(
+                    {
+                        "summary": {
+                            "labeled_rows": 2,
+                            "decisive_rows": 2,
+                            "decision_quality_issue_rows": 2,
+                            "invalid_manual_decision_rows": 1,
+                            "replace_missing_manual_url_rows": 1,
+                        }
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            report = build_calibration_status_report(calibration_cycle_json=cycle, sample_eval_json=sample_eval)
+
+        self.assertEqual(report["summary"]["workflow_status"], "not_converged_fix_fill_quality")
+        self.assertEqual(report["summary"]["decision_quality_issue_rows"], 2)
+        self.assertEqual(report["summary"]["invalid_manual_decision_rows"], 1)
+        self.assertEqual(report["summary"]["replace_missing_manual_url_rows"], 1)
+        self.assertIn("fix_calibration_fill_quality", {item["id"] for item in report["open_requirements"]})
+        self.assertIn("Fix invalid manual_decision", report["next_actions"][0])
+
     def test_build_calibration_status_report_uses_full_sample_counts_after_partial_fill(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

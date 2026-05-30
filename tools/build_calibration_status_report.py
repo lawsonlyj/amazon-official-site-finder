@@ -88,6 +88,9 @@ def build_calibration_status_report(
             ),
             "lane_needs_more_label_rows": _to_int(sample_summary.get("lane_needs_more_label_rows")),
             "lane_candidate_for_change_rows": _to_int(sample_summary.get("lane_candidate_for_change_rows")),
+            "decision_quality_issue_rows": _to_int(sample_summary.get("decision_quality_issue_rows")),
+            "invalid_manual_decision_rows": _to_int(sample_summary.get("invalid_manual_decision_rows")),
+            "replace_missing_manual_url_rows": _to_int(sample_summary.get("replace_missing_manual_url_rows")),
             "lane_change_candidate_count": len(lane_change_candidates),
             "deferred_lane_change_candidate_count": sum(
                 1 for item in lane_change_candidates if item.get("status") == "deferred_until_remaining_label_gaps_close"
@@ -333,6 +336,8 @@ def _workflow_status(
     pattern_status: dict,
     lane_status: dict,
 ) -> str:
+    if _to_int(sample_summary.get("decision_quality_issue_rows")):
+        return "not_converged_fix_fill_quality"
     labeled = _to_int(
         _first_present(
             cycle_summary.get("filled_eval_labeled_rows"),
@@ -361,6 +366,18 @@ def _open_requirements(
     lane_status: dict,
 ) -> list[dict]:
     out = []
+    quality_issue_rows = _to_int(sample_summary.get("decision_quality_issue_rows"))
+    if quality_issue_rows:
+        invalid = _to_int(sample_summary.get("invalid_manual_decision_rows"))
+        missing_url = _to_int(sample_summary.get("replace_missing_manual_url_rows"))
+        out.append(
+            {
+                "id": "fix_calibration_fill_quality",
+                "status": "open",
+                "reason": f"Filled calibration labels contain {quality_issue_rows} quality issue row(s): invalid_decision={invalid}, replace_missing_manual_url={missing_url}.",
+                "action": "Fix invalid manual_decision values and add manual_url for replace rows before using these labels for threshold or rule changes.",
+            }
+        )
     labeled = _to_int(
         _first_present(
             cycle_summary.get("filled_eval_labeled_rows"),
@@ -609,6 +626,9 @@ def _next_actions(
 ) -> list[str]:
     artifacts = artifacts or {}
     label_targets = label_targets or []
+    if workflow_status == "not_converged_fix_fill_quality":
+        fix_actions = [item["action"] for item in open_requirements if item.get("id") == "fix_calibration_fill_quality"]
+        return fix_actions or ["Fix calibration fill-quality issues before changing thresholds or review-lane routing."]
     sample_xlsx = artifacts.get("sample_xlsx") or "the latest calibration XLSX"
     label_gap_xlsx = artifacts.get("label_gap_xlsx") or sample_xlsx
     high_priority_xlsx = artifacts.get("label_gap_high_priority_xlsx") or label_gap_xlsx
@@ -654,6 +674,9 @@ def _render_markdown(report: dict) -> str:
         f"- Review lane status: {summary['review_lane_status']}",
         f"- Recommended thresholds: {summary['recommended_global_accept_threshold']}/{summary['recommended_second_pass_threshold']}",
         f"- Filled decisive rows: {summary['filled_decisive_rows']}",
+        f"- Decision quality issue rows: {summary['decision_quality_issue_rows']}",
+        f"- Invalid manual decisions: {summary['invalid_manual_decision_rows']}",
+        f"- Replace rows missing manual_url: {summary['replace_missing_manual_url_rows']}",
         f"- Protected review lanes: {summary['protected_review_lane_count']}",
         f"- Lane needs-more-label rows: {summary['lane_needs_more_label_rows']}",
         f"- Lane change candidates: {summary['lane_change_candidate_count']} total, {summary['deferred_lane_change_candidate_count']} deferred, {summary['ready_lane_change_candidate_count']} ready",
