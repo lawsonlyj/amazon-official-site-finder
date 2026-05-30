@@ -42,6 +42,7 @@ from tools.run_agent_c_recommendations import run_agent_c_recommendations
 from tools.apply_agent_optimizations import apply_agent_optimizations
 from tools.evaluate_workflow_balance import evaluate_balance, evaluate_balance_from_details
 from tools.build_balance_report import build_balance_report
+from tools.build_calibration_label_gap_task import build_calibration_label_gap_task
 from tools.build_calibration_review_sample import build_calibration_review_sample
 from tools.build_calibration_status_report import build_calibration_status_report
 from tools.evaluate_calibration_review_sample import evaluate_calibration_review_sample
@@ -4518,6 +4519,8 @@ class OperationalCommandTests(unittest.TestCase):
                 "summary_md": (output_dir / "calibration_cycle_summary.md").exists(),
                 "status_json": (output_dir / "calibration_status.json").exists(),
                 "status_md": (output_dir / "calibration_status.md").exists(),
+                "label_gap_csv": (output_dir / "label_gap_task.csv").exists(),
+                "label_gap_xlsx": (output_dir / "label_gap_task.xlsx").exists(),
             }
 
         self.assertEqual(report["summary"]["sample_rows"], 2)
@@ -4533,7 +4536,11 @@ class OperationalCommandTests(unittest.TestCase):
         self.assertTrue(output_exists["summary_md"])
         self.assertTrue(output_exists["status_json"])
         self.assertTrue(output_exists["status_md"])
+        self.assertTrue(output_exists["label_gap_csv"])
+        self.assertTrue(output_exists["label_gap_xlsx"])
         self.assertEqual(report["summary"]["empty_eval_labeled_rows"], 0)
+        self.assertIn("label_gap_task_rows", report["summary"])
+        self.assertIn("label_gap_task", report)
         self.assertIn("release_actionable_safe_patterns", report["summary"])
         self.assertEqual(report["summary"]["actionable_release_validation_rows"], 1)
         self.assertEqual(report["summary"]["recommended_global_accept_threshold"], DEFAULT_SECOND_PASS_ACCEPT_THRESHOLD)
@@ -5097,6 +5104,84 @@ class OperationalCommandTests(unittest.TestCase):
         self.assertEqual(report["summary"]["workflow_status"], "candidate_changes_require_regression")
         self.assertEqual(report["summary"]["review_lane_status"], "candidate_for_downgrade")
         self.assertIn("lane_downgrade_candidate", {item["id"] for item in report["open_requirements"]})
+
+    def test_build_calibration_label_gap_task_selects_needed_unlabeled_rows(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            status = root / "status.json"
+            sample = root / "sample.csv"
+            output_csv = root / "label_gap.csv"
+            output_xlsx = root / "label_gap.xlsx"
+            rows = []
+            for idx in range(6):
+                rows.append(
+                    {
+                        "provider_id": f"high-{idx}",
+                        "provider_name": f"High {idx}",
+                        "provider_detail_url": f"https://amazon.example/high-{idx}",
+                        "review_reason": "precision_second_pass_accepted_lt70",
+                        "official_url": f"https://high{idx}.example",
+                        "manual_decision": "accept" if idx == 0 else "",
+                        "manual_url": "",
+                        "notes": "",
+                    }
+                )
+            for idx in range(4):
+                rows.append(
+                    {
+                        "provider_id": f"spot-{idx}",
+                        "provider_name": f"Spot {idx}",
+                        "provider_detail_url": f"https://amazon.example/spot-{idx}",
+                        "review_reason": "precision_calibrated_pattern_release",
+                        "official_url": f"https://spot{idx}.example",
+                        "manual_decision": "",
+                        "manual_url": "",
+                        "notes": "",
+                    }
+                )
+            _write_test_csv(sample, rows)
+            status.write_text(
+                json.dumps(
+                    {
+                        "artifacts": {"sample_csv": str(sample)},
+                        "label_targets": [
+                            {
+                                "review_reason": "precision_second_pass_accepted_lt70",
+                                "priority": "high",
+                                "target_decisive_rows": 5,
+                                "decisive_rows_needed": 5,
+                                "label_goal": "Fill every sampled row.",
+                            },
+                            {
+                                "review_reason": "precision_calibrated_pattern_release",
+                                "priority": "medium",
+                                "target_decisive_rows": 3,
+                                "decisive_rows_needed": 3,
+                                "label_goal": "Spot-check released rows.",
+                            },
+                        ],
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            summary = build_calibration_label_gap_task(
+                status_json=status,
+                output_csv=output_csv,
+                output_xlsx=output_xlsx,
+            )
+            with output_csv.open(newline="", encoding="utf-8") as f:
+                out_rows = list(csv.DictReader(f))
+            xlsx_exists = output_xlsx.exists()
+
+        self.assertEqual(summary["task_rows"], 8)
+        self.assertEqual(summary["priority_counts"]["high"], 5)
+        self.assertEqual(summary["priority_counts"]["medium"], 3)
+        self.assertTrue(xlsx_exists)
+        self.assertEqual(out_rows[0]["label_priority"], "high")
+        self.assertEqual(out_rows[0]["label_decisive_rows_needed"], "5")
+        self.assertEqual(out_rows[0]["manual_decision"], "")
+        self.assertIn("provider_detail_url", out_rows[0])
 
     def test_scoring_tries_www_variant_before_giving_up_on_candidate(self):
         config = load_config("config/scoring.json")

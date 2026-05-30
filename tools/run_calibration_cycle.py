@@ -9,6 +9,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from tools.build_calibration_review_sample import build_calibration_review_sample
 from tools.build_balance_report import build_balance_report
+from tools.build_calibration_label_gap_task import build_calibration_label_gap_task
 from tools.build_calibration_status_report import build_calibration_status_report
 from tools.evaluate_calibration_review_sample import evaluate_calibration_review_sample
 from tools.mine_evidence_patterns import mine_evidence_patterns
@@ -105,6 +106,8 @@ def run_calibration_cycle(
     filled_eval_csv = out_dir / f"{sample_prefix}_eval_filled_details.csv"
     rule_candidates_json = out_dir / "pattern_rule_candidates.json"
     rule_candidates_md = out_dir / "pattern_rule_candidates.md"
+    label_gap_csv = out_dir / "label_gap_task.csv"
+    label_gap_xlsx = out_dir / "label_gap_task.xlsx"
     summary_json = out_dir / "calibration_cycle_summary.json"
     summary_md = out_dir / "calibration_cycle_summary.md"
     status_json = out_dir / "calibration_status.json"
@@ -281,6 +284,8 @@ def run_calibration_cycle(
             "filled_eval_csv": str(filled_eval_csv) if filled_sample else "",
             "rule_candidates_json": str(rule_candidates_json) if filled_sample else "",
             "rule_candidates_md": str(rule_candidates_md) if filled_sample else "",
+            "label_gap_csv": str(label_gap_csv),
+            "label_gap_xlsx": str(label_gap_xlsx),
             "summary_json": str(summary_json),
             "summary_md": str(summary_md),
             "status_json": str(status_json),
@@ -311,8 +316,18 @@ def run_calibration_cycle(
         output_json=status_json,
         output_md=status_md,
     )
+    label_gap_task = build_calibration_label_gap_task(
+        status_json=status_json,
+        sample_csv=filled_sample if filled_sample and str(filled_sample).endswith(".csv") else sample_csv,
+        output_csv=label_gap_csv,
+        output_xlsx=label_gap_xlsx,
+    )
     report["calibration_status"] = status_report
+    report["label_gap_task"] = label_gap_task
+    report["summary"]["label_gap_task_rows"] = label_gap_task.get("task_rows")
+    report["summary"]["label_gap_high_priority_rows"] = label_gap_task.get("priority_counts", {}).get("high", 0)
     summary_json.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
+    summary_md.write_text(_render_markdown(report), encoding="utf-8")
     return report
 
 
@@ -346,6 +361,8 @@ def _render_markdown(report: dict) -> str:
         f"- Spot-check candidate lanes: {', '.join(summary.get('spot_check_candidate_lanes') or []) or 'None'}",
         f"- More-label review lanes: {', '.join(summary.get('more_label_review_lanes') or []) or 'None'}",
         f"- Sample rows: {summary['sample_rows']}",
+        f"- Label-gap task rows: {summary.get('label_gap_task_rows')}",
+        f"- Label-gap high-priority rows: {summary.get('label_gap_high_priority_rows')}",
         f"- Actionable release validation rows: {summary['actionable_release_validation_rows']}",
         f"- Pattern candidate validation rows: {summary['pattern_validation_rows']}",
         f"- Pattern control validation rows: {summary['pattern_control_rows']}",
