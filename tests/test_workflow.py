@@ -5217,6 +5217,9 @@ class OperationalCommandTests(unittest.TestCase):
         self.assertIn("regression_overlay_xlsx", report["outputs"])
         self.assertIn("regression_overlay", report)
         self.assertIn("regression_overlay_balance", report)
+        self.assertIn("delivery_recommendation", report)
+        self.assertEqual(report["summary"]["delivery_decision"], "use_candidate_final")
+        self.assertFalse(report["summary"]["delivery_is_rule_release"])
         self.assertIn("run_calibration_regression_gate.py", report["summary"]["regression_gate_next_step"])
         self.assertIn("Rejected Pattern", rule_candidates_md_text)
         self.assertIn("Filled Lane Recommendations", summary_text)
@@ -5227,6 +5230,7 @@ class OperationalCommandTests(unittest.TestCase):
         self.assertIn("Regression Gate", summary_text)
         self.assertIn("Regression Overlay", summary_text)
         self.assertIn("Regression Overlay Balance", summary_text)
+        self.assertIn("Delivery Recommendation", summary_text)
         self.assertEqual(report["calibration_status"]["summary"]["workflow_status"], "partially_converged_keep_review_lanes")
 
     def test_run_calibration_cycle_merges_multiple_filled_samples(self):
@@ -6327,10 +6331,21 @@ class OperationalCommandTests(unittest.TestCase):
                             "regression_gate_status": "fail",
                             "regression_gate_fail_rows": 1,
                             "regression_gate_unverified_rows": 1,
+                            "regression_overlay_changed_rows": 2,
+                            "regression_overlay_gate_status": "pass",
+                            "regression_overlay_balance_accuracy": 0.9,
+                            "regression_overlay_balance_auto_precision": 0.95,
+                            "regression_overlay_balance_official_recall": 0.92,
+                            "regression_overlay_balance_accuracy_delta": 0.05,
+                            "regression_overlay_balance_precision_delta": 0.03,
+                            "regression_overlay_balance_recall_delta": 0.01,
                         },
                         "outputs": {
                             "regression_cases_csv": "calibration_regression_cases.csv",
                             "regression_gate_md": "calibration_regression_gate.md",
+                            "regression_overlay_csv": "calibration_regression_overlay_official_sites.csv",
+                            "regression_overlay_xlsx": "calibration_regression_overlay_official_sites.xlsx",
+                            "regression_overlay_balance_json": "calibration_regression_overlay_balance.json",
                         },
                     }
                 ),
@@ -6358,10 +6373,14 @@ class OperationalCommandTests(unittest.TestCase):
         self.assertEqual(report["summary"]["regression_gate_fail_rows"], 1)
         self.assertEqual(report["summary"]["regression_gate_unverified_rows"], 1)
         self.assertEqual(report["artifacts"]["regression_gate_md"], "calibration_regression_gate.md")
+        self.assertEqual(report["summary"]["delivery_decision"], "use_regression_overlay_final")
+        self.assertEqual(report["summary"]["delivery_output_xlsx"], "calibration_regression_overlay_official_sites.xlsx")
+        self.assertFalse(report["summary"]["delivery_is_rule_release"])
         self.assertEqual(report["application_gates"]["review_lane_change"]["status"], "blocked")
         self.assertIn("fix_regression_gate_failures", report["application_gates"]["review_lane_change"]["blockers"])
         self.assertIn("fix_regression_gate_failures", {item["id"] for item in report["open_requirements"]})
-        self.assertIn("Fix candidate workflow changes", report["next_actions"][0])
+        self.assertIn("Use calibration_regression_overlay_official_sites.xlsx", report["next_actions"][0])
+        self.assertIn("Fix candidate workflow changes", report["next_actions"][1])
 
     def test_build_calibration_status_report_marks_candidate_changes_after_gate_pass(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -7628,6 +7647,74 @@ class OperationalCommandTests(unittest.TestCase):
         self.assertIn("Convergence Audit", md_text)
         self.assertIn("75/75", md_text)
         self.assertIn("priority.xlsx", md_text)
+
+    def test_build_convergence_audit_separates_overlay_delivery_from_rule_release(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            status = root / "status.json"
+            balance = root / "balance.json"
+            output_md = root / "convergence.md"
+            status.write_text(
+                json.dumps(
+                    {
+                        "summary": {
+                            "workflow_status": "not_converged_regression_gate_failed",
+                            "threshold_status": "stable_keep_current",
+                            "pattern_release_status": "current_guarded_candidate",
+                            "review_lane_status": "protected_by_filled_labels",
+                            "recommended_global_accept_threshold": 75,
+                            "recommended_second_pass_threshold": 75,
+                            "filled_decisive_rows": 30,
+                            "protected_review_lane_count": 5,
+                            "pattern_release_correct_rows": 4,
+                            "pattern_release_wrong_rows": 0,
+                            "regression_gate_status": "failed",
+                        },
+                        "delivery_recommendation": {
+                            "decision": "use_regression_overlay_final",
+                            "output_csv": "overlay.csv",
+                            "output_xlsx": "overlay.xlsx",
+                            "is_rule_release": False,
+                            "reason": "Exact human-label overlay only.",
+                        },
+                        "next_actions": ["Fix candidate workflow changes until calibration_regression_gate passes."],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            balance.write_text(
+                json.dumps(
+                    {
+                        "threshold_simulations": [
+                            {
+                                "threshold": 75,
+                                "overall_accuracy": 0.9,
+                                "auto_precision": 0.95,
+                                "official_recall": 0.92,
+                                "false_official_rows": 4,
+                                "over_rejected_rows": 6,
+                                "official_output_rows": 243,
+                            }
+                        ]
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            report = build_convergence_audit(
+                status_json=status,
+                labeled_balance_json=balance,
+                output_md=output_md,
+            )
+            md_text = output_md.read_text(encoding="utf-8")
+
+        self.assertEqual(report["summary"]["delivery_decision"], "use_regression_overlay_final")
+        self.assertEqual(report["summary"]["delivery_output_xlsx"], "overlay.xlsx")
+        self.assertFalse(report["summary"]["delivery_is_rule_release"])
+        self.assertIn("Use overlay.xlsx for current delivery", report["next_actions"][1])
+        self.assertIn("Fix candidate workflow changes", report["next_actions"][-1])
+        self.assertIn("Delivery Recommendation", md_text)
+        self.assertIn("overlay.xlsx", md_text)
 
     def test_verify_protected_lane_review_task_checks_links_summary_and_manual_blanks(self):
         with tempfile.TemporaryDirectory() as tmp:

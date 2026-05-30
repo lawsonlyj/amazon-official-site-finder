@@ -542,6 +542,9 @@ def run_calibration_cycle(
         "regression_overlay": regression_overlay,
         "regression_overlay_balance": regression_overlay_balance,
     }
+    delivery_recommendation = _delivery_recommendation(report)
+    report["delivery_recommendation"] = delivery_recommendation
+    report["summary"].update(_delivery_summary(delivery_recommendation))
     summary_json.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
     summary_md.write_text(_render_markdown(report), encoding="utf-8")
     status_report = build_calibration_status_report(
@@ -785,6 +788,107 @@ def _baseline_balance_metric(path_value: str | Path, key: str):
     return (data.get("overall") or {}).get(key)
 
 
+def _delivery_recommendation(report: dict) -> dict:
+    summary = report.get("summary", {})
+    outputs = report.get("outputs", {})
+    inputs = report.get("inputs", {})
+    raw_gate_status = _normalize_gate_status(summary.get("regression_gate_status"))
+    overlay_gate_status = _normalize_gate_status(summary.get("regression_overlay_gate_status"))
+    changed_rows = _as_int(
+        summary.get("regression_overlay_changed_rows"),
+        summary.get("regression_overlay_change_count"),
+    )
+    output_csv = str(outputs.get("regression_overlay_csv") or "")
+    output_xlsx = str(outputs.get("regression_overlay_xlsx") or "")
+    has_overlay_output = bool(output_csv or output_xlsx)
+    balance_delta_keys = [
+        "regression_overlay_balance_accuracy_delta",
+        "regression_overlay_balance_precision_delta",
+        "regression_overlay_balance_recall_delta",
+    ]
+    balance_deltas = [_as_float(summary.get(key)) for key in balance_delta_keys]
+    known_deltas = [value for value in balance_deltas if value is not None]
+    balance_not_worse = not any(value < 0 for value in known_deltas)
+    raw_gate_failed = raw_gate_status in {"fail", "failed"}
+
+    if has_overlay_output and overlay_gate_status == "pass" and (changed_rows > 0 or raw_gate_failed) and balance_not_worse:
+        decision = "use_regression_overlay_final"
+        reason = (
+            "Use the exact human-label regression overlay as the current deliverable; "
+            "it passes the overlay gate and does not reduce labeled balance metrics. "
+            "This is an output correction, not a generalized scoring-rule release."
+        )
+        selected_csv = output_csv
+        selected_xlsx = output_xlsx
+    elif has_overlay_output and overlay_gate_status == "pass":
+        decision = "use_candidate_final"
+        reason = (
+            "The overlay gate passes, but the overlay does not change rows and the raw candidate gate did not fail; "
+            "use the candidate final output."
+        )
+        selected_csv = str(inputs.get("candidate_final_csv") or "")
+        selected_xlsx = ""
+    elif has_overlay_output:
+        decision = "do_not_use_regression_overlay"
+        reason = "A regression overlay exists, but its gate did not pass; do not use it as the deliverable."
+        selected_csv = str(inputs.get("candidate_final_csv") or "")
+        selected_xlsx = ""
+    else:
+        decision = "use_candidate_final"
+        reason = "No regression overlay final was generated for this calibration cycle."
+        selected_csv = str(inputs.get("candidate_final_csv") or "")
+        selected_xlsx = ""
+
+    return {
+        "decision": decision,
+        "reason": reason,
+        "output_csv": selected_csv,
+        "output_xlsx": selected_xlsx,
+        "is_rule_release": False,
+        "raw_candidate_gate_status": raw_gate_status,
+        "raw_candidate_gate_fail_rows": summary.get("regression_gate_fail_rows"),
+        "overlay_gate_status": overlay_gate_status,
+        "overlay_changed_rows": changed_rows,
+        "overlay_accuracy": summary.get("regression_overlay_balance_accuracy"),
+        "overlay_precision": summary.get("regression_overlay_balance_auto_precision"),
+        "overlay_recall": summary.get("regression_overlay_balance_official_recall"),
+        "overlay_accuracy_delta": summary.get("regression_overlay_balance_accuracy_delta"),
+        "overlay_precision_delta": summary.get("regression_overlay_balance_precision_delta"),
+        "overlay_recall_delta": summary.get("regression_overlay_balance_recall_delta"),
+    }
+
+
+def _delivery_summary(delivery: dict) -> dict:
+    return {
+        "delivery_decision": delivery.get("decision", ""),
+        "delivery_output_csv": delivery.get("output_csv", ""),
+        "delivery_output_xlsx": delivery.get("output_xlsx", ""),
+        "delivery_reason": delivery.get("reason", ""),
+        "delivery_is_rule_release": delivery.get("is_rule_release", False),
+    }
+
+
+def _normalize_gate_status(value: object) -> str:
+    text = str(value or "").strip().lower()
+    return {"failed": "failed", "fail": "fail", "passed": "pass"}.get(text, text)
+
+
+def _as_int(*values: object) -> int:
+    for value in values:
+        try:
+            return int(float(value or 0))
+        except (TypeError, ValueError):
+            continue
+    return 0
+
+
+def _as_float(value: object) -> float | None:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
 def _render_markdown(report: dict) -> str:
     summary = report["summary"]
     lines = [
@@ -851,6 +955,10 @@ def _render_markdown(report: dict) -> str:
         f"- Threshold decision: {summary.get('threshold_decision') or 'not_audited'}",
         f"- Review-lane decision: {summary.get('review_lane_decision') or 'not_audited'}",
         f"- Pattern-release decision: {summary.get('pattern_release_decision') or 'not_audited'}",
+        f"- Delivery decision: {summary.get('delivery_decision') or 'not_evaluated'}",
+        f"- Delivery output CSV: {summary.get('delivery_output_csv') or 'not_available'}",
+        f"- Delivery output XLSX: {summary.get('delivery_output_xlsx') or 'not_available'}",
+        f"- Delivery is rule release: {str(summary.get('delivery_is_rule_release')).lower()}",
         f"- Protected-lane task verification passed: {summary.get('protected_lanes_next_review_task_verification_passed')}",
         f"- Protected-lane priority task verification passed: {summary.get('protected_lanes_priority_task_verification_passed')}",
         f"- Historical label reuse enabled: {summary.get('historical_label_reuse_enabled')}",
@@ -1027,6 +1135,14 @@ def _render_markdown(report: dict) -> str:
         lines.append(f"- False official rows: {overall.get('false_official_rows')}")
         lines.append(f"- Over-rejected rows: {overall.get('over_rejected_rows')}")
         lines.append(f"- Accuracy delta vs labeled eval: {summary.get('regression_overlay_balance_accuracy_delta')}")
+    delivery = report.get("delivery_recommendation") or {}
+    if delivery:
+        lines.extend(["", "## Delivery Recommendation", ""])
+        lines.append(f"- Decision: {delivery.get('decision')}")
+        lines.append(f"- Output CSV: {delivery.get('output_csv') or 'not_available'}")
+        lines.append(f"- Output XLSX: {delivery.get('output_xlsx') or 'not_available'}")
+        lines.append(f"- Is rule release: {str(delivery.get('is_rule_release')).lower()}")
+        lines.append(f"- Reason: {delivery.get('reason')}")
     application_gate_checks = report.get("application_gate_checks") or {}
     if application_gate_checks.get("checks"):
         lines.extend(["", "## Application Gates", ""])

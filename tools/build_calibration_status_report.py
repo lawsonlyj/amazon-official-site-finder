@@ -54,6 +54,7 @@ def build_calibration_status_report(
     lane_status = _lane_status(cycle_summary, balance_summary, sample_summary, label_targets)
     lane_change_candidates = _lane_change_candidates(label_targets, lane_status)
     regression_gate_status = _regression_gate_status(cycle_summary)
+    delivery_recommendation = cycle.get("delivery_recommendation") or _delivery_recommendation(cycle_summary, artifacts)
     labeling_instructions = _labeling_instructions()
     workflow_status = _workflow_status(
         cycle_summary,
@@ -79,7 +80,14 @@ def build_calibration_status_report(
         regression_gate_status,
         open_requirements,
     )
-    next_actions = _next_actions(workflow_status, open_requirements, lane_status, artifacts, label_targets)
+    next_actions = _next_actions(
+        workflow_status,
+        open_requirements,
+        lane_status,
+        artifacts,
+        label_targets,
+        delivery_recommendation,
+    )
 
     report = {
         "summary": {
@@ -158,11 +166,16 @@ def build_calibration_status_report(
             "regression_gate_status": regression_gate_status["status"],
             "regression_gate_fail_rows": regression_gate_status["fail_rows"],
             "regression_gate_unverified_rows": regression_gate_status["unverified_rows"],
+            "delivery_decision": delivery_recommendation.get("decision", ""),
+            "delivery_output_csv": delivery_recommendation.get("output_csv", ""),
+            "delivery_output_xlsx": delivery_recommendation.get("output_xlsx", ""),
+            "delivery_is_rule_release": delivery_recommendation.get("is_rule_release", False),
         },
         "threshold": threshold_status,
         "pattern_release": pattern_status,
         "review_lanes": lane_status,
         "regression_gate": regression_gate_status,
+        "delivery_recommendation": delivery_recommendation,
         "application_gates": application_gates,
         "artifacts": artifacts,
         "label_targets": label_targets,
@@ -715,6 +728,12 @@ def _sample_artifacts(cycle: dict, sample_eval_json: str | Path | None) -> dict:
         "protected_lanes_priority_task_verification_md": str(
             outputs.get("protected_lanes_priority_task_verification_md") or ""
         ),
+        "regression_overlay_csv": str(outputs.get("regression_overlay_csv") or ""),
+        "regression_overlay_xlsx": str(outputs.get("regression_overlay_xlsx") or ""),
+        "regression_overlay_gate_json": str(outputs.get("regression_overlay_gate_json") or ""),
+        "regression_overlay_gate_md": str(outputs.get("regression_overlay_gate_md") or ""),
+        "regression_overlay_balance_json": str(outputs.get("regression_overlay_balance_json") or ""),
+        "regression_overlay_balance_csv": str(outputs.get("regression_overlay_balance_csv") or ""),
         "sample_eval_json": str(outputs.get("eval_json") or sample_eval_json or ""),
         "filled_eval_json": str(outputs.get("filled_eval_json") or ""),
         "regression_cases_csv": str(outputs.get("regression_cases_csv") or ""),
@@ -920,24 +939,110 @@ def _as_list(value: object) -> list[str]:
     return []
 
 
+def _delivery_recommendation(cycle_summary: dict, artifacts: dict) -> dict:
+    raw_gate_status = _normalize_gate_status(cycle_summary.get("regression_gate_status"))
+    overlay_gate_status = _normalize_gate_status(cycle_summary.get("regression_overlay_gate_status"))
+    changed_rows = _to_int(
+        _first_present(
+            cycle_summary.get("regression_overlay_changed_rows"),
+            cycle_summary.get("regression_overlay_change_count"),
+        )
+    )
+    output_csv = str(artifacts.get("regression_overlay_csv") or cycle_summary.get("delivery_output_csv") or "")
+    output_xlsx = str(artifacts.get("regression_overlay_xlsx") or cycle_summary.get("delivery_output_xlsx") or "")
+    has_overlay_output = bool(output_csv or output_xlsx)
+    deltas = [
+        _to_float_or_none(cycle_summary.get("regression_overlay_balance_accuracy_delta")),
+        _to_float_or_none(cycle_summary.get("regression_overlay_balance_precision_delta")),
+        _to_float_or_none(cycle_summary.get("regression_overlay_balance_recall_delta")),
+    ]
+    known_deltas = [value for value in deltas if value is not None]
+    balance_not_worse = not any(value < 0 for value in known_deltas)
+    raw_gate_failed = raw_gate_status in {"fail", "failed"}
+
+    if has_overlay_output and overlay_gate_status == "pass" and (changed_rows > 0 or raw_gate_failed) and balance_not_worse:
+        decision = "use_regression_overlay_final"
+        reason = (
+            "Use the exact human-label regression overlay as the current deliverable; "
+            "rules remain unconverged until the candidate regression gate passes."
+        )
+        selected_csv = output_csv
+        selected_xlsx = output_xlsx
+    elif has_overlay_output and overlay_gate_status == "pass":
+        decision = "use_candidate_final"
+        reason = "The regression overlay passes but does not improve this run; use the candidate final output."
+        selected_csv = ""
+        selected_xlsx = ""
+    elif has_overlay_output:
+        decision = "do_not_use_regression_overlay"
+        reason = "The regression overlay output exists, but its gate did not pass."
+        selected_csv = ""
+        selected_xlsx = ""
+    else:
+        decision = "use_candidate_final"
+        reason = "No regression overlay final is available for this run."
+        selected_csv = ""
+        selected_xlsx = ""
+    return {
+        "decision": decision,
+        "reason": reason,
+        "output_csv": selected_csv,
+        "output_xlsx": selected_xlsx,
+        "is_rule_release": False,
+        "raw_candidate_gate_status": raw_gate_status,
+        "raw_candidate_gate_fail_rows": cycle_summary.get("regression_gate_fail_rows"),
+        "overlay_gate_status": overlay_gate_status,
+        "overlay_changed_rows": changed_rows,
+        "overlay_accuracy": cycle_summary.get("regression_overlay_balance_accuracy"),
+        "overlay_precision": cycle_summary.get("regression_overlay_balance_auto_precision"),
+        "overlay_recall": cycle_summary.get("regression_overlay_balance_official_recall"),
+        "overlay_accuracy_delta": cycle_summary.get("regression_overlay_balance_accuracy_delta"),
+        "overlay_precision_delta": cycle_summary.get("regression_overlay_balance_precision_delta"),
+        "overlay_recall_delta": cycle_summary.get("regression_overlay_balance_recall_delta"),
+    }
+
+
+def _delivery_next_action(delivery: dict) -> str:
+    if delivery.get("decision") != "use_regression_overlay_final":
+        return ""
+    output = delivery.get("output_xlsx") or delivery.get("output_csv") or "the regression overlay final"
+    return (
+        f"Use {output} for the current deliverable, but keep it separate from scoring-rule convergence; "
+        "this overlay applies exact human regression labels only."
+    )
+
+
+def _normalize_gate_status(value: object) -> str:
+    text = str(value or "").strip().lower()
+    return {"passed": "pass"}.get(text, text)
+
+
 def _next_actions(
     workflow_status: str,
     open_requirements: list[dict],
     lane_status: dict,
     artifacts: dict | None = None,
     label_targets: list[dict] | None = None,
+    delivery_recommendation: dict | None = None,
 ) -> list[str]:
     artifacts = artifacts or {}
     label_targets = label_targets or []
+    delivery_action = _delivery_next_action(delivery_recommendation or {})
+
+    def with_delivery(actions: list[str]) -> list[str]:
+        return ([delivery_action] if delivery_action else []) + actions
+
     if workflow_status == "not_converged_fix_fill_quality":
         fix_actions = [item["action"] for item in open_requirements if item.get("id") == "fix_calibration_fill_quality"]
-        return fix_actions or ["Fix calibration fill-quality issues before changing thresholds or review-lane routing."]
+        return with_delivery(
+            fix_actions or ["Fix calibration fill-quality issues before changing thresholds or review-lane routing."]
+        )
     if workflow_status == "not_converged_regression_gate_failed":
         gate_actions = [item["action"] for item in open_requirements if item.get("id") == "fix_regression_gate_failures"]
-        return gate_actions or ["Fix regression gate failures before applying threshold or review-lane routing changes."]
+        return with_delivery(gate_actions or ["Fix regression gate failures before applying threshold or review-lane routing changes."])
     if workflow_status == "not_converged_regression_gate_not_run":
         gate_actions = [item["action"] for item in open_requirements if item.get("id") == "run_regression_gate"]
-        return gate_actions or ["Run the calibration regression gate before declaring the current rules converged."]
+        return with_delivery(gate_actions or ["Run the calibration regression gate before declaring the current rules converged."])
     sample_xlsx = artifacts.get("sample_xlsx") or "the latest calibration XLSX"
     label_gap_xlsx = artifacts.get("label_gap_xlsx") or sample_xlsx
     high_priority_xlsx = artifacts.get("label_gap_high_priority_xlsx") or label_gap_xlsx
@@ -951,38 +1056,38 @@ def _next_actions(
         focus = ", ".join(str(target.get("review_reason") or "") for target in focus_targets[:3])
         focus = focus or "needs_more_labels lanes"
         first_target = high_priority_xlsx if high_priority else label_gap_xlsx
-        return [
+        return with_delivery([
             f"Fill {first_target} before changing thresholds or review-lane routing.",
             f"Prioritize high-value labels for: {focus}.",
-        ]
+        ])
     if workflow_status == "candidate_changes_require_regression":
         gate_actions = [item["action"] for item in open_requirements if item.get("id") == "run_regression_gate"]
         if gate_actions:
-            return [
+            return with_delivery([
                 gate_actions[0],
                 "Use the regression gate result before applying any threshold or review-lane routing change.",
-            ]
-        return [
+            ])
+        return with_delivery([
             "Add focused regression tests for each candidate rule or lane downgrade.",
             "Apply only narrow guarded rules; keep global threshold unchanged.",
-        ]
+        ])
     if workflow_status == "candidate_changes_regression_passed":
-        return [
+        return with_delivery([
             "Regression gate passed; review the candidate rule/lane change and keep it narrow.",
             "Do not change the global threshold unless the threshold boundary report also recommends it.",
-        ]
+        ])
     if workflow_status == "partially_converged_keep_review_lanes":
         protected_task = artifacts.get("protected_lanes_next_review_task_xlsx")
         priority_task = artifacts.get("protected_lanes_priority_task_xlsx")
-        return [
+        return with_delivery([
             "Keep protected review lanes active.",
             f"Use {priority_task or protected_task or 'the protected-lane priority review task'} first when review capacity is limited.",
             f"Use {protected_task or 'the full protected-lane next review task'} before reducing protected review lanes.",
             "Use filled wrong rows as blocking fixtures before more tuning.",
-        ]
+        ])
     if open_requirements:
-        return [item["action"] for item in open_requirements[:3]]
-    return ["Keep current thresholds and monitor future calibration samples."]
+        return with_delivery([item["action"] for item in open_requirements[:3]])
+    return with_delivery(["Keep current thresholds and monitor future calibration samples."])
 
 
 def _render_markdown(report: dict) -> str:
@@ -1012,6 +1117,9 @@ def _render_markdown(report: dict) -> str:
         f"- Label-gap task rows: {summary['label_gap_task_rows']} total, {summary['label_gap_high_priority_task_rows']} high priority",
         f"- Regression gate status: {summary['regression_gate_status']}",
         f"- Regression gate fail/unverified rows: {summary['regression_gate_fail_rows']}/{summary['regression_gate_unverified_rows']}",
+        f"- Delivery decision: {summary.get('delivery_decision') or 'not_evaluated'}",
+        f"- Delivery output XLSX: {summary.get('delivery_output_xlsx') or 'not_available'}",
+        f"- Delivery is rule release: {str(summary.get('delivery_is_rule_release')).lower()}",
         "",
         "## Application Gates",
         "",
@@ -1035,6 +1143,16 @@ def _render_markdown(report: dict) -> str:
             f"- Protected-lane priority handoff MD: {report['artifacts'].get('protected_lanes_priority_task_handoff_md') or 'not recorded'}",
             f"- Regression cases CSV: {report['artifacts'].get('regression_cases_csv') or 'not recorded'}",
             f"- Regression gate report: {report['artifacts'].get('regression_gate_md') or 'not recorded'}",
+            f"- Regression overlay XLSX: {report['artifacts'].get('regression_overlay_xlsx') or 'not recorded'}",
+            f"- Regression overlay balance JSON: {report['artifacts'].get('regression_overlay_balance_json') or 'not recorded'}",
+            "",
+            "## Delivery Recommendation",
+            "",
+            f"- Decision: {report.get('delivery_recommendation', {}).get('decision') or 'not_evaluated'}",
+            f"- Output CSV: {report.get('delivery_recommendation', {}).get('output_csv') or 'not_available'}",
+            f"- Output XLSX: {report.get('delivery_recommendation', {}).get('output_xlsx') or 'not_available'}",
+            f"- Is rule release: {str(report.get('delivery_recommendation', {}).get('is_rule_release')).lower()}",
+            f"- Reason: {report.get('delivery_recommendation', {}).get('reason') or 'not_available'}",
             "",
             "## Label Targets",
             "",
@@ -1107,6 +1225,13 @@ def _to_int(value: object) -> int:
         return int(float(value or 0))
     except (TypeError, ValueError):
         return 0
+
+
+def _to_float_or_none(value: object) -> float | None:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
 
 
 if __name__ == "__main__":

@@ -50,8 +50,9 @@ def build_convergence_audit(
     threshold = _threshold_decision(status_summary, balance.get("threshold_simulations") or [])
     review_lanes = _review_lane_decision(status, protected_task, protected_priority_task)
     pattern_release = _pattern_release_decision(status)
+    delivery = status.get("delivery_recommendation") or {}
     state = _convergence_state(status_summary, threshold, review_lanes, pattern_release)
-    next_actions = _next_actions(status, threshold, review_lanes, pattern_release)
+    next_actions = _next_actions(status, threshold, review_lanes, pattern_release, delivery)
     report = {
         "summary": {
             "convergence_state": state,
@@ -66,12 +67,17 @@ def build_convergence_audit(
             "pattern_release_decision": pattern_release["decision"],
             "pattern_release_gate_status": pattern_release["gate_status"],
             "regression_gate_status": str(status_summary.get("regression_gate_status") or ""),
+            "delivery_decision": delivery.get("decision", ""),
+            "delivery_output_csv": delivery.get("output_csv", ""),
+            "delivery_output_xlsx": delivery.get("output_xlsx", ""),
+            "delivery_is_rule_release": delivery.get("is_rule_release", False),
             "filled_decisive_rows": _to_int(status_summary.get("filled_decisive_rows")),
             "next_action_count": len(next_actions),
         },
         "threshold": threshold,
         "review_lanes": review_lanes,
         "pattern_release": pattern_release,
+        "delivery_recommendation": delivery,
         "next_actions": next_actions,
         "inputs": {
             "status_json": str(status_json),
@@ -215,12 +221,24 @@ def _convergence_state(
     return workflow_status or "unknown"
 
 
-def _next_actions(status: dict, threshold: dict, review_lanes: dict, pattern_release: dict) -> list[str]:
+def _next_actions(
+    status: dict,
+    threshold: dict,
+    review_lanes: dict,
+    pattern_release: dict,
+    delivery: dict | None = None,
+) -> list[str]:
     actions: list[str] = []
     if threshold["decision"] in {"keep_current_75_75", "keep_current"}:
         actions.append("Keep first-pass and second-pass thresholds unchanged.")
     else:
         actions.append("Review threshold simulations before changing score thresholds.")
+    delivery = delivery or {}
+    if delivery.get("decision") == "use_regression_overlay_final":
+        output = delivery.get("output_xlsx") or delivery.get("output_csv") or "the regression overlay final"
+        actions.append(
+            f"Use {output} for current delivery; do not treat the overlay as a generalized scoring-rule release."
+        )
     if review_lanes.get("priority_task_rows"):
         actions.append(
             f"Fill {review_lanes.get('priority_task_xlsx') or 'the protected-lane priority review task'} "
@@ -289,6 +307,9 @@ def _render_markdown(report: dict) -> str:
         f"- Pattern-release decision: {summary['pattern_release_decision']}",
         f"- Pattern-release gate: {summary['pattern_release_gate_status']}",
         f"- Regression gate: {summary['regression_gate_status']}",
+        f"- Delivery decision: {summary.get('delivery_decision') or 'not_evaluated'}",
+        f"- Delivery output XLSX: {summary.get('delivery_output_xlsx') or 'not_available'}",
+        f"- Delivery is rule release: {str(summary.get('delivery_is_rule_release')).lower()}",
         "",
         "## Threshold Evidence",
         "",
@@ -326,6 +347,14 @@ def _render_markdown(report: dict) -> str:
             f"- Reason: {pattern['reason']}",
             f"- Correct/wrong rows: {pattern['correct_rows']}/{pattern['wrong_rows']}",
             f"- Source: {pattern['source_path'] or 'not recorded'}",
+            "",
+            "## Delivery Recommendation",
+            "",
+            f"- Decision: {report.get('delivery_recommendation', {}).get('decision') or 'not_evaluated'}",
+            f"- Output CSV: {report.get('delivery_recommendation', {}).get('output_csv') or 'not_available'}",
+            f"- Output XLSX: {report.get('delivery_recommendation', {}).get('output_xlsx') or 'not_available'}",
+            f"- Is rule release: {str(report.get('delivery_recommendation', {}).get('is_rule_release')).lower()}",
+            f"- Reason: {report.get('delivery_recommendation', {}).get('reason') or 'not_available'}",
             "",
             "## Next Actions",
             "",
