@@ -71,6 +71,14 @@ def build_calibration_status_report(
         lane_status,
         regression_gate_status,
     )
+    application_gates = _application_gates(
+        workflow_status,
+        threshold_status,
+        pattern_status,
+        lane_status,
+        regression_gate_status,
+        open_requirements,
+    )
     next_actions = _next_actions(workflow_status, open_requirements, lane_status, artifacts, label_targets)
 
     report = {
@@ -154,6 +162,7 @@ def build_calibration_status_report(
         "pattern_release": pattern_status,
         "review_lanes": lane_status,
         "regression_gate": regression_gate_status,
+        "application_gates": application_gates,
         "artifacts": artifacts,
         "label_targets": label_targets,
         "lane_change_candidates": lane_change_candidates,
@@ -539,6 +548,106 @@ def _open_requirements(
     return out
 
 
+def _application_gates(
+    workflow_status: str,
+    threshold_status: dict,
+    pattern_status: dict,
+    lane_status: dict,
+    regression_gate_status: dict,
+    open_requirements: list[dict],
+) -> dict:
+    blockers = [item["id"] for item in open_requirements if item.get("status") == "open"]
+    gate_blocker = _regression_gate_blocker(regression_gate_status)
+    if gate_blocker:
+        blockers = [gate_blocker, *[item for item in blockers if item != gate_blocker]]
+    return {
+        "global_threshold_change": _threshold_application_gate(threshold_status, regression_gate_status, blockers),
+        "review_lane_change": _review_lane_application_gate(workflow_status, lane_status, regression_gate_status, blockers),
+        "pattern_release_change": _pattern_release_application_gate(workflow_status, pattern_status, regression_gate_status, blockers),
+    }
+
+
+def _threshold_application_gate(threshold_status: dict, regression_gate_status: dict, blockers: list[str]) -> dict:
+    if regression_gate_status["status"] in {"failed", "not_run"}:
+        return _blocked_gate("global_threshold_change", blockers, "Regression gate must pass before any threshold change.")
+    if threshold_status["status"] == "stable_keep_current":
+        return {
+            "status": "not_recommended",
+            "can_apply_now": False,
+            "blockers": [],
+            "reason": "Current evidence recommends keeping first-pass and second-pass thresholds unchanged.",
+            "required_action": "Keep thresholds unchanged unless a later threshold boundary report recommends a change.",
+        }
+    return {
+        "status": "candidate",
+        "can_apply_now": False,
+        "blockers": blockers,
+        "reason": threshold_status.get("reason", ""),
+        "required_action": "Review threshold boundary metrics and pass regression gate before changing thresholds.",
+    }
+
+
+def _review_lane_application_gate(
+    workflow_status: str,
+    lane_status: dict,
+    regression_gate_status: dict,
+    blockers: list[str],
+) -> dict:
+    if regression_gate_status["status"] in {"failed", "not_run"}:
+        return _blocked_gate("review_lane_change", blockers, "Regression gate must pass before reducing manual review.")
+    if workflow_status == "candidate_changes_regression_passed" and lane_status["status"] == "candidate_for_downgrade":
+        return {
+            "status": "candidate",
+            "can_apply_now": False,
+            "blockers": [],
+            "reason": lane_status.get("reason", ""),
+            "required_action": "Apply only a narrow lane downgrade after confirming regression coverage for the exact evidence lane.",
+        }
+    return _blocked_gate("review_lane_change", blockers, lane_status.get("reason", "Review lanes are not ready for routing changes."))
+
+
+def _pattern_release_application_gate(
+    workflow_status: str,
+    pattern_status: dict,
+    regression_gate_status: dict,
+    blockers: list[str],
+) -> dict:
+    if pattern_status["status"] == "blocked_by_wrong_release":
+        return _blocked_gate("pattern_release_change", ["block_pattern_release"], pattern_status.get("reason", "Pattern release is blocked."))
+    if regression_gate_status["status"] in {"failed", "not_run"}:
+        return _blocked_gate("pattern_release_change", blockers, "Regression gate must pass before widening pattern release.")
+    if workflow_status == "candidate_changes_regression_passed" and pattern_status["status"] in {
+        "current_guarded_candidate",
+        "historical_guarded_candidate",
+    }:
+        return {
+            "status": "candidate",
+            "can_apply_now": False,
+            "blockers": [],
+            "reason": pattern_status.get("reason", ""),
+            "required_action": "Keep any pattern release guarded and narrow; do not widen beyond the validated evidence pattern.",
+        }
+    return _blocked_gate("pattern_release_change", blockers, pattern_status.get("reason", "Pattern release is not ready."))
+
+
+def _regression_gate_blocker(regression_gate_status: dict) -> str:
+    if regression_gate_status["status"] == "failed":
+        return "fix_regression_gate_failures"
+    if regression_gate_status["status"] == "not_run":
+        return "run_regression_gate"
+    return ""
+
+
+def _blocked_gate(name: str, blockers: list[str], reason: str) -> dict:
+    return {
+        "status": "blocked",
+        "can_apply_now": False,
+        "blockers": list(dict.fromkeys(blockers)),
+        "reason": reason,
+        "required_action": f"Resolve blockers before applying {name}.",
+    }
+
+
 def _sample_artifacts(cycle: dict, sample_eval_json: str | Path | None) -> dict:
     outputs = cycle.get("outputs", {})
     return {
@@ -842,18 +951,30 @@ def _render_markdown(report: dict) -> str:
         f"- Regression gate status: {summary['regression_gate_status']}",
         f"- Regression gate fail/unverified rows: {summary['regression_gate_fail_rows']}/{summary['regression_gate_unverified_rows']}",
         "",
-        "## Artifacts",
-        "",
-        f"- Sample XLSX: {report['artifacts'].get('sample_xlsx') or 'not recorded'}",
-        f"- Sample CSV: {report['artifacts'].get('sample_csv') or 'not recorded'}",
-        f"- Label-gap XLSX: {report['artifacts'].get('label_gap_xlsx') or 'not recorded'}",
-        f"- High-priority label-gap XLSX: {report['artifacts'].get('label_gap_high_priority_xlsx') or 'not recorded'}",
-        f"- Regression cases CSV: {report['artifacts'].get('regression_cases_csv') or 'not recorded'}",
-        f"- Regression gate report: {report['artifacts'].get('regression_gate_md') or 'not recorded'}",
-        "",
-        "## Label Targets",
+        "## Application Gates",
         "",
     ]
+    for name, gate in report.get("application_gates", {}).items():
+        blockers = ", ".join(gate.get("blockers") or []) or "none"
+        lines.append(
+            f"- {name}: status={gate.get('status')}, can_apply_now={gate.get('can_apply_now')}, blockers={blockers}; {gate.get('required_action')}"
+        )
+    lines.extend(
+        [
+            "",
+            "## Artifacts",
+            "",
+            f"- Sample XLSX: {report['artifacts'].get('sample_xlsx') or 'not recorded'}",
+            f"- Sample CSV: {report['artifacts'].get('sample_csv') or 'not recorded'}",
+            f"- Label-gap XLSX: {report['artifacts'].get('label_gap_xlsx') or 'not recorded'}",
+            f"- High-priority label-gap XLSX: {report['artifacts'].get('label_gap_high_priority_xlsx') or 'not recorded'}",
+            f"- Regression cases CSV: {report['artifacts'].get('regression_cases_csv') or 'not recorded'}",
+            f"- Regression gate report: {report['artifacts'].get('regression_gate_md') or 'not recorded'}",
+            "",
+            "## Label Targets",
+            "",
+        ]
+    )
     if report["label_targets"]:
         for target in report["label_targets"]:
             lines.append(

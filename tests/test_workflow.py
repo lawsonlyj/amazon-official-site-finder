@@ -5573,6 +5573,10 @@ class OperationalCommandTests(unittest.TestCase):
         self.assertEqual(report["summary"]["label_gap_task_rows"], 7)
         self.assertEqual(report["summary"]["label_gap_high_priority_task_rows"], 5)
         self.assertEqual(report["summary"]["regression_gate_status"], "not_needed")
+        self.assertEqual(report["application_gates"]["global_threshold_change"]["status"], "not_recommended")
+        self.assertFalse(report["application_gates"]["global_threshold_change"]["can_apply_now"])
+        self.assertEqual(report["application_gates"]["review_lane_change"]["status"], "blocked")
+        self.assertIn("fill_calibration_sample", report["application_gates"]["review_lane_change"]["blockers"])
         by_reason = {item["review_reason"]: item for item in report["label_targets"]}
         self.assertEqual(by_reason["precision_calibrated_pattern_release"]["target_decisive_rows"], 3)
         self.assertEqual(by_reason["precision_low_confidence_auto_match"]["target_decisive_rows"], 3)
@@ -5679,6 +5683,8 @@ class OperationalCommandTests(unittest.TestCase):
         self.assertEqual(report["summary"]["regression_gate_fail_rows"], 1)
         self.assertEqual(report["summary"]["regression_gate_unverified_rows"], 1)
         self.assertEqual(report["artifacts"]["regression_gate_md"], "calibration_regression_gate.md")
+        self.assertEqual(report["application_gates"]["review_lane_change"]["status"], "blocked")
+        self.assertIn("fix_regression_gate_failures", report["application_gates"]["review_lane_change"]["blockers"])
         self.assertIn("fix_regression_gate_failures", {item["id"] for item in report["open_requirements"]})
         self.assertIn("Fix candidate workflow changes", report["next_actions"][0])
 
@@ -5723,6 +5729,9 @@ class OperationalCommandTests(unittest.TestCase):
 
         self.assertEqual(report["summary"]["workflow_status"], "candidate_changes_regression_passed")
         self.assertEqual(report["summary"]["regression_gate_status"], "pass")
+        self.assertEqual(report["application_gates"]["global_threshold_change"]["status"], "not_recommended")
+        self.assertEqual(report["application_gates"]["review_lane_change"]["status"], "candidate")
+        self.assertFalse(report["application_gates"]["review_lane_change"]["can_apply_now"])
         self.assertIn("Regression gate passed", report["next_actions"][0])
 
     def test_build_calibration_status_report_prioritizes_unrun_regression_gate(self):
@@ -5763,6 +5772,8 @@ class OperationalCommandTests(unittest.TestCase):
 
         self.assertEqual(report["summary"]["workflow_status"], "candidate_changes_require_regression")
         self.assertEqual(report["summary"]["regression_gate_status"], "not_run")
+        self.assertEqual(report["application_gates"]["review_lane_change"]["status"], "blocked")
+        self.assertIn("run_regression_gate", report["application_gates"]["review_lane_change"]["blockers"])
         self.assertIn("run_regression_gate", {item["id"] for item in report["open_requirements"]})
         self.assertIn("run_calibration_regression_gate.py", report["next_actions"][0])
 
@@ -5804,6 +5815,8 @@ class OperationalCommandTests(unittest.TestCase):
 
         self.assertEqual(report["summary"]["workflow_status"], "not_converged_regression_gate_not_run")
         self.assertEqual(report["summary"]["regression_gate_status"], "not_run")
+        self.assertEqual(report["application_gates"]["pattern_release_change"]["status"], "blocked")
+        self.assertIn("run_regression_gate", report["application_gates"]["pattern_release_change"]["blockers"])
         self.assertIn("run_regression_gate", {item["id"] for item in report["open_requirements"]})
         self.assertIn("run_calibration_regression_gate.py", report["next_actions"][0])
 
