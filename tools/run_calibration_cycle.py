@@ -23,6 +23,7 @@ from tools.run_calibration_regression_gate import run_calibration_regression_gat
 from tools.simulate_pattern_release import simulate_pattern_release
 from tools.build_threshold_boundary_report import build_threshold_boundary_report
 from tools.verify_protected_lane_review_task import verify_protected_lane_review_task
+from tools.reuse_historical_labels_for_task import reuse_historical_labels_for_task
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -59,6 +60,15 @@ def main(argv: list[str] | None = None) -> int:
         "--candidate-final-csv",
         help="Optional candidate official_sites.csv/provider_final CSV to validate against filled calibration regression cases.",
     )
+    parser.add_argument(
+        "--reuse-label-path",
+        action="append",
+        default=[],
+        help=(
+            "Optional trusted historical manual-label CSV file or directory to prefill protected-lane review tasks. "
+            "Repeatable. AgentB/automatic outputs are ignored by the reuse tool."
+        ),
+    )
     args = parser.parse_args(argv)
 
     report = run_calibration_cycle(
@@ -78,6 +88,7 @@ def main(argv: list[str] | None = None) -> int:
         pattern_release_jsons=args.pattern_release_json,
         policy_report_json=args.policy_report_json,
         candidate_final_csv=args.candidate_final_csv,
+        reuse_label_paths=args.reuse_label_path,
     )
     print(json.dumps(report["summary"], ensure_ascii=False, indent=2))
     return 0
@@ -101,6 +112,7 @@ def run_calibration_cycle(
     pattern_release_jsons: list[str | Path] | None = None,
     policy_report_json: str | Path | None = None,
     candidate_final_csv: str | Path | None = None,
+    reuse_label_paths: list[str | Path] | None = None,
 ) -> dict:
     out_dir = Path(output_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -141,12 +153,24 @@ def run_calibration_cycle(
     protected_lane_task_json = out_dir / "protected_lanes_next_review_task_summary.json"
     protected_lane_task_verify_json = out_dir / "protected_lanes_next_review_task_verification.json"
     protected_lane_task_verify_md = out_dir / "protected_lanes_next_review_task_verification.md"
+    protected_lane_task_prefilled_csv = out_dir / "protected_lanes_next_review_task_prefilled.csv"
+    protected_lane_task_prefilled_xlsx = out_dir / "protected_lanes_next_review_task_prefilled.xlsx"
+    protected_lane_task_reuse_json = out_dir / "protected_lanes_next_review_task_historical_label_reuse.json"
+    protected_lane_task_reuse_md = out_dir / "protected_lanes_next_review_task_historical_label_reuse.md"
+    protected_lane_task_prefilled_verify_json = out_dir / "protected_lanes_next_review_task_prefilled_verification.json"
+    protected_lane_task_prefilled_verify_md = out_dir / "protected_lanes_next_review_task_prefilled_verification.md"
     protected_lane_priority_csv = out_dir / "protected_lanes_priority_task.csv"
     protected_lane_priority_xlsx = out_dir / "protected_lanes_priority_task.xlsx"
     protected_lane_priority_json = out_dir / "protected_lanes_priority_task_summary.json"
     protected_lane_priority_md = out_dir / "protected_lanes_priority_task_handoff.md"
     protected_lane_priority_verify_json = out_dir / "protected_lanes_priority_task_verification.json"
     protected_lane_priority_verify_md = out_dir / "protected_lanes_priority_task_verification.md"
+    protected_lane_priority_prefilled_csv = out_dir / "protected_lanes_priority_task_prefilled.csv"
+    protected_lane_priority_prefilled_xlsx = out_dir / "protected_lanes_priority_task_prefilled.xlsx"
+    protected_lane_priority_reuse_json = out_dir / "protected_lanes_priority_task_historical_label_reuse.json"
+    protected_lane_priority_reuse_md = out_dir / "protected_lanes_priority_task_historical_label_reuse.md"
+    protected_lane_priority_prefilled_verify_json = out_dir / "protected_lanes_priority_task_prefilled_verification.json"
+    protected_lane_priority_prefilled_verify_md = out_dir / "protected_lanes_priority_task_prefilled_verification.md"
     summary_json = out_dir / "calibration_cycle_summary.json"
     summary_md = out_dir / "calibration_cycle_summary.md"
     status_json = out_dir / "calibration_status.json"
@@ -353,6 +377,7 @@ def run_calibration_cycle(
             "filled_samples": [str(path) for path in filled_sample_paths],
             "policy_report_json": str(policy_report_json or ""),
             "candidate_final_csv": str(candidate_final_csv or ""),
+            "reuse_label_paths": [str(path) for path in (reuse_label_paths or [])],
         },
         "outputs": {
             "recall_json": str(recall_json),
@@ -391,12 +416,24 @@ def run_calibration_cycle(
             "protected_lanes_next_review_task_summary_json": str(protected_lane_task_json),
             "protected_lanes_next_review_task_verification_json": str(protected_lane_task_verify_json),
             "protected_lanes_next_review_task_verification_md": str(protected_lane_task_verify_md),
+            "protected_lanes_next_review_task_prefilled_csv": "",
+            "protected_lanes_next_review_task_prefilled_xlsx": "",
+            "protected_lanes_next_review_task_historical_label_reuse_json": "",
+            "protected_lanes_next_review_task_historical_label_reuse_md": "",
+            "protected_lanes_next_review_task_prefilled_verification_json": "",
+            "protected_lanes_next_review_task_prefilled_verification_md": "",
             "protected_lanes_priority_task_csv": str(protected_lane_priority_csv),
             "protected_lanes_priority_task_xlsx": str(protected_lane_priority_xlsx),
             "protected_lanes_priority_task_summary_json": str(protected_lane_priority_json),
             "protected_lanes_priority_task_handoff_md": str(protected_lane_priority_md),
             "protected_lanes_priority_task_verification_json": str(protected_lane_priority_verify_json),
             "protected_lanes_priority_task_verification_md": str(protected_lane_priority_verify_md),
+            "protected_lanes_priority_task_prefilled_csv": "",
+            "protected_lanes_priority_task_prefilled_xlsx": "",
+            "protected_lanes_priority_task_historical_label_reuse_json": "",
+            "protected_lanes_priority_task_historical_label_reuse_md": "",
+            "protected_lanes_priority_task_prefilled_verification_json": "",
+            "protected_lanes_priority_task_prefilled_verification_md": "",
             "summary_json": str(summary_json),
             "summary_md": str(summary_md),
             "status_json": str(status_json),
@@ -523,9 +560,111 @@ def run_calibration_cycle(
     report["summary"]["protected_lanes_priority_task_verification_passed"] = protected_lane_priority_verification[
         "summary"
     ].get("passed")
+    if reuse_label_paths:
+        protected_lane_task_reuse = reuse_historical_labels_for_task(
+            task_csv=protected_lane_task_csv,
+            label_paths=reuse_label_paths,
+            output_csv=protected_lane_task_prefilled_csv,
+            output_xlsx=protected_lane_task_prefilled_xlsx,
+            output_json=protected_lane_task_reuse_json,
+            output_md=protected_lane_task_reuse_md,
+        )
+        protected_lane_task_prefilled_verification = verify_protected_lane_review_task(
+            csv_path=protected_lane_task_prefilled_csv,
+            summary_json=protected_lane_task_json,
+            xlsx_path=protected_lane_task_prefilled_xlsx,
+            output_json=protected_lane_task_prefilled_verify_json,
+            output_md=protected_lane_task_prefilled_verify_md,
+            allow_filled=True,
+        )
+        protected_lane_priority_reuse = reuse_historical_labels_for_task(
+            task_csv=protected_lane_priority_csv,
+            label_paths=reuse_label_paths,
+            output_csv=protected_lane_priority_prefilled_csv,
+            output_xlsx=protected_lane_priority_prefilled_xlsx,
+            output_json=protected_lane_priority_reuse_json,
+            output_md=protected_lane_priority_reuse_md,
+        )
+        protected_lane_priority_prefilled_verification = verify_protected_lane_review_task(
+            csv_path=protected_lane_priority_prefilled_csv,
+            summary_json=protected_lane_priority_json,
+            xlsx_path=protected_lane_priority_prefilled_xlsx,
+            output_json=protected_lane_priority_prefilled_verify_json,
+            output_md=protected_lane_priority_prefilled_verify_md,
+            allow_filled=True,
+        )
+        report["protected_lanes_next_review_task_historical_label_reuse"] = protected_lane_task_reuse
+        report["protected_lanes_next_review_task_prefilled_verification"] = (
+            protected_lane_task_prefilled_verification
+        )
+        report["protected_lanes_priority_task_historical_label_reuse"] = protected_lane_priority_reuse
+        report["protected_lanes_priority_task_prefilled_verification"] = (
+            protected_lane_priority_prefilled_verification
+        )
+        report["outputs"]["protected_lanes_next_review_task_prefilled_csv"] = str(protected_lane_task_prefilled_csv)
+        report["outputs"]["protected_lanes_next_review_task_prefilled_xlsx"] = str(protected_lane_task_prefilled_xlsx)
+        report["outputs"]["protected_lanes_next_review_task_historical_label_reuse_json"] = str(
+            protected_lane_task_reuse_json
+        )
+        report["outputs"]["protected_lanes_next_review_task_historical_label_reuse_md"] = str(
+            protected_lane_task_reuse_md
+        )
+        report["outputs"]["protected_lanes_next_review_task_prefilled_verification_json"] = str(
+            protected_lane_task_prefilled_verify_json
+        )
+        report["outputs"]["protected_lanes_next_review_task_prefilled_verification_md"] = str(
+            protected_lane_task_prefilled_verify_md
+        )
+        report["outputs"]["protected_lanes_priority_task_prefilled_csv"] = str(protected_lane_priority_prefilled_csv)
+        report["outputs"]["protected_lanes_priority_task_prefilled_xlsx"] = str(protected_lane_priority_prefilled_xlsx)
+        report["outputs"]["protected_lanes_priority_task_historical_label_reuse_json"] = str(
+            protected_lane_priority_reuse_json
+        )
+        report["outputs"]["protected_lanes_priority_task_historical_label_reuse_md"] = str(
+            protected_lane_priority_reuse_md
+        )
+        report["outputs"]["protected_lanes_priority_task_prefilled_verification_json"] = str(
+            protected_lane_priority_prefilled_verify_json
+        )
+        report["outputs"]["protected_lanes_priority_task_prefilled_verification_md"] = str(
+            protected_lane_priority_prefilled_verify_md
+        )
+        _add_reuse_summary(report["summary"], "protected_lanes_next_review_task", protected_lane_task_reuse)
+        _add_reuse_summary(report["summary"], "protected_lanes_priority_task", protected_lane_priority_reuse)
+        report["summary"]["historical_label_reuse_enabled"] = True
+        report["summary"]["protected_lanes_next_review_task_prefilled_verification_passed"] = (
+            protected_lane_task_prefilled_verification["summary"].get("passed")
+        )
+        report["summary"]["protected_lanes_priority_task_prefilled_verification_passed"] = (
+            protected_lane_priority_prefilled_verification["summary"].get("passed")
+        )
+    else:
+        report["summary"]["historical_label_reuse_enabled"] = False
+        _add_empty_reuse_summary(report["summary"], "protected_lanes_next_review_task")
+        _add_empty_reuse_summary(report["summary"], "protected_lanes_priority_task")
     summary_json.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
     summary_md.write_text(_render_markdown(report), encoding="utf-8")
     return report
+
+
+def _add_reuse_summary(summary: dict, prefix: str, reuse_report: dict) -> None:
+    reuse_summary = reuse_report.get("summary", {})
+    summary[f"{prefix}_prefilled_reused_rows"] = reuse_summary.get("reused_rows", 0)
+    summary[f"{prefix}_prefilled_conflict_rows"] = reuse_summary.get("conflict_rows", 0)
+    summary[f"{prefix}_prefilled_unlabeled_rows"] = reuse_summary.get("unlabeled_rows", 0)
+    summary[f"{prefix}_prefilled_trusted_label_rows"] = reuse_summary.get("trusted_label_rows", 0)
+    summary[f"{prefix}_prefilled_output_csv"] = reuse_summary.get("output_csv", "")
+    summary[f"{prefix}_prefilled_output_xlsx"] = reuse_summary.get("output_xlsx", "")
+
+
+def _add_empty_reuse_summary(summary: dict, prefix: str) -> None:
+    summary[f"{prefix}_prefilled_reused_rows"] = 0
+    summary[f"{prefix}_prefilled_conflict_rows"] = 0
+    summary[f"{prefix}_prefilled_unlabeled_rows"] = None
+    summary[f"{prefix}_prefilled_trusted_label_rows"] = 0
+    summary[f"{prefix}_prefilled_output_csv"] = ""
+    summary[f"{prefix}_prefilled_output_xlsx"] = ""
+    summary[f"{prefix}_prefilled_verification_passed"] = None
 
 
 def _render_markdown(report: dict) -> str:
@@ -591,6 +730,11 @@ def _render_markdown(report: dict) -> str:
         f"- Pattern-release decision: {summary.get('pattern_release_decision') or 'not_audited'}",
         f"- Protected-lane task verification passed: {summary.get('protected_lanes_next_review_task_verification_passed')}",
         f"- Protected-lane priority task verification passed: {summary.get('protected_lanes_priority_task_verification_passed')}",
+        f"- Historical label reuse enabled: {summary.get('historical_label_reuse_enabled')}",
+        f"- Protected-lane task historical labels reused/blank/conflict: {summary.get('protected_lanes_next_review_task_prefilled_reused_rows')}/{summary.get('protected_lanes_next_review_task_prefilled_unlabeled_rows')}/{summary.get('protected_lanes_next_review_task_prefilled_conflict_rows')}",
+        f"- Protected-lane priority historical labels reused/blank/conflict: {summary.get('protected_lanes_priority_task_prefilled_reused_rows')}/{summary.get('protected_lanes_priority_task_prefilled_unlabeled_rows')}/{summary.get('protected_lanes_priority_task_prefilled_conflict_rows')}",
+        f"- Protected-lane prefilled verification passed: {summary.get('protected_lanes_next_review_task_prefilled_verification_passed')}",
+        f"- Protected-lane priority prefilled verification passed: {summary.get('protected_lanes_priority_task_prefilled_verification_passed')}",
         "",
         "## Outputs",
         "",

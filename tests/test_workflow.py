@@ -4331,6 +4331,8 @@ class OperationalCommandTests(unittest.TestCase):
             labeled_agent_b = root / "labeled_agent_b.csv"
             review = root / "review.csv"
             batch_agent_b = root / "batch_agent_b.csv"
+            labels_dir = root / "labels"
+            labels_dir.mkdir()
             policy_report = root / "policy_report.json"
             pattern_release = root / "pattern_release.json"
             output_dir = root / "calibration"
@@ -4530,6 +4532,28 @@ class OperationalCommandTests(unittest.TestCase):
                     },
                 ],
             )
+            _write_test_csv(
+                labels_dir / "manual_review_combined_decisions.csv",
+                [
+                    {
+                        "provider_id": "batch-precision",
+                        "manual_decision": "accept",
+                        "manual_url": "",
+                        "notes": "historically confirmed",
+                    }
+                ],
+            )
+            _write_test_csv(
+                labels_dir / "agent_b_verification_results.csv",
+                [
+                    {
+                        "provider_id": "batch-recall",
+                        "manual_decision": "accept",
+                        "manual_url": "",
+                        "notes": "automatic source ignored",
+                    }
+                ],
+            )
             policy_report.write_text(
                 json.dumps(
                     {
@@ -4594,6 +4618,7 @@ class OperationalCommandTests(unittest.TestCase):
                 max_per_pattern=1,
                 pattern_release_jsons=[pattern_release],
                 policy_report_json=policy_report,
+                reuse_label_paths=[labels_dir],
             )
             output_exists = {
                 "recall_json": (output_dir / "evidence_patterns_recall.json").exists(),
@@ -4619,6 +4644,14 @@ class OperationalCommandTests(unittest.TestCase):
                 "protected_lane_json": (output_dir / "protected_lanes_next_review_task_summary.json").exists(),
                 "protected_lane_verify_json": (output_dir / "protected_lanes_next_review_task_verification.json").exists(),
                 "protected_lane_verify_md": (output_dir / "protected_lanes_next_review_task_verification.md").exists(),
+                "protected_lane_prefilled_csv": (output_dir / "protected_lanes_next_review_task_prefilled.csv").exists(),
+                "protected_lane_prefilled_xlsx": (output_dir / "protected_lanes_next_review_task_prefilled.xlsx").exists(),
+                "protected_lane_reuse_json": (
+                    output_dir / "protected_lanes_next_review_task_historical_label_reuse.json"
+                ).exists(),
+                "protected_lane_prefilled_verify_json": (
+                    output_dir / "protected_lanes_next_review_task_prefilled_verification.json"
+                ).exists(),
                 "protected_lane_priority_csv": (output_dir / "protected_lanes_priority_task.csv").exists(),
                 "protected_lane_priority_xlsx": (output_dir / "protected_lanes_priority_task.xlsx").exists(),
                 "protected_lane_priority_json": (output_dir / "protected_lanes_priority_task_summary.json").exists(),
@@ -4629,6 +4662,18 @@ class OperationalCommandTests(unittest.TestCase):
                 "protected_lane_priority_verify_md": (
                     output_dir / "protected_lanes_priority_task_verification.md"
                 ).exists(),
+                "protected_lane_priority_prefilled_csv": (
+                    output_dir / "protected_lanes_priority_task_prefilled.csv"
+                ).exists(),
+                "protected_lane_priority_prefilled_xlsx": (
+                    output_dir / "protected_lanes_priority_task_prefilled.xlsx"
+                ).exists(),
+                "protected_lane_priority_reuse_json": (
+                    output_dir / "protected_lanes_priority_task_historical_label_reuse.json"
+                ).exists(),
+                "protected_lane_priority_prefilled_verify_json": (
+                    output_dir / "protected_lanes_priority_task_prefilled_verification.json"
+                ).exists(),
                 "convergence_audit_json": (output_dir / "convergence_audit.json").exists(),
                 "convergence_audit_md": (output_dir / "convergence_audit.md").exists(),
             }
@@ -4636,6 +4681,8 @@ class OperationalCommandTests(unittest.TestCase):
                 high_gap_rows = list(csv.DictReader(f))
             with (output_dir / "protected_lanes_next_review_task.csv").open(newline="", encoding="utf-8") as f:
                 protected_lane_rows = list(csv.DictReader(f))
+            with (output_dir / "protected_lanes_priority_task_prefilled.csv").open(newline="", encoding="utf-8") as f:
+                protected_priority_prefilled_rows = list(csv.DictReader(f))
             status_data = json.loads((output_dir / "calibration_status.json").read_text(encoding="utf-8"))
             gate_data = json.loads((output_dir / "calibration_application_gates.json").read_text(encoding="utf-8"))
             convergence_data = json.loads((output_dir / "convergence_audit.json").read_text(encoding="utf-8"))
@@ -4644,6 +4691,9 @@ class OperationalCommandTests(unittest.TestCase):
             )
             protected_priority_verify = json.loads(
                 (output_dir / "protected_lanes_priority_task_verification.json").read_text(encoding="utf-8")
+            )
+            protected_priority_prefilled_verify = json.loads(
+                (output_dir / "protected_lanes_priority_task_prefilled_verification.json").read_text(encoding="utf-8")
             )
 
         self.assertEqual(report["summary"]["sample_rows"], 2)
@@ -4670,12 +4720,20 @@ class OperationalCommandTests(unittest.TestCase):
         self.assertTrue(output_exists["protected_lane_json"])
         self.assertTrue(output_exists["protected_lane_verify_json"])
         self.assertTrue(output_exists["protected_lane_verify_md"])
+        self.assertTrue(output_exists["protected_lane_prefilled_csv"])
+        self.assertTrue(output_exists["protected_lane_prefilled_xlsx"])
+        self.assertTrue(output_exists["protected_lane_reuse_json"])
+        self.assertTrue(output_exists["protected_lane_prefilled_verify_json"])
         self.assertTrue(output_exists["protected_lane_priority_csv"])
         self.assertTrue(output_exists["protected_lane_priority_xlsx"])
         self.assertTrue(output_exists["protected_lane_priority_json"])
         self.assertTrue(output_exists["protected_lane_priority_md"])
         self.assertTrue(output_exists["protected_lane_priority_verify_json"])
         self.assertTrue(output_exists["protected_lane_priority_verify_md"])
+        self.assertTrue(output_exists["protected_lane_priority_prefilled_csv"])
+        self.assertTrue(output_exists["protected_lane_priority_prefilled_xlsx"])
+        self.assertTrue(output_exists["protected_lane_priority_reuse_json"])
+        self.assertTrue(output_exists["protected_lane_priority_prefilled_verify_json"])
         self.assertTrue(output_exists["convergence_audit_json"])
         self.assertTrue(output_exists["convergence_audit_md"])
         self.assertEqual(report["summary"]["empty_eval_labeled_rows"], 0)
@@ -4703,6 +4761,12 @@ class OperationalCommandTests(unittest.TestCase):
         self.assertEqual(protected_verify["summary"]["row_count"], 2)
         self.assertTrue(protected_priority_verify["summary"]["passed"])
         self.assertEqual(protected_priority_verify["summary"]["row_count"], 2)
+        self.assertTrue(protected_priority_prefilled_verify["summary"]["passed"])
+        self.assertEqual(protected_priority_prefilled_verify["summary"]["filled_manual_decision_rows"], 1)
+        self.assertEqual(
+            {row["provider_id"]: row["historical_label_status"] for row in protected_priority_prefilled_rows},
+            {"batch-recall": "unlabeled", "batch-precision": "reused"},
+        )
         self.assertEqual(status_data["summary"]["label_gap_task_rows"], report["summary"]["label_gap_task_rows"])
         self.assertEqual(status_data["summary"]["label_gap_high_priority_task_rows"], 0)
         self.assertEqual(status_data["summary"]["protected_lanes_priority_task_rows"], 2)
@@ -4734,6 +4798,12 @@ class OperationalCommandTests(unittest.TestCase):
         self.assertEqual(gate_data["summary"]["gate_count"], 3)
         self.assertEqual(report["summary"]["application_gate_not_allowed_count"], 3)
         self.assertEqual(report["summary"]["application_gate_allowed_count"], 0)
+        self.assertTrue(report["summary"]["historical_label_reuse_enabled"])
+        self.assertEqual(report["summary"]["protected_lanes_priority_task_prefilled_reused_rows"], 1)
+        self.assertEqual(report["summary"]["protected_lanes_priority_task_prefilled_unlabeled_rows"], 1)
+        self.assertTrue(report["summary"]["protected_lanes_priority_task_prefilled_verification_passed"])
+        self.assertEqual(report["inputs"]["reuse_label_paths"], [str(labels_dir)])
+        self.assertIn("protected_lanes_priority_task_prefilled_xlsx", report["outputs"])
         self.assertIn("review_lane_change", gate_data["summary"]["not_allowed_gates"])
         self.assertEqual(report["calibration_status"]["summary"]["workflow_status"], "not_converged_needs_human_labels")
         self.assertEqual(report["summary"]["convergence_state"], convergence_data["summary"]["convergence_state"])
