@@ -319,6 +319,12 @@ def _lane_change_candidates(label_targets: list[dict], lane_status: dict) -> lis
                 "rows": _to_int(target.get("rows")),
                 "labeled_rows": _to_int(target.get("labeled_rows")),
                 "decisive_rows": _to_int(target.get("decisive_rows")),
+                "support_rows": _to_int(target.get("support_rows")),
+                "blocking_rows": _to_int(target.get("blocking_rows")),
+                "support_rate": target.get("support_rate"),
+                "support_rate_wilson_lower_80": target.get("support_rate_wilson_lower_80"),
+                "blocking_rate_wilson_upper_80": target.get("blocking_rate_wilson_upper_80"),
+                "evidence_strength": str(target.get("evidence_strength") or ""),
                 "target_decisive_rows": _to_int(target.get("target_decisive_rows")),
                 "decisive_rows_needed": own_gap,
                 "blocking_decisive_rows_needed": max(0, total_gap - own_gap),
@@ -508,6 +514,7 @@ def _label_targets(cycle: dict, balance: dict, sample_eval: dict, artifacts: dic
         )
         rows = _to_int(stats.get("rows"))
         decisive_rows = _to_int(stats.get("decisive_rows"))
+        lane_eval = lane_recommendations.get(reason, {})
         target_decisive_rows = _target_decisive_rows(reason, recommendation, rows, protected, needs_more, spot_check)
         targets.append(
             {
@@ -516,6 +523,12 @@ def _label_targets(cycle: dict, balance: dict, sample_eval: dict, artifacts: dic
                 "rows": rows,
                 "labeled_rows": _to_int(stats.get("labeled_rows")),
                 "decisive_rows": decisive_rows,
+                "support_rows": _to_int(lane_eval.get("support_rows")),
+                "blocking_rows": _to_int(lane_eval.get("blocking_rows")),
+                "support_rate": lane_eval.get("support_rate"),
+                "support_rate_wilson_lower_80": lane_eval.get("support_rate_wilson_lower_80"),
+                "blocking_rate_wilson_upper_80": lane_eval.get("blocking_rate_wilson_upper_80"),
+                "evidence_strength": str(lane_eval.get("evidence_strength") or ""),
                 "target_decisive_rows": target_decisive_rows,
                 "decisive_rows_needed": max(0, target_decisive_rows - decisive_rows),
                 "recommendation": recommendation,
@@ -702,6 +715,8 @@ def _render_markdown(report: dict) -> str:
             lines.append(
                 "- {review_reason} ({priority}, rows={rows}, labeled={labeled_rows}, "
                 "decisive={decisive_rows}/{target_decisive_rows}, needed={decisive_rows_needed}, "
+                "support={support_rows}, block={blocking_rows}, strength={evidence_strength}, "
+                "support_lower80={support_rate_wilson_lower_80}, block_upper80={blocking_rate_wilson_upper_80}, "
                 "recommendation={recommendation}): {label_goal}".format(**target)
             )
     else:
@@ -711,7 +726,9 @@ def _render_markdown(report: dict) -> str:
         for item in report["lane_change_candidates"]:
             lines.append(
                 "- {review_reason} ({status}, decisive={decisive_rows}/{target_decisive_rows}, "
-                "blocking_gap={blocking_decisive_rows_needed}): {required_action}".format(**item)
+                "strength={evidence_strength}, support_lower80={support_rate_wilson_lower_80}, "
+                "block_upper80={blocking_rate_wilson_upper_80}, blocking_gap={blocking_decisive_rows_needed}): "
+                "{required_action}".format(**item)
             )
     else:
         lines.append("- None")

@@ -324,6 +324,10 @@ def _pattern_recommendations(details: list[dict[str, str]]) -> list[dict]:
                 "decisive_rows": len(decisive),
                 "supporting_rows": len(good),
                 "blocking_rows": len(bad),
+                "support_rate": _ratio(len(good), len(decisive)),
+                "support_rate_wilson_lower_80": _wilson_interval(len(good), len(decisive))["lower"],
+                "blocking_rate_wilson_upper_80": _wilson_interval(len(bad), len(decisive))["upper"],
+                "evidence_strength": _evidence_strength(len(decisive), len(good), len(bad)),
                 "recommendation": recommendation,
                 "reason": reason,
             }
@@ -351,6 +355,10 @@ def _lane_recommendations(details: list[dict[str, str]]) -> list[dict]:
         decisive = _valid_decisive(rows)
         outcomes = Counter(row["calibration_outcome"] for row in decisive)
         lane_kind = _first(rows[0], "lane_kind")
+        support_rows = _lane_support_rows(lane_kind, outcomes)
+        blocking_rows = _lane_blocking_rows(lane_kind, outcomes)
+        support_interval = _wilson_interval(support_rows, len(decisive))
+        blocking_interval = _wilson_interval(blocking_rows, len(decisive))
         recommendation, explanation, required_action = _lane_decision(reason, lane_kind, outcomes, len(decisive))
         out.append(
             {
@@ -364,6 +372,12 @@ def _lane_recommendations(details: list[dict[str, str]]) -> list[dict]:
                 "recall_useful_rows": outcomes.get("recall_candidate_useful", 0),
                 "recall_not_useful_rows": outcomes.get("recall_candidate_not_useful", 0),
                 "manual_unsure_rows": Counter(row["calibration_outcome"] for row in labeled).get("manual_unsure", 0),
+                "support_rows": support_rows,
+                "blocking_rows": blocking_rows,
+                "support_rate": _ratio(support_rows, len(decisive)),
+                "support_rate_wilson_lower_80": support_interval["lower"],
+                "blocking_rate_wilson_upper_80": blocking_interval["upper"],
+                "evidence_strength": _evidence_strength(len(decisive), support_rows, blocking_rows),
                 "recommendation": recommendation,
                 "reason": explanation,
                 "required_action": required_action,
@@ -379,6 +393,18 @@ def _lane_recommendations(details: list[dict[str, str]]) -> list[dict]:
         )
     )
     return out
+
+
+def _lane_support_rows(lane_kind: str, outcomes: Counter[str]) -> int:
+    if lane_kind == "recall":
+        return outcomes.get("recall_candidate_useful", 0)
+    return outcomes.get("candidate_correct", 0)
+
+
+def _lane_blocking_rows(lane_kind: str, outcomes: Counter[str]) -> int:
+    if lane_kind == "recall":
+        return outcomes.get("recall_candidate_not_useful", 0)
+    return outcomes.get("candidate_incorrect", 0)
 
 
 def _lane_decision(reason: str, lane_kind: str, outcomes: Counter[str], decisive_rows: int) -> tuple[str, str, str]:
@@ -453,10 +479,10 @@ def _required_action_for_pattern(item: dict) -> str:
     scope = item.get("pattern_scope", "")
     if recommendation == "candidate_for_rule":
         if scope == "recall":
-            return "Add regression tests, then consider a narrow recall recovery rule for this exact evidence pattern."
+            return "Add regression tests, then consider a narrow recall recovery rule for this exact evidence pattern; treat five clean labels as minimum support, not final proof."
         if scope == "precision":
-            return "Add regression tests, then consider narrowing manual-review routing for this exact precision pattern."
-        return "Add regression tests before any production rule change."
+            return "Add regression tests, then consider narrowing manual-review routing for this exact precision pattern; treat five clean labels as minimum support, not final proof."
+        return "Add regression tests before any production rule change; treat five clean labels as minimum support, not final proof."
     if recommendation == "needs_more_labels":
         return "Keep this pattern in calibration samples until it reaches five decisive supporting labels with zero blockers."
     if recommendation == "reject_pattern":
@@ -579,7 +605,7 @@ def _render_markdown(report: dict) -> str:
         lines.extend(["", "## Review Lane Guidance", ""])
         for row in report["lane_recommendations"]:
             lines.append(
-                "- {recommendation}: rows={rows}, decisive={decisive}, good={good}, bad={bad}, recall_useful={recall_useful}, recall_bad={recall_bad} :: {reason}".format(
+                "- {recommendation}: rows={rows}, decisive={decisive}, good={good}, bad={bad}, recall_useful={recall_useful}, recall_bad={recall_bad}, strength={strength}, support_lower80={support_lower}, block_upper80={block_upper} :: {reason}".format(
                     recommendation=row["recommendation"],
                     rows=row["rows"],
                     decisive=row["decisive_rows"],
@@ -587,6 +613,9 @@ def _render_markdown(report: dict) -> str:
                     bad=row["candidate_incorrect_rows"],
                     recall_useful=row["recall_useful_rows"],
                     recall_bad=row["recall_not_useful_rows"],
+                    strength=row.get("evidence_strength", ""),
+                    support_lower=row.get("support_rate_wilson_lower_80"),
+                    block_upper=row.get("blocking_rate_wilson_upper_80"),
                     reason=row["review_reason"],
                 )
             )
@@ -595,13 +624,16 @@ def _render_markdown(report: dict) -> str:
         lines.extend(["", "## Pattern Validation", ""])
         for row in report["pattern_recommendations"][:25]:
             lines.append(
-                "- {recommendation}: scope={scope}, rows={rows}, decisive={decisive}, support={support}, block={block} :: {pattern}".format(
+                "- {recommendation}: scope={scope}, rows={rows}, decisive={decisive}, support={support}, block={block}, strength={strength}, support_lower80={support_lower}, block_upper80={block_upper} :: {pattern}".format(
                     recommendation=row["recommendation"],
                     scope=row.get("pattern_scope", ""),
                     rows=row["rows"],
                     decisive=row["decisive_rows"],
                     support=row["supporting_rows"],
                     block=row["blocking_rows"],
+                    strength=row.get("evidence_strength", ""),
+                    support_lower=row.get("support_rate_wilson_lower_80"),
+                    block_upper=row.get("blocking_rate_wilson_upper_80"),
                     pattern=row["pattern"],
                 )
             )
@@ -662,6 +694,31 @@ def _normalize_url(value: object) -> str:
 
 def _ratio(num: int, den: int) -> float | None:
     return round(num / den, 4) if den else None
+
+
+def _wilson_interval(successes: int, total: int, z: float = 1.2815515655446004) -> dict[str, float | None]:
+    if total <= 0:
+        return {"lower": None, "upper": None}
+    p = successes / total
+    denom = 1 + (z * z / total)
+    center = (p + (z * z / (2 * total))) / denom
+    margin = (z * ((p * (1 - p) / total + z * z / (4 * total * total)) ** 0.5)) / denom
+    return {
+        "lower": round(max(0.0, center - margin), 4),
+        "upper": round(min(1.0, center + margin), 4),
+    }
+
+
+def _evidence_strength(decisive_rows: int, support_rows: int, blocking_rows: int) -> str:
+    if decisive_rows <= 0:
+        return "unlabeled"
+    if blocking_rows:
+        return "blocked"
+    if support_rows < 5:
+        return "thin_support"
+    if decisive_rows < 10:
+        return "minimum_support"
+    return "strong_support"
 
 
 if __name__ == "__main__":

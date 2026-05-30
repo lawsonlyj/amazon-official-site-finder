@@ -5167,7 +5167,11 @@ class OperationalCommandTests(unittest.TestCase):
         self.assertEqual(len(candidates), 1)
         self.assertEqual(candidates[0]["supporting_rows"], 5)
         self.assertEqual(candidates[0]["blocking_rows"], 0)
+        self.assertEqual(candidates[0]["evidence_strength"], "minimum_support")
+        self.assertEqual(candidates[0]["support_rate_wilson_lower_80"], 0.7527)
+        self.assertEqual(candidates[0]["blocking_rate_wilson_upper_80"], 0.2473)
         self.assertIn("narrow recall recovery rule", candidates[0]["required_action"])
+        self.assertIn("minimum support", candidates[0]["required_action"])
 
     def test_evaluate_calibration_review_sample_exports_lane_downgrade_candidates(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -5200,6 +5204,12 @@ class OperationalCommandTests(unittest.TestCase):
         self.assertEqual(report["summary"]["lane_keep_review_rows"], 0)
         self.assertEqual(report["lane_recommendations"][0]["recommendation"], "candidate_for_review_downgrade")
         self.assertEqual(report["lane_recommendations"][0]["candidate_correct_rows"], 5)
+        self.assertEqual(report["lane_recommendations"][0]["support_rows"], 5)
+        self.assertEqual(report["lane_recommendations"][0]["blocking_rows"], 0)
+        self.assertEqual(report["lane_recommendations"][0]["support_rate"], 1.0)
+        self.assertEqual(report["lane_recommendations"][0]["support_rate_wilson_lower_80"], 0.7527)
+        self.assertEqual(report["lane_recommendations"][0]["blocking_rate_wilson_upper_80"], 0.2473)
+        self.assertEqual(report["lane_recommendations"][0]["evidence_strength"], "minimum_support")
         self.assertIn("spot-check", report["lane_recommendations"][0]["required_action"])
 
     def test_build_calibration_status_report_requires_labels_before_converging(self):
@@ -5569,6 +5579,12 @@ class OperationalCommandTests(unittest.TestCase):
                             {
                                 "review_reason": "precision_second_pass_accepted_lt70",
                                 "recommendation": "candidate_for_review_downgrade",
+                                "support_rows": 5,
+                                "blocking_rows": 0,
+                                "support_rate": 1.0,
+                                "support_rate_wilson_lower_80": 0.7527,
+                                "blocking_rate_wilson_upper_80": 0.2473,
+                                "evidence_strength": "minimum_support",
                             }
                         ],
                     }
@@ -5594,6 +5610,8 @@ class OperationalCommandTests(unittest.TestCase):
         self.assertEqual(report["lane_change_candidates"][0]["review_reason"], "precision_second_pass_accepted_lt70")
         self.assertEqual(report["lane_change_candidates"][0]["status"], "deferred_until_remaining_label_gaps_close")
         self.assertEqual(report["lane_change_candidates"][0]["blocking_decisive_rows_needed"], 3)
+        self.assertEqual(report["lane_change_candidates"][0]["evidence_strength"], "minimum_support")
+        self.assertEqual(report["lane_change_candidates"][0]["support_rate_wilson_lower_80"], 0.7527)
         self.assertIn("defer_lane_downgrade_candidate", {item["id"] for item in report["open_requirements"]})
         self.assertIn(str(label_gap_xlsx), report["next_actions"][0])
         self.assertNotIn(str(label_gap_high_xlsx), report["next_actions"][0])
