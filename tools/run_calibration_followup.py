@@ -67,7 +67,7 @@ def run_calibration_followup(
     summary = previous.get("summary") or {}
     out_dir = Path(output_dir) if output_dir else previous_path.parent
     out_dir.mkdir(parents=True, exist_ok=True)
-    filled_samples = _merged_filled_samples(inputs, filled_sample, reuse_previous_filled)
+    filled_samples = _merged_filled_samples(inputs, outputs, filled_sample, reuse_previous_filled)
     filled_policy_validations = _merged_filled_policy_validations(
         inputs,
         filled_policy_validation,
@@ -644,13 +644,24 @@ def _table_headers(path: Path) -> set[str]:
         return {str(item or "").strip() for item in (reader.fieldnames or []) if str(item or "").strip()}
 
 
-def _merged_filled_samples(inputs: dict, filled_sample: str | Path | list[str | Path] | None, reuse_previous: bool) -> list[Path]:
+def _merged_filled_samples(
+    inputs: dict,
+    outputs: dict,
+    filled_sample: str | Path | list[str | Path] | None,
+    reuse_previous: bool,
+) -> list[Path]:
     paths: list[Path] = []
     if reuse_previous:
-        paths.extend(Path(path) for path in inputs.get("filled_samples") or [] if str(path))
+        paths.extend(
+            path
+            for path in (Path(path) for path in inputs.get("filled_samples") or [] if str(path))
+            if _previous_filled_sample_can_reuse(path, outputs)
+        )
         previous_single = str(inputs.get("filled_sample") or "")
         if previous_single:
-            paths.append(Path(previous_single))
+            previous_path = Path(previous_single)
+            if _previous_filled_sample_can_reuse(previous_path, outputs):
+                paths.append(previous_path)
     if filled_sample:
         if isinstance(filled_sample, (str, Path)):
             paths.append(Path(filled_sample))
@@ -664,6 +675,62 @@ def _merged_filled_samples(inputs: dict, filled_sample: str | Path | list[str | 
             seen.add(key)
             deduped.append(path)
     return deduped
+
+
+def _previous_filled_sample_can_reuse(path: Path, outputs: dict) -> bool:
+    if not path.exists():
+        return False
+    if _looks_like_protected_lane_task(path):
+        try:
+            report = verify_protected_lane_review_task(
+                csv_path=path,
+                summary_json=_summary_for_filled_sample(path, outputs) or None,
+                xlsx_path=path if path.suffix.casefold() == ".xlsx" else None,
+                allow_filled=True,
+                require_filled=True,
+            )
+        except Exception:
+            return False
+        return bool((report.get("summary") or {}).get("passed"))
+    headers = _table_headers(path)
+    if "manual_decision" in headers:
+        return _table_has_any_manual_decision(path)
+    return True
+
+
+def _table_has_any_manual_decision(path: Path) -> bool:
+    for row in _table_rows(path):
+        if str(row.get("manual_decision") or "").strip():
+            return True
+    return False
+
+
+def _table_rows(path: Path) -> list[dict[str, str]]:
+    if not path.exists():
+        return []
+    if path.suffix.casefold() == ".xlsx":
+        try:
+            from openpyxl import load_workbook
+        except ImportError:
+            return []
+        workbook = load_workbook(path, read_only=True, data_only=False)
+        sheet = workbook.active
+        rows = list(sheet.iter_rows())
+        if not rows:
+            return []
+        headers = [str(cell.value or "").strip() for cell in rows[0]]
+        out = []
+        for cells in rows[1:]:
+            row = {
+                headers[idx]: str(cells[idx].value or "").strip()
+                for idx in range(len(headers))
+                if headers[idx]
+            }
+            if any(row.values()):
+                out.append(row)
+        return out
+    with path.open(newline="", encoding="utf-8-sig") as f:
+        return list(csv.DictReader(f))
 
 
 def _merged_filled_policy_validations(

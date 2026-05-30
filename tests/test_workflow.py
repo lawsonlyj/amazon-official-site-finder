@@ -5006,6 +5006,16 @@ class OperationalCommandTests(unittest.TestCase):
                     }
                 ],
             )
+            summary_with_blank_previous = root / "calibration_summary_with_blank_previous.json"
+            summary_payload = json.loads((output_dir / "calibration_cycle_summary.json").read_text(encoding="utf-8"))
+            summary_payload["inputs"]["filled_samples"] = [str(blank_priority_sample)]
+            summary_with_blank_previous.write_text(json.dumps(summary_payload), encoding="utf-8")
+            policy_only_followup_dir = root / "policy_only_followup"
+            policy_only_decision = run_calibration_followup(
+                previous_summary_json=summary_with_blank_previous,
+                filled_policy_validation=filled_policy_validation,
+                output_dir=policy_only_followup_dir,
+            )
 
             decision = run_calibration_followup(
                 previous_summary_json=output_dir / "calibration_cycle_summary.json",
@@ -5029,6 +5039,9 @@ class OperationalCommandTests(unittest.TestCase):
         self.assertTrue(verification_md_exists)
         self.assertTrue(policy_eval_exists)
         self.assertTrue(policy_eval_md_exists)
+        self.assertEqual(policy_only_decision["inputs"]["filled_samples"], [])
+        self.assertEqual(policy_only_decision["summary"]["filled_protected_sample_verification_count"], 0)
+        self.assertEqual(policy_only_decision["summary"]["filled_policy_validation_support_rows"], 1)
         self.assertTrue(verification["summary"]["passed"])
         self.assertEqual(decision["inputs"]["filled_samples"], [str(filled_sample)])
         self.assertEqual(decision["inputs"]["filled_policy_validations"], [str(filled_policy_validation)])
