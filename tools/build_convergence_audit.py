@@ -13,6 +13,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--status-json", required=True, help="calibration_status.json from run_calibration_cycle.py.")
     parser.add_argument("--labeled-balance-json", required=True, help="Labeled balance JSON with threshold simulations.")
     parser.add_argument("--protected-task-summary-json", help="Optional protected_lanes_next_review_task_summary.json.")
+    parser.add_argument("--protected-priority-task-summary-json", help="Optional protected_lanes_priority_task_summary.json.")
     parser.add_argument("--output-json")
     parser.add_argument("--output-md")
     args = parser.parse_args(argv)
@@ -21,6 +22,7 @@ def main(argv: list[str] | None = None) -> int:
         status_json=args.status_json,
         labeled_balance_json=args.labeled_balance_json,
         protected_task_summary_json=args.protected_task_summary_json,
+        protected_priority_task_summary_json=args.protected_priority_task_summary_json,
         output_json=args.output_json,
         output_md=args.output_md,
     )
@@ -33,16 +35,20 @@ def build_convergence_audit(
     status_json: str | Path,
     labeled_balance_json: str | Path,
     protected_task_summary_json: str | Path | None = None,
+    protected_priority_task_summary_json: str | Path | None = None,
     output_json: str | Path | None = None,
     output_md: str | Path | None = None,
 ) -> dict:
     status = _read_json(Path(status_json))
     balance = _read_json(Path(labeled_balance_json))
     protected_task = _read_json(Path(protected_task_summary_json)) if protected_task_summary_json else {}
+    protected_priority_task = (
+        _read_json(Path(protected_priority_task_summary_json)) if protected_priority_task_summary_json else {}
+    )
 
     status_summary = status.get("summary", {})
     threshold = _threshold_decision(status_summary, balance.get("threshold_simulations") or [])
-    review_lanes = _review_lane_decision(status, protected_task)
+    review_lanes = _review_lane_decision(status, protected_task, protected_priority_task)
     pattern_release = _pattern_release_decision(status)
     state = _convergence_state(status_summary, threshold, review_lanes, pattern_release)
     next_actions = _next_actions(status, threshold, review_lanes, pattern_release)
@@ -56,6 +62,7 @@ def build_convergence_audit(
             "review_lane_decision": review_lanes["decision"],
             "protected_review_lane_count": review_lanes["protected_review_lane_count"],
             "protected_lanes_next_review_task_rows": review_lanes["next_task_rows"],
+            "protected_lanes_priority_task_rows": review_lanes["priority_task_rows"],
             "pattern_release_decision": pattern_release["decision"],
             "pattern_release_gate_status": pattern_release["gate_status"],
             "regression_gate_status": str(status_summary.get("regression_gate_status") or ""),
@@ -70,6 +77,7 @@ def build_convergence_audit(
             "status_json": str(status_json),
             "labeled_balance_json": str(labeled_balance_json),
             "protected_task_summary_json": str(protected_task_summary_json or ""),
+            "protected_priority_task_summary_json": str(protected_priority_task_summary_json or ""),
         },
     }
     if output_json:
@@ -124,11 +132,12 @@ def _threshold_decision(status_summary: dict, simulations: list[dict]) -> dict:
     }
 
 
-def _review_lane_decision(status: dict, protected_task: dict) -> dict:
+def _review_lane_decision(status: dict, protected_task: dict, protected_priority_task: dict) -> dict:
     summary = status.get("summary", {})
     gates = status.get("application_gates") or {}
     review_gate = gates.get("review_lane_change") or {}
     task_rows = _to_int(protected_task.get("task_rows"))
+    priority_rows = _to_int(protected_priority_task.get("task_rows"))
     protected_count = _to_int(summary.get("protected_review_lane_count"))
     if str(review_gate.get("status") or "") == "blocked":
         decision = "keep_protected_lanes"
@@ -148,6 +157,10 @@ def _review_lane_decision(status: dict, protected_task: dict) -> dict:
         "next_task_rows": task_rows,
         "next_task_csv": str(protected_task.get("output_csv") or ""),
         "next_task_xlsx": str(protected_task.get("output_xlsx") or ""),
+        "priority_task_rows": priority_rows,
+        "priority_task_csv": str(protected_priority_task.get("output_csv") or ""),
+        "priority_task_xlsx": str(protected_priority_task.get("output_xlsx") or ""),
+        "priority_reason_counts": protected_priority_task.get("priority_reason_counts") or {},
         "reason_counts": protected_task.get("reason_counts") or {},
         "agent_b_decision_counts": protected_task.get("agent_b_decision_counts") or {},
         "targets": protected_task.get("targets") or [],
@@ -208,7 +221,17 @@ def _next_actions(status: dict, threshold: dict, review_lanes: dict, pattern_rel
         actions.append("Keep first-pass and second-pass thresholds unchanged.")
     else:
         actions.append("Review threshold simulations before changing score thresholds.")
-    if review_lanes.get("next_task_rows"):
+    if review_lanes.get("priority_task_rows"):
+        actions.append(
+            f"Fill {review_lanes.get('priority_task_xlsx') or 'the protected-lane priority review task'} "
+            f"({review_lanes['priority_task_rows']} rows) first when review capacity is limited."
+        )
+        if review_lanes.get("next_task_rows"):
+            actions.append(
+                f"Fill {review_lanes.get('next_task_xlsx') or 'the full protected-lane review task'} "
+                f"({review_lanes['next_task_rows']} rows) before reducing protected review lanes."
+            )
+    elif review_lanes.get("next_task_rows"):
         actions.append(
             f"Fill {review_lanes.get('next_task_xlsx') or 'the protected-lane review task'} "
             f"({review_lanes['next_task_rows']} rows) before reducing protected review lanes."
@@ -217,10 +240,21 @@ def _next_actions(status: dict, threshold: dict, review_lanes: dict, pattern_rel
         actions.append("Keep protected review lanes active until new labels support a narrower lane change.")
     if pattern_release["decision"] == "guarded_candidate_requires_explicit_allow":
         actions.append("Treat pattern release as a guarded candidate only; require explicit allow-candidate rollout.")
+    has_priority_task = bool(review_lanes.get("priority_task_rows"))
+    full_task_path = str(review_lanes.get("next_task_xlsx") or "")
     for action in status.get("next_actions") or []:
+        if has_priority_task and _is_stale_full_task_first_action(str(action), full_task_path):
+            continue
         if action and action not in actions:
             actions.append(str(action))
     return actions
+
+
+def _is_stale_full_task_first_action(action: str, full_task_path: str) -> bool:
+    if not full_task_path or full_task_path not in action:
+        return False
+    normalized = action.casefold()
+    return "next small label batch" in normalized or "first when review capacity is limited" in normalized
 
 
 def _threshold_row(row: dict) -> dict:
@@ -251,6 +285,7 @@ def _render_markdown(report: dict) -> str:
         f"- Current threshold ties best accuracy: {str(summary['current_threshold_ties_best_accuracy']).lower()}",
         f"- Review-lane decision: {summary['review_lane_decision']}",
         f"- Protected-lane next task rows: {summary['protected_lanes_next_review_task_rows']}",
+        f"- Protected-lane priority task rows: {summary['protected_lanes_priority_task_rows']}",
         f"- Pattern-release decision: {summary['pattern_release_decision']}",
         f"- Pattern-release gate: {summary['pattern_release_gate_status']}",
         f"- Regression gate: {summary['regression_gate_status']}",
@@ -281,7 +316,9 @@ def _render_markdown(report: dict) -> str:
             "",
             f"- Reason: {lanes['reason']}",
             f"- Protected lane count: {lanes['protected_review_lane_count']}",
+            f"- Priority review task: {lanes['priority_task_xlsx'] or 'not available'}",
             f"- Next review task: {lanes['next_task_xlsx'] or 'not available'}",
+            f"- Priority reason counts: {json.dumps(lanes['priority_reason_counts'], ensure_ascii=False, sort_keys=True)}",
             f"- Reason counts: {json.dumps(lanes['reason_counts'], ensure_ascii=False, sort_keys=True)}",
             "",
             "## Pattern Release",

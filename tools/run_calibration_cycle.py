@@ -489,6 +489,7 @@ def run_calibration_cycle(
         status_json=status_json,
         labeled_balance_json=labeled_eval_json,
         protected_task_summary_json=protected_lane_task_json,
+        protected_priority_task_summary_json=protected_lane_priority_json,
         output_json=convergence_audit_json,
         output_md=convergence_audit_md,
     )

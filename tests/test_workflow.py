@@ -4900,6 +4900,8 @@ class OperationalCommandTests(unittest.TestCase):
         self.assertIn("protected_lanes_priority_task_verification_json", decision["outputs"])
         self.assertIn("protected_lanes_next_review_task_verification_md", decision["outputs"])
         self.assertIn("protected_lanes_priority_task_verification_md", decision["outputs"])
+        if decision["summary"].get("protected_lanes_priority_task_rows"):
+            self.assertIn("protected_lanes_priority_task.xlsx", decision["summary"]["next_action"])
         self.assertIn("Threshold decision", decision_md)
         self.assertIn("Next Actions", decision_md)
 
@@ -7112,6 +7114,7 @@ class OperationalCommandTests(unittest.TestCase):
             status = root / "status.json"
             balance = root / "balance.json"
             protected_summary = root / "protected_summary.json"
+            priority_summary = root / "priority_summary.json"
             output_json = root / "convergence.json"
             output_md = root / "convergence.md"
             status.write_text(
@@ -7209,11 +7212,31 @@ class OperationalCommandTests(unittest.TestCase):
                 ),
                 encoding="utf-8",
             )
+            priority_summary.write_text(
+                json.dumps(
+                    {
+                        "task_rows": 16,
+                        "output_csv": "priority.csv",
+                        "output_xlsx": "priority.xlsx",
+                        "reason_counts": {
+                            "precision_low_confidence_auto_match": 4,
+                            "recall_unresolved_top_candidate": 4,
+                        },
+                        "priority_reason_counts": {
+                            "unfetchable_candidate_boundary": 3,
+                            "country_conflict_boundary": 1,
+                        },
+                        "agent_b_decision_counts": {"unsure": 15, "accept": 1},
+                    }
+                ),
+                encoding="utf-8",
+            )
 
             report = build_convergence_audit(
                 status_json=status,
                 labeled_balance_json=balance,
                 protected_task_summary_json=protected_summary,
+                protected_priority_task_summary_json=priority_summary,
                 output_json=output_json,
                 output_md=output_md,
             )
@@ -7226,11 +7249,16 @@ class OperationalCommandTests(unittest.TestCase):
         self.assertEqual(report["threshold"]["best_accuracy_thresholds"], [70, 75])
         self.assertEqual(report["review_lanes"]["decision"], "keep_protected_lanes")
         self.assertEqual(report["review_lanes"]["next_task_rows"], 32)
+        self.assertEqual(report["review_lanes"]["priority_task_rows"], 16)
+        self.assertEqual(report["summary"]["protected_lanes_priority_task_rows"], 16)
         self.assertEqual(report["pattern_release"]["decision"], "guarded_candidate_requires_explicit_allow")
-        self.assertIn("protected.xlsx", report["next_actions"][1])
+        self.assertIn("priority.xlsx", report["next_actions"][1])
+        self.assertIn("protected.xlsx", report["next_actions"][2])
         self.assertEqual(saved["summary"]["threshold_decision"], "keep_current_75_75")
+        self.assertEqual(saved["summary"]["protected_lanes_priority_task_rows"], 16)
         self.assertIn("Convergence Audit", md_text)
         self.assertIn("75/75", md_text)
+        self.assertIn("priority.xlsx", md_text)
 
     def test_verify_protected_lane_review_task_checks_links_summary_and_manual_blanks(self):
         with tempfile.TemporaryDirectory() as tmp:
