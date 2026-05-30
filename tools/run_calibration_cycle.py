@@ -31,6 +31,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--max-pattern-size", type=int, default=3)
     parser.add_argument("--filled-sample", help="Optional filled calibration sample CSV/XLSX to evaluate in the same cycle.")
     parser.add_argument(
+        "--pattern-release-json",
+        action="append",
+        default=[],
+        help="Optional already-validated pattern release simulation JSON. Repeatable.",
+    )
+    parser.add_argument(
         "--policy-report-json",
         help="Optional final release policy JSON from tools/build_release_policy_report.py.",
     )
@@ -50,6 +56,7 @@ def main(argv: list[str] | None = None) -> int:
         min_support=args.min_support,
         max_pattern_size=args.max_pattern_size,
         filled_sample=args.filled_sample,
+        pattern_release_jsons=args.pattern_release_json,
         policy_report_json=args.policy_report_json,
     )
     print(json.dumps(report["summary"], ensure_ascii=False, indent=2))
@@ -71,6 +78,7 @@ def run_calibration_cycle(
     min_support: int = 2,
     max_pattern_size: int = 3,
     filled_sample: str | Path | None = None,
+    pattern_release_jsons: list[str | Path] | None = None,
     policy_report_json: str | Path | None = None,
 ) -> dict:
     out_dir = Path(output_dir)
@@ -126,18 +134,20 @@ def run_calibration_cycle(
         output_json=release_sim_json,
         output_md=release_sim_md,
     )
+    pattern_release_inputs = [release_sim_json, *[Path(path) for path in (pattern_release_jsons or [])]]
+    preferred_pattern_release = _preferred_pattern_release_json(release_sim_json, pattern_release_jsons or [])
     balance_report = build_balance_report(
         labeled_eval_json=labeled_eval_json,
         batch_review_csv=review_csv,
         batch_agent_b_csv=batch_agent_b_csv,
         batch_total_rows=batch_total_rows,
-        pattern_release_jsons=[release_sim_json],
+        pattern_release_jsons=pattern_release_inputs,
         output_json=balance_report_json,
         output_md=balance_report_md,
     )
     threshold_boundary = build_threshold_boundary_report(
         labeled_eval_json=labeled_eval_json,
-        pattern_release_json=release_sim_json,
+        pattern_release_json=preferred_pattern_release,
         policy_report_json=policy_report_json,
         output_json=threshold_boundary_json,
         output_md=threshold_boundary_md,
@@ -150,7 +160,7 @@ def run_calibration_cycle(
         max_rows=max_rows,
         max_per_reason=max_per_reason,
         max_per_pattern=max_per_pattern,
-        pattern_jsons=[release_sim_json, recall_json, precision_json],
+        pattern_jsons=[*pattern_release_inputs, recall_json, precision_json],
     )
     empty_eval = evaluate_calibration_review_sample(
         sample=sample_xlsx,
@@ -197,6 +207,9 @@ def run_calibration_cycle(
             ),
             "raw_agent_b_recall_release": threshold_boundary["summary"].get("raw_agent_b_recall_release"),
             "calibrated_pattern_release": threshold_boundary["summary"].get("calibrated_pattern_release"),
+            "recommended_pattern_release": balance_report["summary"].get("recommended_pattern_release"),
+            "pattern_release_correct_rows": balance_report["summary"].get("pattern_release_correct_rows"),
+            "pattern_release_wrong_rows": balance_report["summary"].get("pattern_release_wrong_rows"),
             "protected_review_lane_count": balance_report["summary"].get("protected_review_lane_count"),
             "protected_review_lane_rows": balance_report["summary"].get("protected_review_lane_rows"),
             "spot_check_candidate_lanes": balance_report["summary"].get("spot_check_candidate_lanes"),
@@ -231,6 +244,8 @@ def run_calibration_cycle(
             "review_csv": str(review_csv),
             "batch_agent_b_csv": str(batch_agent_b_csv),
             "batch_total_rows": str(batch_total_rows),
+            "pattern_release_jsons": [str(path) for path in (pattern_release_jsons or [])],
+            "preferred_pattern_release_json": str(preferred_pattern_release),
             "filled_sample": str(filled_sample or ""),
             "policy_report_json": str(policy_report_json or ""),
         },
@@ -261,6 +276,7 @@ def run_calibration_cycle(
         "recall_recommendations": recall_report.get("recommendations", []),
         "precision_recommendations": precision_report.get("recommendations", []),
         "release_simulation_summary": release_simulation.get("summary", {}),
+        "pattern_release_inputs": [str(path) for path in pattern_release_inputs],
         "balance_report": balance_report,
         "threshold_boundary": threshold_boundary,
         "actionable_release_patterns": release_simulation.get("actionable_safe_patterns", []),
@@ -299,6 +315,8 @@ def _render_markdown(report: dict) -> str:
         f"- Matched-review confidence cutoff: <{summary['recommended_matched_review_confidence_below']}",
         f"- Raw AgentB recall release: {summary['raw_agent_b_recall_release']}",
         f"- Calibrated pattern release: {summary['calibrated_pattern_release']}",
+        f"- Recommended pattern release: {summary['recommended_pattern_release']}",
+        f"- Pattern release correct/wrong rows: {summary['pattern_release_correct_rows']}/{summary['pattern_release_wrong_rows']}",
         f"- Protected review lanes: {summary['protected_review_lane_count']}",
         f"- Protected review lane rows: {summary['protected_review_lane_rows']}",
         f"- Spot-check candidate lanes: {', '.join(summary.get('spot_check_candidate_lanes') or []) or 'None'}",
@@ -476,6 +494,14 @@ def _pattern_recommendation_counts(filled_eval: dict) -> dict[str, int]:
         if recommendation:
             counts[recommendation] = counts.get(recommendation, 0) + 1
     return counts
+
+
+def _preferred_pattern_release_json(generated: Path, extras: list[str | Path]) -> Path:
+    for path_value in extras:
+        path = Path(path_value)
+        if path.exists():
+            return path
+    return generated
 
 
 if __name__ == "__main__":

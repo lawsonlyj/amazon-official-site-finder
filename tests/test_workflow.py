@@ -4241,6 +4241,7 @@ class OperationalCommandTests(unittest.TestCase):
             review = root / "review.csv"
             batch_agent_b = root / "batch_agent_b.csv"
             policy_report = root / "policy_report.json"
+            pattern_release = root / "pattern_release.json"
             output_dir = root / "calibration"
             balance_json.write_text(
                 json.dumps(
@@ -4451,6 +4452,45 @@ class OperationalCommandTests(unittest.TestCase):
                 ),
                 encoding="utf-8",
             )
+            pattern_release.write_text(
+                json.dumps(
+                    {
+                        "summary": {
+                            "scope": "recall",
+                            "baseline_overall_accuracy": 0.81,
+                            "selected_actionable_pattern_count": 1,
+                            "selected_actionable_correct_recovery_rows": 2,
+                            "selected_actionable_wrong_release_rows": 0,
+                            "selected_actionable_accuracy": 0.84,
+                            "selected_actionable_auto_precision": 0.95,
+                            "selected_actionable_official_recall": 0.9,
+                        },
+                        "selected_actionable_pattern_set": [
+                            {
+                                "pattern": "agent_b_score<45 AND domain_relation:exact_provider_slug AND has:schema_org_organization_seen",
+                                "features": [
+                                    "agent_b_score<45",
+                                    "domain_relation:exact_provider_slug",
+                                    "has:schema_org_organization_seen",
+                                ],
+                                "correct_recovery_rows": 2,
+                                "wrong_release_rows": 0,
+                            }
+                        ],
+                        "selected_actionable_release_summary": {
+                            "pattern_count": 1,
+                            "correct_recovery_rows": 2,
+                            "wrong_release_rows": 0,
+                            "simulated_overall": {
+                                "overall_accuracy": 0.84,
+                                "auto_precision": 0.95,
+                                "official_recall": 0.9,
+                            },
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
 
             report = run_calibration_cycle(
                 labeled_eval_json=balance_json,
@@ -4461,6 +4501,7 @@ class OperationalCommandTests(unittest.TestCase):
                 output_dir=output_dir,
                 max_rows=2,
                 max_per_pattern=1,
+                pattern_release_jsons=[pattern_release],
                 policy_report_json=policy_report,
             )
             output_exists = {
@@ -4489,13 +4530,16 @@ class OperationalCommandTests(unittest.TestCase):
         self.assertTrue(output_exists["summary_md"])
         self.assertEqual(report["summary"]["empty_eval_labeled_rows"], 0)
         self.assertIn("release_actionable_safe_patterns", report["summary"])
-        self.assertIn("actionable_release_validation_rows", report["summary"])
+        self.assertEqual(report["summary"]["actionable_release_validation_rows"], 1)
         self.assertEqual(report["summary"]["recommended_global_accept_threshold"], DEFAULT_SECOND_PASS_ACCEPT_THRESHOLD)
         self.assertEqual(
             report["summary"]["recommended_matched_review_confidence_below"],
             DEFAULT_MATCHED_REVIEW_CONFIDENCE_CUTOFF,
         )
         self.assertEqual(report["summary"]["calibrated_pattern_release"], "enabled_with_guard_no_batch_release")
+        self.assertEqual(report["summary"]["recommended_pattern_release"], "narrow_pattern_release_candidate")
+        self.assertEqual(report["summary"]["pattern_release_correct_rows"], 2)
+        self.assertEqual(report["summary"]["pattern_release_wrong_rows"], 0)
         self.assertEqual(report["summary"]["protected_review_lane_count"], 2)
         self.assertEqual(
             report["summary"]["spot_check_candidate_lanes"],
@@ -4503,6 +4547,8 @@ class OperationalCommandTests(unittest.TestCase):
         )
         self.assertIn("balance_report", report)
         self.assertIn("threshold_boundary", report)
+        self.assertEqual(report["inputs"]["pattern_release_jsons"], [str(pattern_release)])
+        self.assertEqual(report["inputs"]["preferred_pattern_release_json"], str(pattern_release))
         self.assertEqual(report["inputs"]["policy_report_json"], str(policy_report))
         self.assertEqual(report["inputs"]["batch_total_rows"], "2")
 

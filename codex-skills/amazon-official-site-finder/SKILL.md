@@ -174,6 +174,8 @@ For calibration work, run `tools/evaluate_workflow_balance.py` against the basel
 
 `run_calibration_cycle.py` also writes `balance_report.json/md`, including protected review lanes, clean spot-check candidate lanes, and lanes that need more labels.
 
+Pass `--pattern-release-json` to `run_calibration_cycle.py` when a previously validated pattern-release simulation should stay in the next balance report, threshold boundary report, and review sample.
+
 When more labels are needed, run `tools/build_calibration_review_sample.py` with the batch `review_task.csv` and `agent_b/check.csv` to produce a small high-value XLSX. Add `--pattern-json` from `tools/mine_evidence_patterns.py` when the next review should validate narrow candidate rules, and set `--max-per-pattern` to keep labels balanced across candidate patterns. Ask the worker to fill `manual_decision`, `manual_url`, and `notes`; then run `tools/evaluate_calibration_review_sample.py` on the filled CSV/XLSX. Use its lane-level, `pattern_match`, and `pattern_rule_candidates` recommendations before changing thresholds or widening/narrowing review lanes.
 
 Expected reviewed outputs:
