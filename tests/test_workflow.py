@@ -51,7 +51,7 @@ from tools.apply_pattern_release_experiment import apply_pattern_release_experim
 from tools.apply_pattern_release_to_run import apply_pattern_release_to_run
 from tools.build_release_policy_report import build_release_policy_report
 from tools.build_threshold_boundary_report import build_threshold_boundary_report
-from tools.output_layout import DEFAULT_SECOND_PASS_ACCEPT_THRESHOLD, WORKFLOW_VERSION
+from tools.output_layout import DEFAULT_MATCHED_REVIEW_CONFIDENCE_CUTOFF, DEFAULT_SECOND_PASS_ACCEPT_THRESHOLD, WORKFLOW_VERSION
 
 
 def _write_test_csv(path: Path, rows: list[dict[str, str]]) -> None:
@@ -1463,6 +1463,50 @@ class OperationalCommandTests(unittest.TestCase):
         self.assertEqual(summary["review_rows"], 1)
         self.assertNotIn("high", task_rows)
         self.assertEqual(task_rows["low"]["review_reason"], "precision_second_pass_accepted_70_84")
+
+    def test_build_manual_review_task_uses_calibrated_matched_review_cutoff(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            run_dir = Path(tmp)
+            final_rows = [
+                {
+                    "provider_id": "watch",
+                    "provider_name": "Watch Band",
+                    "provider_detail_url": "https://amazon.example/watch",
+                    "official_url": "https://watch.example",
+                    "official_domain": "watch.example",
+                    "status": "matched",
+                    "decision_source": "auto_matched",
+                    "confidence": str(DEFAULT_MATCHED_REVIEW_CONFIDENCE_CUTOFF - 1),
+                    "source_status": "matched",
+                    "evidence_summary": "page_contains_exact_provider_name",
+                    "service_apis": "[]",
+                    "provider_locations": "[]",
+                },
+                {
+                    "provider_id": "above",
+                    "provider_name": "Above Band",
+                    "provider_detail_url": "https://amazon.example/above",
+                    "official_url": "https://above.example",
+                    "official_domain": "above.example",
+                    "status": "matched",
+                    "decision_source": "auto_matched",
+                    "confidence": str(DEFAULT_MATCHED_REVIEW_CONFIDENCE_CUTOFF),
+                    "source_status": "matched",
+                    "evidence_summary": "page_contains_exact_provider_name",
+                    "service_apis": "[]",
+                    "provider_locations": "[]",
+                },
+            ]
+            _write_test_csv(run_dir / "official_sites.csv", final_rows)
+
+            summary = build_manual_review_task(run_dir=run_dir, write_xlsx=False)
+            with (run_dir / "review_task.csv").open(newline="", encoding="utf-8") as f:
+                task_rows = {row["provider_id"]: row for row in csv.DictReader(f)}
+
+        self.assertEqual(summary["review_rows"], 1)
+        self.assertIn("watch", task_rows)
+        self.assertEqual(task_rows["watch"]["review_reason"], "precision_low_confidence_auto_match")
+        self.assertNotIn("above", task_rows)
 
     def test_agent_b_verification_outputs_decisions_and_clickable_workbook(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -3179,6 +3223,17 @@ class OperationalCommandTests(unittest.TestCase):
                             {"threshold": 75, "overall_accuracy": 0.81, "official_recall": 0.86, "false_official_rows": 8},
                             {"threshold": 82, "overall_accuracy": 0.81, "official_recall": 0.83, "false_official_rows": 6},
                         ],
+                        "details": [
+                            {
+                                "provider_id": "false-82",
+                                "provider_name": "False At 82",
+                                "outcome": "false_official",
+                                "output_confidence": "82",
+                                "output_domain": "wrong.example",
+                                "expected_domain": "",
+                                "manual_review_reason": "precision_low_confidence_auto_match",
+                            }
+                        ],
                         "agent_b_recall_release_simulations": [
                             {
                                 "agent_b_evidence_threshold": 75,
@@ -3415,6 +3470,17 @@ class OperationalCommandTests(unittest.TestCase):
                                 "correct_official_rows": 68,
                             },
                         ],
+                        "details": [
+                            {
+                                "provider_id": "false-82",
+                                "provider_name": "False At 82",
+                                "outcome": "false_official",
+                                "output_confidence": "82",
+                                "output_domain": "wrong.example",
+                                "expected_domain": "",
+                                "manual_review_reason": "precision_low_confidence_auto_match",
+                            }
+                        ],
                         "agent_b_recall_release_simulations": [
                             {
                                 "agent_b_evidence_threshold": 0,
@@ -3471,7 +3537,12 @@ class OperationalCommandTests(unittest.TestCase):
         self.assertEqual(report["summary"]["recommended_global_accept_threshold"], 75)
         self.assertEqual(report["summary"]["best_labeled_accuracy_threshold"], 75)
         self.assertEqual(report["summary"]["precision_watch_min"], 75)
-        self.assertEqual(report["summary"]["precision_watch_max"], 81)
+        self.assertEqual(report["summary"]["precision_watch_max"], 82)
+        self.assertEqual(
+            report["summary"]["recommended_matched_review_confidence_below"],
+            DEFAULT_MATCHED_REVIEW_CONFIDENCE_CUTOFF,
+        )
+        self.assertEqual(report["summary"]["observed_low_confidence_false_official_max"], 82)
         self.assertEqual(report["thresholds"]["precision_boundary"]["threshold"], 82)
         self.assertEqual(report["thresholds"]["precision_boundary"]["recommended_use"], "review_lane_only")
         self.assertEqual(report["summary"]["raw_agent_b_recall_release"], "manual_only")
@@ -4094,6 +4165,10 @@ class OperationalCommandTests(unittest.TestCase):
         self.assertIn("release_actionable_safe_patterns", report["summary"])
         self.assertIn("actionable_release_validation_rows", report["summary"])
         self.assertEqual(report["summary"]["recommended_global_accept_threshold"], DEFAULT_SECOND_PASS_ACCEPT_THRESHOLD)
+        self.assertEqual(
+            report["summary"]["recommended_matched_review_confidence_below"],
+            DEFAULT_MATCHED_REVIEW_CONFIDENCE_CUTOFF,
+        )
         self.assertEqual(report["summary"]["calibrated_pattern_release"], "enabled_with_guard_no_batch_release")
         self.assertIn("threshold_boundary", report)
         self.assertEqual(report["inputs"]["policy_report_json"], str(policy_report))

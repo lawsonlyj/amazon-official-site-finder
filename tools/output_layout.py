@@ -6,6 +6,8 @@ from pathlib import Path
 
 WORKFLOW_VERSION = "agent-loop-v6.3-calibrated-release"
 DEFAULT_SECOND_PASS_ACCEPT_THRESHOLD = 75
+DEFAULT_MATCHED_REVIEW_CONFIDENCE_CUTOFF = 83
+DEFAULT_SECOND_PASS_REVIEW_CONFIDENCE_CUTOFF = 85
 
 
 def run_root(run_dir: str | Path) -> Path:

@@ -177,6 +177,9 @@ def run_calibration_cycle(
             "recommended_second_pass_threshold": threshold_boundary["summary"].get("recommended_second_pass_threshold"),
             "precision_watch_min": threshold_boundary["summary"].get("precision_watch_min"),
             "precision_watch_max": threshold_boundary["summary"].get("precision_watch_max"),
+            "recommended_matched_review_confidence_below": threshold_boundary["summary"].get(
+                "recommended_matched_review_confidence_below"
+            ),
             "raw_agent_b_recall_release": threshold_boundary["summary"].get("raw_agent_b_recall_release"),
             "calibrated_pattern_release": threshold_boundary["summary"].get("calibrated_pattern_release"),
             "sample_rows": sample_summary.get("sample_rows"),
@@ -270,6 +273,7 @@ def _render_markdown(report: dict) -> str:
         f"- Recommended global accept threshold: {summary['recommended_global_accept_threshold']}",
         f"- Recommended second-pass threshold: {summary['recommended_second_pass_threshold']}",
         f"- Precision watch score band: {summary['precision_watch_min']}-{summary['precision_watch_max']}",
+        f"- Matched-review confidence cutoff: <{summary['recommended_matched_review_confidence_below']}",
         f"- Raw AgentB recall release: {summary['raw_agent_b_recall_release']}",
         f"- Calibrated pattern release: {summary['calibrated_pattern_release']}",
         f"- Sample rows: {summary['sample_rows']}",

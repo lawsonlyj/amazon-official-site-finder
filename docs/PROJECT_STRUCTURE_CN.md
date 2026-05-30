@@ -191,7 +191,7 @@ Codex receives filled manual review workbook
 | `finder/scoring.py` | 官网打分器。当前版本加入身份 cap：同名/通用名、国家冲突、服务不一致、logo-only、缺少服务或地区佐证时不能直接高分接受；但当页面级名称证据和 marketplace/service 证据同时存在时，会放宽同名/通用名 cap，避免过度拒绝正确官网。 |
 | `finder/logo.py` | 从候选官网提取 logo/favicon/og:image，并与 Amazon listing logo 做感知哈希相似度比较；作为正向身份加分证据，但 logo-only 不足以自动接受。 |
 | `tools/run_unresolved_second_pass.py` | 对第一轮没解决的商家做二轮补漏，用 Brave/Exa 找更可能的官网；默认接受阈值为 `75`，与 first pass 对齐，同时保留强证据、风险 URL 和身份 cap 约束。 |
-| `tools/build_manual_review_task.py` | 生成简化人工复核 CSV/XLSX，只保留工作人员需要判断和填写的列。 |
+| `tools/build_manual_review_task.py` | 生成简化人工复核 CSV/XLSX，只保留工作人员需要判断和填写的列；普通 auto-match 默认复核 75-82 分，second-pass accepted 仍复核 85 分以下。 |
 | `tools/run_agent_b_verification.py` | B 的高风险候选优先复核部分。只复核低置信、二轮新增、平台页、logo-only、同名/通用名、身份 cap 等风险行，输出 accept/replace/reject/unsure 和结构化证据。 |
 | `tools/run_agent_b_recommendations.py` | B 的建议部分。读取 B 复核结果和人工复核学习报告，输出可执行或需人工评估的优化建议。 |
 | `tools/run_review_learning.py` | 读取填好的复核表，合并人工反馈，输出 reviewed 结果、人工标签和优化建议。 |

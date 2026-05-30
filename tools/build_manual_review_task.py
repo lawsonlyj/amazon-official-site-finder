@@ -11,7 +11,13 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from finder.text import domain_from_url
 from finder.text import tokens
 from tools.build_linked_workbook import build_workbook
-from tools.output_layout import first_existing, publish_review_task_aliases, review_task_paths
+from tools.output_layout import (
+    DEFAULT_MATCHED_REVIEW_CONFIDENCE_CUTOFF,
+    DEFAULT_SECOND_PASS_REVIEW_CONFIDENCE_CUTOFF,
+    first_existing,
+    publish_review_task_aliases,
+    review_task_paths,
+)
 
 
 TASK_FIELDS = [
@@ -46,7 +52,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--output-csv")
     parser.add_argument("--output-xlsx")
     parser.add_argument("--write-xlsx", action="store_true")
-    parser.add_argument("--include-matched-confidence-below", type=int, default=85)
+    parser.add_argument("--include-matched-confidence-below", type=int, default=DEFAULT_MATCHED_REVIEW_CONFIDENCE_CUTOFF)
     args = parser.parse_args(argv)
 
     summary = build_manual_review_task(
@@ -66,7 +72,7 @@ def build_manual_review_task(
     output_csv: str | Path | None = None,
     output_xlsx: str | Path | None = None,
     write_xlsx: bool = True,
-    include_matched_confidence_below: int = 85,
+    include_matched_confidence_below: int = DEFAULT_MATCHED_REVIEW_CONFIDENCE_CUTOFF,
 ) -> dict:
     run_dir = Path(run_dir)
     final_path = first_existing(
@@ -121,7 +127,7 @@ def _needs_manual_review(row: dict[str, str], second_pass_row: dict[str, str], c
     if not row.get("official_url"):
         return True
     if status == "manual_accepted":
-        return confidence < 85
+        return confidence < DEFAULT_SECOND_PASS_REVIEW_CONFIDENCE_CUTOFF
     if status != "matched":
         return True
     if confidence < confidence_cutoff:
@@ -178,7 +184,7 @@ def _review_reason(row: dict[str, str], second_pass_row: dict[str, str]) -> str:
         return "precision_calibrated_pattern_release"
     if status == "manual_accepted" and confidence < 70:
         return "precision_second_pass_accepted_lt70"
-    if status == "manual_accepted" and confidence < 85:
+    if status == "manual_accepted" and confidence < DEFAULT_SECOND_PASS_REVIEW_CONFIDENCE_CUTOFF:
         return "precision_second_pass_accepted_70_84"
     if status == "manual_accepted":
         return "precision_second_pass_accepted_85_plus"
@@ -189,7 +195,7 @@ def _review_reason(row: dict[str, str], second_pass_row: dict[str, str]) -> str:
         return "precision_generic_identity_term_risk"
     if _high_confidence_slug_extension_risk(row, evidence, confidence):
         return "precision_slug_extension_identity_risk"
-    if confidence < 85:
+    if confidence < DEFAULT_MATCHED_REVIEW_CONFIDENCE_CUTOFF:
         return "precision_low_confidence_auto_match"
     return "spot_check_non_matched_status"
 
