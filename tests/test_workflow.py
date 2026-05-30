@@ -4592,6 +4592,7 @@ class OperationalCommandTests(unittest.TestCase):
             review = root / "review.csv"
             batch_agent_b = root / "batch_agent_b.csv"
             filled_sample = root / "filled_sample.csv"
+            candidate_final = root / "official_sites.csv"
             output_dir = root / "calibration"
             balance_json.write_text(
                 json.dumps(
@@ -4710,6 +4711,23 @@ class OperationalCommandTests(unittest.TestCase):
                     },
                 ],
             )
+            _write_test_csv(
+                candidate_final,
+                [
+                    {
+                        "provider_id": "filled-good",
+                        "provider_name": "Filled Good",
+                        "official_url": "https://filledgood.example/",
+                        "status": "matched",
+                    },
+                    {
+                        "provider_id": "filled-bad",
+                        "provider_name": "Filled Bad",
+                        "official_url": "",
+                        "status": "unresolved",
+                    },
+                ],
+            )
 
             report = run_calibration_cycle(
                 labeled_eval_json=balance_json,
@@ -4719,11 +4737,13 @@ class OperationalCommandTests(unittest.TestCase):
                 output_dir=output_dir,
                 max_rows=1,
                 filled_sample=filled_sample,
+                candidate_final_csv=candidate_final,
             )
             filled_eval_exists = (output_dir / "pattern_validation_sample_50_eval_filled.json").exists()
             rule_candidates_json_exists = (output_dir / "pattern_rule_candidates.json").exists()
             regression_cases_json_exists = (output_dir / "calibration_regression_cases.json").exists()
             regression_cases_csv_exists = (output_dir / "calibration_regression_cases.csv").exists()
+            regression_gate_json_exists = (output_dir / "calibration_regression_gate.json").exists()
             rule_candidates_md = output_dir / "pattern_rule_candidates.md"
             rule_candidates_md_text = rule_candidates_md.read_text(encoding="utf-8")
             summary_text = (output_dir / "calibration_cycle_summary.md").read_text(encoding="utf-8")
@@ -4732,6 +4752,7 @@ class OperationalCommandTests(unittest.TestCase):
         self.assertTrue(rule_candidates_json_exists)
         self.assertTrue(regression_cases_json_exists)
         self.assertTrue(regression_cases_csv_exists)
+        self.assertTrue(regression_gate_json_exists)
         self.assertEqual(report["summary"]["filled_eval_labeled_rows"], 2)
         self.assertEqual(report["summary"]["filled_pattern_recommendation_counts"]["reject_pattern"], 1)
         self.assertEqual(report["summary"]["filled_lane_recommendation_counts"]["keep_review_lane"], 1)
@@ -4740,6 +4761,9 @@ class OperationalCommandTests(unittest.TestCase):
         self.assertEqual(report["summary"]["filled_regression_case_rows"], 2)
         self.assertEqual(report["summary"]["filled_recall_blocking_fixture_rows"], 1)
         self.assertEqual(report["summary"]["filled_positive_fixture_rows"], 1)
+        self.assertEqual(report["summary"]["regression_gate_status"], "pass")
+        self.assertEqual(report["summary"]["regression_gate_fail_rows"], 0)
+        self.assertEqual(report["summary"]["regression_gate_unverified_rows"], 0)
         self.assertIn("run_calibration_regression_gate.py", report["summary"]["regression_gate_next_step"])
         self.assertIn("Rejected Pattern", rule_candidates_md_text)
         self.assertIn("Filled Lane Recommendations", summary_text)
@@ -4747,6 +4771,7 @@ class OperationalCommandTests(unittest.TestCase):
         self.assertIn("Filled Candidate Rule Export", summary_text)
         self.assertIn("Filled Regression Cases", summary_text)
         self.assertIn("Regression gate next step", summary_text)
+        self.assertIn("Regression Gate", summary_text)
         self.assertEqual(report["calibration_status"]["summary"]["workflow_status"], "partially_converged_keep_review_lanes")
 
     def test_run_calibration_cycle_merges_multiple_filled_samples(self):

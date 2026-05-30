@@ -15,6 +15,7 @@ from tools.build_calibration_regression_cases import build_calibration_regressio
 from tools.build_calibration_status_report import build_calibration_status_report
 from tools.evaluate_calibration_review_sample import evaluate_calibration_review_sample
 from tools.mine_evidence_patterns import mine_evidence_patterns
+from tools.run_calibration_regression_gate import run_calibration_regression_gate
 from tools.simulate_pattern_release import simulate_pattern_release
 from tools.build_threshold_boundary_report import build_threshold_boundary_report
 
@@ -49,6 +50,10 @@ def main(argv: list[str] | None = None) -> int:
         "--policy-report-json",
         help="Optional final release policy JSON from tools/build_release_policy_report.py.",
     )
+    parser.add_argument(
+        "--candidate-final-csv",
+        help="Optional candidate official_sites.csv/provider_final CSV to validate against filled calibration regression cases.",
+    )
     args = parser.parse_args(argv)
 
     report = run_calibration_cycle(
@@ -67,6 +72,7 @@ def main(argv: list[str] | None = None) -> int:
         filled_sample=args.filled_sample,
         pattern_release_jsons=args.pattern_release_json,
         policy_report_json=args.policy_report_json,
+        candidate_final_csv=args.candidate_final_csv,
     )
     print(json.dumps(report["summary"], ensure_ascii=False, indent=2))
     return 0
@@ -89,6 +95,7 @@ def run_calibration_cycle(
     filled_sample: str | Path | list[str | Path] | None = None,
     pattern_release_jsons: list[str | Path] | None = None,
     policy_report_json: str | Path | None = None,
+    candidate_final_csv: str | Path | None = None,
 ) -> dict:
     out_dir = Path(output_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -117,6 +124,9 @@ def run_calibration_cycle(
     regression_cases_csv = out_dir / "calibration_regression_cases.csv"
     regression_cases_json = out_dir / "calibration_regression_cases.json"
     regression_cases_md = out_dir / "calibration_regression_cases.md"
+    regression_gate_csv = out_dir / "calibration_regression_gate.csv"
+    regression_gate_json = out_dir / "calibration_regression_gate.json"
+    regression_gate_md = out_dir / "calibration_regression_gate.md"
     label_gap_csv = out_dir / "label_gap_task.csv"
     label_gap_xlsx = out_dir / "label_gap_task.xlsx"
     label_gap_high_csv = out_dir / "label_gap_high_priority_task.csv"
@@ -191,6 +201,7 @@ def run_calibration_cycle(
     filled_eval_sample = _filled_eval_sample_path(filled_sample_paths, filled_samples_merged_csv)
     filled_eval = {}
     regression_cases = {}
+    regression_gate = {}
     if filled_eval_sample:
         filled_eval = evaluate_calibration_review_sample(
             sample=filled_eval_sample,
@@ -209,6 +220,14 @@ def run_calibration_cycle(
             output_json=regression_cases_json,
             output_md=regression_cases_md,
         )
+        if candidate_final_csv:
+            regression_gate = run_calibration_regression_gate(
+                cases_csv=regression_cases_csv,
+                candidate_final_csv=candidate_final_csv,
+                output_csv=regression_gate_csv,
+                output_json=regression_gate_json,
+                output_md=regression_gate_md,
+            )
     pattern_recommendation_counts = _pattern_recommendation_counts(filled_eval)
     lane_recommendation_counts = _lane_recommendation_counts(filled_eval)
     report = {
@@ -290,6 +309,11 @@ def run_calibration_cycle(
             if regression_cases
             else None,
             "regression_gate_next_step": _regression_gate_next_step(regression_cases_csv) if regression_cases else "",
+            "regression_gate_status": regression_gate.get("summary", {}).get("gate_status") if regression_gate else "",
+            "regression_gate_fail_rows": regression_gate.get("summary", {}).get("fail_rows") if regression_gate else None,
+            "regression_gate_unverified_rows": regression_gate.get("summary", {}).get("unverified_rows")
+            if regression_gate
+            else None,
         },
         "inputs": {
             "labeled_eval_json": str(labeled_eval_json),
@@ -302,6 +326,7 @@ def run_calibration_cycle(
             "filled_sample": str(filled_sample_paths[0]) if len(filled_sample_paths) == 1 else "",
             "filled_samples": [str(path) for path in filled_sample_paths],
             "policy_report_json": str(policy_report_json or ""),
+            "candidate_final_csv": str(candidate_final_csv or ""),
         },
         "outputs": {
             "recall_json": str(recall_json),
@@ -328,6 +353,9 @@ def run_calibration_cycle(
             "regression_cases_csv": str(regression_cases_csv) if filled_eval_sample else "",
             "regression_cases_json": str(regression_cases_json) if filled_eval_sample else "",
             "regression_cases_md": str(regression_cases_md) if filled_eval_sample else "",
+            "regression_gate_csv": str(regression_gate_csv) if regression_gate else "",
+            "regression_gate_json": str(regression_gate_json) if regression_gate else "",
+            "regression_gate_md": str(regression_gate_md) if regression_gate else "",
             "label_gap_csv": str(label_gap_csv),
             "label_gap_xlsx": str(label_gap_xlsx),
             "label_gap_high_priority_csv": str(label_gap_high_csv),
@@ -352,6 +380,7 @@ def run_calibration_cycle(
         "filled_pattern_recommendations": filled_eval.get("pattern_recommendations", []) if filled_eval else [],
         "filled_pattern_rule_candidates": filled_eval.get("pattern_rule_candidates", {}) if filled_eval else {},
         "filled_regression_cases": regression_cases,
+        "regression_gate": regression_gate,
     }
     summary_json.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
     summary_md.write_text(_render_markdown(report), encoding="utf-8")
@@ -451,6 +480,8 @@ def _render_markdown(report: dict) -> str:
         f"- Filled precision blocking fixtures: {summary.get('filled_precision_blocking_fixture_rows')}",
         f"- Filled recall blocking fixtures: {summary.get('filled_recall_blocking_fixture_rows')}",
         f"- Filled positive fixtures: {summary.get('filled_positive_fixture_rows')}",
+        f"- Regression gate status: {summary.get('regression_gate_status') or 'not_run'}",
+        f"- Regression gate fail/unverified rows: {summary.get('regression_gate_fail_rows')}/{summary.get('regression_gate_unverified_rows')}",
         "",
         "## Outputs",
         "",
@@ -591,6 +622,12 @@ def _render_markdown(report: dict) -> str:
         lines.append(f"- Positive fixtures: {case_summary.get('positive_fixture_rows')}")
         if summary.get("regression_gate_next_step"):
             lines.append(f"- Regression gate next step: {summary.get('regression_gate_next_step')}")
+    regression_gate = report.get("regression_gate") or {}
+    if regression_gate.get("summary"):
+        lines.extend(["", "## Regression Gate", ""])
+        gate_summary = regression_gate["summary"]
+        lines.append(f"- Gate status: {gate_summary.get('gate_status')}")
+        lines.append(f"- Pass/fail/unverified: {gate_summary.get('pass_rows')}/{gate_summary.get('fail_rows')}/{gate_summary.get('unverified_rows')}")
     lines.append("")
     return "\n".join(lines)
 
