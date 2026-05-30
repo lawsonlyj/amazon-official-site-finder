@@ -4836,13 +4836,27 @@ class OperationalCommandTests(unittest.TestCase):
             )
             decision_json_exists = (output_dir / "calibration_followup_decision.json").exists()
             decision_md_exists = (output_dir / "calibration_followup_decision.md").exists()
+            decision_md = (output_dir / "calibration_followup_decision.md").read_text(encoding="utf-8")
 
         self.assertTrue(decision_json_exists)
         self.assertTrue(decision_md_exists)
         self.assertEqual(decision["inputs"]["filled_samples"], [str(filled_sample)])
         self.assertEqual(decision["summary"]["filled_labeled_rows"], len(rows))
         self.assertIn("workflow_status", decision["summary"])
+        self.assertIn("convergence_state", decision["summary"])
+        self.assertIn("threshold_decision", decision["summary"])
+        self.assertIn("review_lane_decision", decision["summary"])
+        self.assertIn("pattern_release_decision", decision["summary"])
+        self.assertIn("current_threshold_ties_best_accuracy", decision["summary"])
+        self.assertIn("protected_lanes_next_review_task_rows", decision["summary"])
+        self.assertIn("blocked_gates", decision["summary"])
+        self.assertIn("blocked_gate_count", decision["summary"])
+        self.assertIn("convergence_audit", decision)
         self.assertIn("application_gate_checks", decision)
+        self.assertIn("convergence_audit_json", decision["outputs"])
+        self.assertIn("protected_lanes_next_review_task_xlsx", decision["outputs"])
+        self.assertIn("Threshold decision", decision_md)
+        self.assertIn("Next Actions", decision_md)
 
     def test_run_calibration_cycle_can_evaluate_filled_pattern_sample(self):
         with tempfile.TemporaryDirectory() as tmp:
