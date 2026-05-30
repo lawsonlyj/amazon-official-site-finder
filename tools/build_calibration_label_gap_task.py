@@ -17,6 +17,10 @@ LABEL_GAP_PREFIX_FIELDS = [
     "label_target_decisive_rows",
     "label_decisive_rows_needed",
     "label_goal",
+    "label_question",
+    "label_decision_hint",
+    "label_evidence_source_kind",
+    "label_evidence_source_path",
 ]
 
 
@@ -62,6 +66,7 @@ def build_calibration_label_gap_task(
     sample_rows = _read_rows(sample_path) if sample_value and sample_path.is_file() else []
     filled_keys = _filled_row_keys(Path(filled_sample)) if filled_sample else set()
     headers = list(sample_rows[0].keys()) if sample_rows else []
+    status_summary = status.get("summary", {})
     allowed_priorities = set(priorities or ["high", "medium", "normal", "low"])
     selected: list[dict[str, str]] = []
     target_summaries = []
@@ -82,7 +87,7 @@ def build_calibration_label_gap_task(
         ]
         picked = candidates[:needed]
         for row in picked:
-            selected.append(_label_gap_row(row, target))
+            selected.append(_label_gap_row(row, target, status_summary))
         target_summaries.append(
             {
                 "review_reason": reason,
@@ -113,13 +118,51 @@ def build_calibration_label_gap_task(
     }
 
 
-def _label_gap_row(row: dict[str, str], target: dict) -> dict[str, str]:
+def _label_gap_row(row: dict[str, str], target: dict, status_summary: dict) -> dict[str, str]:
     out = dict(row)
+    review_reason = str(row.get("review_reason") or target.get("review_reason") or "")
     out["label_priority"] = str(target.get("priority") or "")
     out["label_target_decisive_rows"] = str(target.get("target_decisive_rows") or "")
     out["label_decisive_rows_needed"] = str(target.get("decisive_rows_needed") or "")
     out["label_goal"] = str(target.get("label_goal") or "")
+    out["label_question"] = _label_question(review_reason)
+    out["label_decision_hint"] = _label_decision_hint(review_reason)
+    out["label_evidence_source_kind"] = _label_evidence_source_kind(review_reason, status_summary)
+    out["label_evidence_source_path"] = _label_evidence_source_path(review_reason, status_summary)
     return out
+
+
+def _label_question(review_reason: str) -> str:
+    if review_reason == "recall_unresolved_top_candidate":
+        return "Should this unresolved candidate be accepted as the provider's official website?"
+    if review_reason == "precision_calibrated_pattern_release":
+        return "Is this pattern-released official_url truly the provider's independent official website?"
+    if review_reason.startswith("precision_"):
+        return "Is the shown official_url truly the provider's independent official website?"
+    return "What is the correct manual decision for this candidate?"
+
+
+def _label_decision_hint(review_reason: str) -> str:
+    base = "Use accept if the shown URL is correct; replace with manual_url if another official site is correct; reject if it is wrong; unsure only when evidence is insufficient."
+    if review_reason == "precision_calibrated_pattern_release":
+        return base + " A reject/replace here blocks wider automatic release for this pattern until retested."
+    if review_reason == "precision_second_pass_accepted_lt70":
+        return base + " This low-confidence second-pass lane controls whether sub-70 accepts stay manual-only."
+    if review_reason == "recall_unresolved_top_candidate":
+        return base + " An accept here measures recoverable recall from unresolved rows."
+    return base
+
+
+def _label_evidence_source_kind(review_reason: str, status_summary: dict) -> str:
+    if review_reason == "precision_calibrated_pattern_release":
+        return str(status_summary.get("pattern_release_source_kind") or "")
+    return ""
+
+
+def _label_evidence_source_path(review_reason: str, status_summary: dict) -> str:
+    if review_reason == "precision_calibrated_pattern_release":
+        return str(status_summary.get("pattern_release_source_path") or "")
+    return ""
 
 
 def _fields(sample_headers: list[str]) -> list[str]:

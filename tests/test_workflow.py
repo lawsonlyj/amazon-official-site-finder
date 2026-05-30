@@ -5518,6 +5518,10 @@ class OperationalCommandTests(unittest.TestCase):
             status.write_text(
                 json.dumps(
                     {
+                        "summary": {
+                            "pattern_release_source_kind": "supplied_prior",
+                            "pattern_release_source_path": "prior/pattern_release.json",
+                        },
                         "artifacts": {"sample_csv": str(sample)},
                         "label_targets": [
                             {
@@ -5556,9 +5560,15 @@ class OperationalCommandTests(unittest.TestCase):
         self.assertTrue(xlsx_exists)
         self.assertEqual(out_rows[0]["label_priority"], "high")
         self.assertEqual(out_rows[0]["label_decisive_rows_needed"], "5")
+        self.assertIn("official_url", out_rows[0]["label_question"])
+        self.assertIn("sub-70 accepts", out_rows[0]["label_decision_hint"])
         self.assertEqual(out_rows[0]["manual_decision"], "")
         self.assertIn("provider_detail_url", out_rows[0])
         self.assertNotIn("high-1", {row["provider_id"] for row in out_rows})
+        spot_rows = [row for row in out_rows if row["review_reason"] == "precision_calibrated_pattern_release"]
+        self.assertEqual(spot_rows[0]["label_evidence_source_kind"], "supplied_prior")
+        self.assertEqual(spot_rows[0]["label_evidence_source_path"], "prior/pattern_release.json")
+        self.assertIn("blocks wider automatic release", spot_rows[0]["label_decision_hint"])
 
     def test_scoring_tries_www_variant_before_giving_up_on_candidate(self):
         config = load_config("config/scoring.json")
