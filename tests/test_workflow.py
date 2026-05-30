@@ -50,6 +50,7 @@ from tools.check_calibration_application_gate import check_calibration_applicati
 from tools.evaluate_calibration_review_sample import evaluate_calibration_review_sample
 from tools.mine_evidence_patterns import mine_evidence_patterns
 from tools.run_calibration_cycle import run_calibration_cycle
+from tools.run_calibration_followup import run_calibration_followup
 from tools.run_calibration_regression_gate import run_calibration_regression_gate
 from tools.simulate_pattern_release import simulate_pattern_release
 from tools.apply_pattern_release_experiment import apply_pattern_release_experiment
@@ -4594,6 +4595,150 @@ class OperationalCommandTests(unittest.TestCase):
         self.assertEqual(report["inputs"]["preferred_pattern_release_json"], str(pattern_release))
         self.assertEqual(report["inputs"]["policy_report_json"], str(policy_report))
         self.assertEqual(report["inputs"]["batch_total_rows"], "2")
+
+    def test_run_calibration_followup_reuses_cycle_inputs_with_filled_sample(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            balance_json = root / "balance.json"
+            labeled_agent_b = root / "labeled_agent_b.csv"
+            review = root / "review.csv"
+            batch_agent_b = root / "batch_agent_b.csv"
+            output_dir = root / "calibration"
+            filled_sample = root / "filled_label_gap.csv"
+            balance_json.write_text(
+                json.dumps(
+                    {
+                        "overall": {
+                            "labeled_rows": 1,
+                            "auto_precision": 1.0,
+                            "official_recall": 1.0,
+                            "false_official_rows": 0,
+                            "over_rejected_rows": 0,
+                        },
+                        "threshold_simulations": [
+                            {
+                                "threshold": 75,
+                                "overall_accuracy": 1.0,
+                                "auto_precision": 1.0,
+                                "official_recall": 1.0,
+                                "false_official_rows": 0,
+                                "over_rejected_rows": 0,
+                            }
+                        ],
+                        "details": [
+                            {
+                                "provider_id": "p-precision",
+                                "provider_name": "Precision Lane",
+                                "expected_kind": "official",
+                                "expected_domain": "precision.example",
+                                "outcome": "correct_official",
+                                "manual_review_reason": "precision_second_pass_accepted_lt70",
+                            }
+                        ],
+                        "manual_review_lanes": [
+                            {
+                                "review_reason": "precision_second_pass_accepted_lt70",
+                                "review_task_rows": 1,
+                                "labeled_rows": 1,
+                                "false_official_rows": 0,
+                                "over_rejected_rows": 0,
+                                "correct_official_rows": 1,
+                                "correct_no_official_rows": 0,
+                                "risk_rows": 0,
+                            }
+                        ],
+                        "manual_review_lane_drop_simulations": [
+                            {
+                                "drop_review_reason": "precision_second_pass_accepted_lt70",
+                                "manual_review_rows_removed": 1,
+                                "known_false_official_missed_if_dropped": 0,
+                                "known_over_rejected_missed_if_dropped": 0,
+                                "known_correct_reviews_removed_if_dropped": 1,
+                            }
+                        ],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            _write_test_csv(
+                labeled_agent_b,
+                [
+                    {
+                        "provider_id": "p-precision",
+                        "provider_name": "Precision Lane",
+                        "candidate_domain": "precision.example",
+                        "candidate_url": "https://precision.example",
+                        "agent_b_decision": "accept",
+                        "confidence": "69",
+                        "evidence_score": "69",
+                        "supporting_facts": "candidate_pages_fetch_ok; page_contains_exact_provider_name",
+                        "counter_evidence": "",
+                        "reason_for_unsure": "",
+                    }
+                ],
+            )
+            _write_test_csv(
+                review,
+                [
+                    {
+                        "provider_id": "p-precision",
+                        "provider_name": "Precision Lane",
+                        "provider_detail_url": "https://amazon.example/p-precision",
+                        "official_url": "https://precision.example",
+                        "official_domain": "precision.example",
+                        "top_candidate_url": "",
+                        "top_candidate_domain": "",
+                        "review_reason": "precision_second_pass_accepted_lt70",
+                    }
+                ],
+            )
+            _write_test_csv(
+                batch_agent_b,
+                [
+                    {
+                        "provider_id": "p-precision",
+                        "provider_name": "Precision Lane",
+                        "candidate_domain": "precision.example",
+                        "candidate_url": "https://precision.example",
+                        "agent_b_decision": "accept",
+                        "confidence": "69",
+                        "evidence_score": "69",
+                        "supporting_facts": "candidate_pages_fetch_ok; page_contains_exact_provider_name",
+                        "counter_evidence": "",
+                        "reason_for_unsure": "",
+                    }
+                ],
+            )
+
+            run_calibration_cycle(
+                labeled_eval_json=balance_json,
+                labeled_agent_b_csv=labeled_agent_b,
+                review_csv=review,
+                batch_agent_b_csv=batch_agent_b,
+                batch_total_rows=1,
+                output_dir=output_dir,
+                max_rows=1,
+            )
+            with (output_dir / "pattern_validation_sample_50.csv").open(newline="", encoding="utf-8") as f:
+                rows = list(csv.DictReader(f))
+            for row in rows:
+                row["manual_decision"] = "accept"
+                row["notes"] = "confirmed official site"
+            _write_test_csv(filled_sample, rows)
+
+            decision = run_calibration_followup(
+                previous_summary_json=output_dir / "calibration_cycle_summary.json",
+                filled_sample=filled_sample,
+            )
+            decision_json_exists = (output_dir / "calibration_followup_decision.json").exists()
+            decision_md_exists = (output_dir / "calibration_followup_decision.md").exists()
+
+        self.assertTrue(decision_json_exists)
+        self.assertTrue(decision_md_exists)
+        self.assertEqual(decision["inputs"]["filled_samples"], [str(filled_sample)])
+        self.assertEqual(decision["summary"]["filled_labeled_rows"], len(rows))
+        self.assertIn("workflow_status", decision["summary"])
+        self.assertIn("application_gate_checks", decision)
 
     def test_run_calibration_cycle_can_evaluate_filled_pattern_sample(self):
         with tempfile.TemporaryDirectory() as tmp:
