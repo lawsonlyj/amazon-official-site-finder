@@ -392,6 +392,10 @@ def _sample_artifacts(cycle: dict, sample_eval_json: str | Path | None) -> dict:
     return {
         "sample_csv": str(outputs.get("sample_csv") or ""),
         "sample_xlsx": str(outputs.get("sample_xlsx") or ""),
+        "label_gap_csv": str(outputs.get("label_gap_csv") or ""),
+        "label_gap_xlsx": str(outputs.get("label_gap_xlsx") or ""),
+        "label_gap_high_priority_csv": str(outputs.get("label_gap_high_priority_csv") or ""),
+        "label_gap_high_priority_xlsx": str(outputs.get("label_gap_high_priority_xlsx") or ""),
         "sample_eval_json": str(outputs.get("eval_json") or sample_eval_json or ""),
         "filled_eval_json": str(outputs.get("filled_eval_json") or ""),
     }
@@ -549,11 +553,14 @@ def _next_actions(
     artifacts = artifacts or {}
     label_targets = label_targets or []
     sample_xlsx = artifacts.get("sample_xlsx") or "the latest calibration XLSX"
+    label_gap_xlsx = artifacts.get("label_gap_xlsx") or sample_xlsx
+    high_priority_xlsx = artifacts.get("label_gap_high_priority_xlsx") or label_gap_xlsx
     high_priority = [target["review_reason"] for target in label_targets if target.get("priority") == "high"]
     if workflow_status == "not_converged_needs_human_labels":
         focus = ", ".join(high_priority[:3]) if high_priority else "needs_more_labels lanes"
+        first_target = high_priority_xlsx if high_priority else label_gap_xlsx
         return [
-            f"Fill {sample_xlsx} before changing thresholds or review-lane routing.",
+            f"Fill {first_target} before changing thresholds or review-lane routing.",
             f"Prioritize high-value labels for: {focus}.",
         ]
     if workflow_status == "candidate_changes_require_regression":
@@ -596,6 +603,8 @@ def _render_markdown(report: dict) -> str:
         "",
         f"- Sample XLSX: {report['artifacts'].get('sample_xlsx') or 'not recorded'}",
         f"- Sample CSV: {report['artifacts'].get('sample_csv') or 'not recorded'}",
+        f"- Label-gap XLSX: {report['artifacts'].get('label_gap_xlsx') or 'not recorded'}",
+        f"- High-priority label-gap XLSX: {report['artifacts'].get('label_gap_high_priority_xlsx') or 'not recorded'}",
         "",
         "## Label Targets",
         "",

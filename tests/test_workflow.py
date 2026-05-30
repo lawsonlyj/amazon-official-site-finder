@@ -5163,6 +5163,8 @@ class OperationalCommandTests(unittest.TestCase):
             sample_eval = root / "sample_eval.json"
             sample_csv = root / "pattern_validation_sample_50.csv"
             sample_xlsx = root / "pattern_validation_sample_50.xlsx"
+            label_gap_xlsx = root / "label_gap_task.xlsx"
+            label_gap_high_xlsx = root / "label_gap_high_priority_task.xlsx"
             out_md = root / "status.md"
             cycle.write_text(
                 json.dumps(
@@ -5183,6 +5185,8 @@ class OperationalCommandTests(unittest.TestCase):
                         "outputs": {
                             "sample_csv": str(sample_csv),
                             "sample_xlsx": str(sample_xlsx),
+                            "label_gap_xlsx": str(label_gap_xlsx),
+                            "label_gap_high_priority_xlsx": str(label_gap_high_xlsx),
                         },
                     }
                 ),
@@ -5268,6 +5272,8 @@ class OperationalCommandTests(unittest.TestCase):
         self.assertIn("fill_calibration_sample", {item["id"] for item in report["open_requirements"]})
         self.assertIn("validate_historical_pattern_release", {item["id"] for item in report["open_requirements"]})
         self.assertEqual(report["artifacts"]["sample_xlsx"], str(sample_xlsx))
+        self.assertEqual(report["artifacts"]["label_gap_xlsx"], str(label_gap_xlsx))
+        self.assertEqual(report["artifacts"]["label_gap_high_priority_xlsx"], str(label_gap_high_xlsx))
         self.assertEqual(report["labeling_instructions"]["fields_to_fill"], ["manual_decision", "manual_url", "notes"])
         self.assertIn("precision_second_pass_accepted_lt70", {item["review_reason"] for item in report["label_targets"]})
         high_priority = [item for item in report["label_targets"] if item["priority"] == "high"]
@@ -5278,8 +5284,9 @@ class OperationalCommandTests(unittest.TestCase):
         by_reason = {item["review_reason"]: item for item in report["label_targets"]}
         self.assertEqual(by_reason["precision_calibrated_pattern_release"]["target_decisive_rows"], 3)
         self.assertEqual(by_reason["precision_low_confidence_auto_match"]["target_decisive_rows"], 3)
-        self.assertIn(str(sample_xlsx), report["next_actions"][0])
+        self.assertIn(str(label_gap_high_xlsx), report["next_actions"][0])
         self.assertIn(str(sample_xlsx), md_text)
+        self.assertIn(str(label_gap_high_xlsx), md_text)
         self.assertIn("precision_second_pass_accepted_lt70", md_text)
         self.assertIn("prior/pattern_release.json", md_text)
         self.assertIn("supplied_prior", md_text)
