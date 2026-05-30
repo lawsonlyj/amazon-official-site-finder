@@ -5112,6 +5112,7 @@ class OperationalCommandTests(unittest.TestCase):
             sample = root / "sample.csv"
             output_csv = root / "label_gap.csv"
             output_xlsx = root / "label_gap.xlsx"
+            filled = root / "filled.csv"
             rows = []
             for idx in range(6):
                 rows.append(
@@ -5140,6 +5141,16 @@ class OperationalCommandTests(unittest.TestCase):
                     }
                 )
             _write_test_csv(sample, rows)
+            _write_test_csv(
+                filled,
+                [
+                    {
+                        "provider_id": "high-1",
+                        "review_reason": "precision_second_pass_accepted_lt70",
+                        "manual_decision": "accept",
+                    }
+                ],
+            )
             status.write_text(
                 json.dumps(
                     {
@@ -5167,6 +5178,7 @@ class OperationalCommandTests(unittest.TestCase):
 
             summary = build_calibration_label_gap_task(
                 status_json=status,
+                filled_sample=filled,
                 output_csv=output_csv,
                 output_xlsx=output_xlsx,
             )
@@ -5174,14 +5186,15 @@ class OperationalCommandTests(unittest.TestCase):
                 out_rows = list(csv.DictReader(f))
             xlsx_exists = output_xlsx.exists()
 
-        self.assertEqual(summary["task_rows"], 8)
-        self.assertEqual(summary["priority_counts"]["high"], 5)
+        self.assertEqual(summary["task_rows"], 7)
+        self.assertEqual(summary["priority_counts"]["high"], 4)
         self.assertEqual(summary["priority_counts"]["medium"], 3)
         self.assertTrue(xlsx_exists)
         self.assertEqual(out_rows[0]["label_priority"], "high")
         self.assertEqual(out_rows[0]["label_decisive_rows_needed"], "5")
         self.assertEqual(out_rows[0]["manual_decision"], "")
         self.assertIn("provider_detail_url", out_rows[0])
+        self.assertNotIn("high-1", {row["provider_id"] for row in out_rows})
 
     def test_scoring_tries_www_variant_before_giving_up_on_candidate(self):
         config = load_config("config/scoring.json")

@@ -318,7 +318,8 @@ def run_calibration_cycle(
     )
     label_gap_task = build_calibration_label_gap_task(
         status_json=status_json,
-        sample_csv=filled_sample if filled_sample and str(filled_sample).endswith(".csv") else sample_csv,
+        sample_csv=sample_csv,
+        filled_sample=filled_sample,
         output_csv=label_gap_csv,
         output_xlsx=label_gap_xlsx,
     )

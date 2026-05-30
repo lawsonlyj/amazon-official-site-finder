@@ -24,6 +24,7 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Build a focused calibration label-gap review task.")
     parser.add_argument("--status-json", required=True, help="calibration_status.json from run_calibration_cycle.py.")
     parser.add_argument("--sample-csv", help="Optional sample CSV. Defaults to artifacts.sample_csv in status JSON.")
+    parser.add_argument("--filled-sample", help="Optional filled CSV/XLSX rows to exclude from the next gap task.")
     parser.add_argument("--output-csv", required=True)
     parser.add_argument("--output-xlsx")
     parser.add_argument(
@@ -37,6 +38,7 @@ def main(argv: list[str] | None = None) -> int:
     summary = build_calibration_label_gap_task(
         status_json=args.status_json,
         sample_csv=args.sample_csv,
+        filled_sample=args.filled_sample,
         output_csv=args.output_csv,
         output_xlsx=args.output_xlsx,
         priorities=args.priority,
@@ -50,6 +52,7 @@ def build_calibration_label_gap_task(
     status_json: str | Path,
     output_csv: str | Path,
     sample_csv: str | Path | None = None,
+    filled_sample: str | Path | None = None,
     output_xlsx: str | Path | None = None,
     priorities: list[str] | None = None,
 ) -> dict:
@@ -57,6 +60,7 @@ def build_calibration_label_gap_task(
     sample_value = sample_csv or status.get("artifacts", {}).get("sample_csv") or ""
     sample_path = Path(sample_value) if sample_value else Path()
     sample_rows = _read_rows(sample_path) if sample_value and sample_path.is_file() else []
+    filled_keys = _filled_row_keys(Path(filled_sample)) if filled_sample else set()
     headers = list(sample_rows[0].keys()) if sample_rows else []
     allowed_priorities = set(priorities or ["high", "medium", "normal", "low"])
     selected: list[dict[str, str]] = []
@@ -74,6 +78,7 @@ def build_calibration_label_gap_task(
             row
             for row in sample_rows
             if row.get("review_reason") == reason and not str(row.get("manual_decision") or "").strip()
+            and _row_key(row) not in filled_keys
         ]
         picked = candidates[:needed]
         for row in picked:
@@ -97,6 +102,7 @@ def build_calibration_label_gap_task(
     return {
         "status_json": str(status_json),
         "sample_csv": str(sample_path),
+        "filled_sample": str(filled_sample or ""),
         "output_csv": str(output_csv_path),
         "output_xlsx": str(output_xlsx or ""),
         "task_rows": len(selected),
@@ -120,6 +126,24 @@ def _fields(sample_headers: list[str]) -> list[str]:
     return [*LABEL_GAP_PREFIX_FIELDS, *[field for field in sample_headers if field not in LABEL_GAP_PREFIX_FIELDS]]
 
 
+def _filled_row_keys(path: Path) -> set[tuple[str, str]]:
+    if not path.exists():
+        return set()
+    return {
+        _row_key(row)
+        for row in _read_table(path)
+        if _row_key(row) and str(row.get("manual_decision") or row.get("your_decision") or row.get("decision") or "").strip()
+    }
+
+
+def _row_key(row: dict[str, str]) -> tuple[str, str]:
+    provider_id = str(row.get("provider_id") or "").strip()
+    review_reason = str(row.get("review_reason") or "").strip()
+    if not provider_id or not review_reason:
+        return ("", "")
+    return (provider_id, review_reason)
+
+
 def _read_json(path: Path) -> dict:
     if not path.exists():
         return {}
@@ -129,6 +153,35 @@ def _read_json(path: Path) -> dict:
 def _read_rows(path: Path) -> list[dict[str, str]]:
     with path.open(newline="", encoding="utf-8-sig") as f:
         return list(csv.DictReader(f))
+
+
+def _read_table(path: Path) -> list[dict[str, str]]:
+    if path.suffix.casefold() == ".xlsx":
+        return _read_xlsx(path)
+    return _read_rows(path)
+
+
+def _read_xlsx(path: Path) -> list[dict[str, str]]:
+    try:
+        from openpyxl import load_workbook
+    except ImportError:
+        return []
+    workbook = load_workbook(path, data_only=False, read_only=True)
+    sheet = workbook.active
+    rows = list(sheet.iter_rows())
+    if not rows:
+        return []
+    headers = [_cell_text(cell.value) for cell in rows[0]]
+    out = []
+    for cells in rows[1:]:
+        row = {headers[idx]: _cell_text(cells[idx].value) for idx in range(len(headers)) if headers[idx]}
+        if any(row.values()):
+            out.append(row)
+    return out
+
+
+def _cell_text(value: object) -> str:
+    return str(value or "").strip()
 
 
 def _write_rows(path: Path, rows: list[dict[str, str]], fields: list[str]) -> None:
