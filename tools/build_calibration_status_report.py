@@ -784,6 +784,12 @@ def _next_actions(
             f"Prioritize high-value labels for: {focus}.",
         ]
     if workflow_status == "candidate_changes_require_regression":
+        gate_actions = [item["action"] for item in open_requirements if item.get("id") == "run_regression_gate"]
+        if gate_actions:
+            return [
+                gate_actions[0],
+                "Use the regression gate result before applying any threshold or review-lane routing change.",
+            ]
         return [
             "Add focused regression tests for each candidate rule or lane downgrade.",
             "Apply only narrow guarded rules; keep global threshold unchanged.",
