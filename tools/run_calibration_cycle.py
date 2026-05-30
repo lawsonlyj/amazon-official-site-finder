@@ -24,6 +24,7 @@ from tools.simulate_pattern_release import simulate_pattern_release
 from tools.build_threshold_boundary_report import build_threshold_boundary_report
 from tools.verify_protected_lane_review_task import verify_protected_lane_review_task
 from tools.reuse_historical_labels_for_task import reuse_historical_labels_for_task
+from tools.apply_calibration_regression_cases import apply_calibration_regression_cases
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -144,6 +145,13 @@ def run_calibration_cycle(
     regression_gate_csv = out_dir / "calibration_regression_gate.csv"
     regression_gate_json = out_dir / "calibration_regression_gate.json"
     regression_gate_md = out_dir / "calibration_regression_gate.md"
+    regression_overlay_csv = out_dir / "calibration_regression_overlay_official_sites.csv"
+    regression_overlay_xlsx = out_dir / "calibration_regression_overlay_official_sites.xlsx"
+    regression_overlay_json = out_dir / "calibration_regression_overlay_application.json"
+    regression_overlay_md = out_dir / "calibration_regression_overlay_application.md"
+    regression_overlay_gate_csv = out_dir / "calibration_regression_overlay_gate.csv"
+    regression_overlay_gate_json = out_dir / "calibration_regression_overlay_gate.json"
+    regression_overlay_gate_md = out_dir / "calibration_regression_overlay_gate.md"
     label_gap_csv = out_dir / "label_gap_task.csv"
     label_gap_xlsx = out_dir / "label_gap_task.xlsx"
     label_gap_high_csv = out_dir / "label_gap_high_priority_task.csv"
@@ -246,6 +254,7 @@ def run_calibration_cycle(
     filled_eval = {}
     regression_cases = {}
     regression_gate = {}
+    regression_overlay = {}
     if filled_eval_sample:
         filled_eval = evaluate_calibration_review_sample(
             sample=filled_eval_sample,
@@ -271,6 +280,17 @@ def run_calibration_cycle(
                 output_csv=regression_gate_csv,
                 output_json=regression_gate_json,
                 output_md=regression_gate_md,
+            )
+            regression_overlay = apply_calibration_regression_cases(
+                cases_csv=regression_cases_csv,
+                candidate_final_csv=candidate_final_csv,
+                output_csv=regression_overlay_csv,
+                output_xlsx=regression_overlay_xlsx,
+                output_json=regression_overlay_json,
+                output_md=regression_overlay_md,
+                gate_csv=regression_overlay_gate_csv,
+                gate_json=regression_overlay_gate_json,
+                gate_md=regression_overlay_gate_md,
             )
     pattern_recommendation_counts = _pattern_recommendation_counts(filled_eval)
     lane_recommendation_counts = _lane_recommendation_counts(filled_eval)
@@ -358,6 +378,26 @@ def run_calibration_cycle(
             "regression_gate_unverified_rows": regression_gate.get("summary", {}).get("unverified_rows")
             if regression_gate
             else None,
+            "regression_overlay_changed_rows": regression_overlay.get("summary", {}).get("changed_rows")
+            if regression_overlay
+            else None,
+            "regression_overlay_change_count": regression_overlay.get("summary", {}).get("change_count")
+            if regression_overlay
+            else None,
+            "regression_overlay_gate_status": regression_overlay.get("summary", {}).get("regression_gate_status")
+            if regression_overlay
+            else "",
+            "regression_overlay_gate_fail_rows": regression_overlay.get("summary", {}).get("regression_gate_fail_rows")
+            if regression_overlay
+            else None,
+            "regression_overlay_gate_unverified_rows": regression_overlay.get("summary", {}).get(
+                "regression_gate_unverified_rows"
+            )
+            if regression_overlay
+            else None,
+            "regression_overlay_official_url_rows": regression_overlay.get("summary", {}).get("official_url_rows")
+            if regression_overlay
+            else None,
         },
         "inputs": {
             "labeled_eval_json": str(labeled_eval_json),
@@ -407,6 +447,13 @@ def run_calibration_cycle(
             "regression_gate_csv": str(regression_gate_csv) if regression_gate else "",
             "regression_gate_json": str(regression_gate_json) if regression_gate else "",
             "regression_gate_md": str(regression_gate_md) if regression_gate else "",
+            "regression_overlay_csv": str(regression_overlay_csv) if regression_overlay else "",
+            "regression_overlay_xlsx": str(regression_overlay_xlsx) if regression_overlay else "",
+            "regression_overlay_json": str(regression_overlay_json) if regression_overlay else "",
+            "regression_overlay_md": str(regression_overlay_md) if regression_overlay else "",
+            "regression_overlay_gate_csv": str(regression_overlay_gate_csv) if regression_overlay else "",
+            "regression_overlay_gate_json": str(regression_overlay_gate_json) if regression_overlay else "",
+            "regression_overlay_gate_md": str(regression_overlay_gate_md) if regression_overlay else "",
             "label_gap_csv": str(label_gap_csv),
             "label_gap_xlsx": str(label_gap_xlsx),
             "label_gap_high_priority_csv": str(label_gap_high_csv),
@@ -459,6 +506,7 @@ def run_calibration_cycle(
         "filled_pattern_rule_candidates": filled_eval.get("pattern_rule_candidates", {}) if filled_eval else {},
         "filled_regression_cases": regression_cases,
         "regression_gate": regression_gate,
+        "regression_overlay": regression_overlay,
     }
     summary_json.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
     summary_md.write_text(_render_markdown(report), encoding="utf-8")
@@ -723,6 +771,9 @@ def _render_markdown(report: dict) -> str:
         f"- Filled positive fixtures: {summary.get('filled_positive_fixture_rows')}",
         f"- Regression gate status: {summary.get('regression_gate_status') or 'not_run'}",
         f"- Regression gate fail/unverified rows: {summary.get('regression_gate_fail_rows')}/{summary.get('regression_gate_unverified_rows')}",
+        f"- Regression overlay changed rows: {summary.get('regression_overlay_changed_rows')}",
+        f"- Regression overlay gate status: {summary.get('regression_overlay_gate_status') or 'not_run'}",
+        f"- Regression overlay gate fail/unverified rows: {summary.get('regression_overlay_gate_fail_rows')}/{summary.get('regression_overlay_gate_unverified_rows')}",
         f"- Application gates allowed/not allowed/candidate: {summary.get('application_gate_allowed_count')}/{summary.get('application_gate_not_allowed_count')}/{summary.get('application_gate_candidate_count')}",
         f"- Convergence state: {summary.get('convergence_state') or 'not_audited'}",
         f"- Threshold decision: {summary.get('threshold_decision') or 'not_audited'}",
@@ -881,6 +932,18 @@ def _render_markdown(report: dict) -> str:
         gate_summary = regression_gate["summary"]
         lines.append(f"- Gate status: {gate_summary.get('gate_status')}")
         lines.append(f"- Pass/fail/unverified: {gate_summary.get('pass_rows')}/{gate_summary.get('fail_rows')}/{gate_summary.get('unverified_rows')}")
+    regression_overlay = report.get("regression_overlay") or {}
+    if regression_overlay.get("summary"):
+        lines.extend(["", "## Regression Overlay", ""])
+        overlay_summary = regression_overlay["summary"]
+        lines.append(f"- Changed rows: {overlay_summary.get('changed_rows')}")
+        lines.append(f"- Change types: {json.dumps(overlay_summary.get('change_type_counts') or {}, ensure_ascii=False)}")
+        lines.append(f"- Output CSV: {overlay_summary.get('output_csv')}")
+        lines.append(f"- Output XLSX: {overlay_summary.get('output_xlsx')}")
+        lines.append(f"- Overlay gate: {overlay_summary.get('regression_gate_status')}")
+        lines.append(
+            f"- Overlay gate fail/unverified: {overlay_summary.get('regression_gate_fail_rows')}/{overlay_summary.get('regression_gate_unverified_rows')}"
+        )
     application_gate_checks = report.get("application_gate_checks") or {}
     if application_gate_checks.get("checks"):
         lines.extend(["", "## Application Gates", ""])
