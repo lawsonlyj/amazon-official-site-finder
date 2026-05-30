@@ -26,7 +26,7 @@ amazon-official-site-finder/
     build_linked_workbook.py
     build_manual_review_task.py
     run_agent_b_verification.py
-    run_agent_c_recommendations.py
+    run_agent_c_recommendations.py      # 旧命令兼容入口
     apply_agent_optimizations.py
     apply_pattern_release_to_run.py
     build_policy_validation_task.py
@@ -197,7 +197,7 @@ Codex receives filled manual review workbook
 | `tools/run_agent_b_verification.py` | B 的高风险候选优先复核部分。只复核低置信、二轮新增、平台页、logo-only、同名/通用名、身份 cap 等风险行，输出 accept/replace/reject/unsure 和结构化证据。 |
 | `tools/run_agent_b_recommendations.py` | B 的建议部分。读取 B 复核结果和人工复核学习报告，输出可执行或需人工评估的优化建议。 |
 | `tools/run_review_learning.py` | 读取填好的复核表，合并人工反馈，输出 reviewed 结果、人工标签和优化建议。 |
-| `tools/run_agent_c_recommendations.py` | 旧名称兼容入口，内部仍生成 AgentB 建议。 |
+| `tools/run_agent_c_recommendations.py` | 旧名称兼容入口，转调 AgentB 建议实现。 |
 | `tools/apply_agent_optimizations.py` | A 的安全应用器，只自动写入可解释、可回滚的 excluded_domains 配置，并生成 human/identity/no_official/reachability 回归样例。 |
 | `tools/build_linked_workbook.py` | 生成链接可点击的 XLSX。 |
 | `tools/verify_run_outputs.py` | 检查最终 CSV、unresolved CSV、质量 JSON、XLSX 链接公式是否正常。 |
@@ -247,7 +247,7 @@ outputs/my_run/agent_b/check.xlsx
 outputs/my_run/agent_b/suggestions.md
 ```
 
-`details/input/`、`details/first_pass/`、`details/second_pass/` 保存中间证据和调试文件。旧版公开文件名仍会生成兼容副本，例如 `provider_final_official_websites_second_pass.csv` 和 `manual_official_site_review_task.xlsx`。
+`details/input/`、`details/first_pass/`、`details/second_pass/` 保存中间证据和调试文件。新版默认只写短文件名；旧版公开文件名仍可作为读取 fallback，例如 `provider_final_official_websites_second_pass.csv` 和 `manual_official_site_review_task.xlsx`。只有设置 `FINDER_WRITE_LEGACY_ALIASES=1` 时才额外写出旧名副本。
 
 人工复核填完并交给 Codex 后，最终主要看：
 

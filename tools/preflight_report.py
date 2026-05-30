@@ -34,7 +34,6 @@ REFERENCE_LINKS = [
     ("Trafilatura", "https://trafilatura.readthedocs.io/"),
     ("RapidFuzz", "https://rapidfuzz.github.io/RapidFuzz/"),
     ("Playwright Python", "https://playwright.dev/python/docs/intro"),
-    ("GitHub search syntax", "https://docs.github.com/search-github/getting-started-with-searching-on-github/understanding-the-search-syntax"),
 ]
 
 
@@ -176,7 +175,6 @@ def build_preflight_report(
             "Use Exa Search API as the semantic second-pass recall source if available.",
             "Use SerpAPI or Serper as Google SERP comparison sources if available.",
             "Use Tavily or Firecrawl as supplemental discovery sources.",
-            "Keep GitHub coverage as site:github.com queries inside normal web search.",
             "Use DDGS only for exploratory no-key smoke tests.",
         ],
         "handoff_outputs": [

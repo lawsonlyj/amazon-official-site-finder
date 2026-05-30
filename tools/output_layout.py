@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import shutil
 from pathlib import Path
 
@@ -129,13 +130,30 @@ def copy_aliases(pairs: list[tuple[str | Path, str | Path]]) -> None:
         copy_file_alias(source, alias)
 
 
+def legacy_aliases_enabled() -> bool:
+    value = os.getenv("FINDER_WRITE_LEGACY_ALIASES", "").strip().casefold()
+    return value in {"1", "true", "yes", "on"}
+
+
 def publish_first_pass_aliases(run_dir: str | Path, paths: dict[str, Path]) -> dict[str, str]:
     root = run_root(run_dir)
-    aliases = {
+    canonical = {
         "official_sites": root / "official_sites.csv",
         "unresolved": root / "unresolved.csv",
         "quality_md": root / "quality.md",
         "quality_json": root / "quality.json",
+    }
+    copy_aliases(
+        [
+            (paths["final"], canonical["official_sites"]),
+            (paths["unresolved"], canonical["unresolved"]),
+            (paths["quality_md"], canonical["quality_md"]),
+            (paths["quality_json"], canonical["quality_json"]),
+        ]
+    )
+    if not legacy_aliases_enabled():
+        return {}
+    aliases = {
         "provider_final_official_websites": root / "provider_final_official_websites.csv",
         "provider_unresolved": root / "provider_unresolved.csv",
         "quality_gate_provider_final_md": root / "quality_gate_provider_final.md",
@@ -143,10 +161,6 @@ def publish_first_pass_aliases(run_dir: str | Path, paths: dict[str, Path]) -> d
     }
     copy_aliases(
         [
-            (paths["final"], aliases["official_sites"]),
-            (paths["unresolved"], aliases["unresolved"]),
-            (paths["quality_md"], aliases["quality_md"]),
-            (paths["quality_json"], aliases["quality_json"]),
             (paths["final"], aliases["provider_final_official_websites"]),
             (paths["unresolved"], aliases["provider_unresolved"]),
             (paths["quality_md"], aliases["quality_gate_provider_final_md"]),
@@ -157,6 +171,8 @@ def publish_first_pass_aliases(run_dir: str | Path, paths: dict[str, Path]) -> d
 
 
 def publish_second_pass_aliases(run_dir: str | Path, paths: dict[str, Path]) -> dict[str, str]:
+    if not legacy_aliases_enabled():
+        return {}
     root = run_root(run_dir)
     aliases = {
         "unresolved_second_pass_plan": root / "unresolved_second_pass_plan.csv",
@@ -188,6 +204,8 @@ def publish_second_pass_aliases(run_dir: str | Path, paths: dict[str, Path]) -> 
 
 
 def publish_review_task_aliases(run_dir: str | Path, paths: dict[str, Path]) -> dict[str, str]:
+    if not legacy_aliases_enabled():
+        return {}
     root = run_root(run_dir)
     aliases = {
         "manual_official_site_review_task_csv": root / "manual_official_site_review_task.csv",
@@ -203,6 +221,8 @@ def publish_review_task_aliases(run_dir: str | Path, paths: dict[str, Path]) -> 
 
 
 def publish_agent_b_aliases(run_dir: str | Path, paths: dict[str, Path]) -> dict[str, str]:
+    if not legacy_aliases_enabled():
+        return {}
     root = run_root(run_dir)
     aliases = {
         "agent_b_verification_results_csv": root / "agent_b_verification_results.csv",
@@ -222,6 +242,8 @@ def publish_agent_b_aliases(run_dir: str | Path, paths: dict[str, Path]) -> dict
 
 
 def publish_agent_b_suggestion_aliases(run_dir: str | Path, paths: dict[str, Path]) -> dict[str, str]:
+    if not legacy_aliases_enabled():
+        return {}
     root = run_root(run_dir)
     aliases = {
         "agent_c_optimization_recommendations_json": root / "agent_c_optimization_recommendations.json",
@@ -237,6 +259,8 @@ def publish_agent_b_suggestion_aliases(run_dir: str | Path, paths: dict[str, Pat
 
 
 def publish_agent_a_aliases(run_dir: str | Path, paths: dict[str, Path]) -> dict[str, str]:
+    if not legacy_aliases_enabled():
+        return {}
     root = run_root(run_dir)
     aliases = {
         "agent_a_applied_optimizations_summary": root / "agent_a_applied_optimizations_summary.json",
@@ -258,6 +282,8 @@ def publish_agent_a_aliases(run_dir: str | Path, paths: dict[str, Path]) -> dict
 
 
 def publish_reviewed_aliases(run_dir: str | Path, paths: dict[str, Path]) -> dict[str, str]:
+    if not legacy_aliases_enabled():
+        return {}
     root = run_root(run_dir)
     aliases = {
         "manual_review_combined_decisions": root / "manual_review_combined_decisions.csv",

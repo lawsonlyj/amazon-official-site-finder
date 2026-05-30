@@ -38,7 +38,7 @@ from tools.verify_run_outputs import verify_run_outputs
 from tools.run_unresolved_second_pass import run_unresolved_second_pass, _accepted
 from tools.configure_env_from_key_files import extract_key_from_file, main as configure_env_main
 from tools.run_agent_b_verification import run_agent_b_verification
-from tools.run_agent_c_recommendations import run_agent_c_recommendations
+from tools.run_agent_b_recommendations import run_agent_b_recommendations
 from tools.apply_agent_optimizations import apply_agent_optimizations
 from tools.evaluate_workflow_balance import evaluate_balance, evaluate_balance_from_details
 from tools.build_balance_report import build_balance_report
@@ -184,7 +184,7 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual(providers[0]["service_apis"], ["Account Management", "Advertising Optimization"])
         self.assertEqual(providers[0]["provider_languages"], ["English", "German"])
 
-    def test_query_builder_includes_web_and_github_queries(self):
+    def test_query_builder_includes_web_queries_without_github_queries(self):
         provider = {
             "provider_name": "Example Agency LLC",
             "service_apis": ["Account Management"],
@@ -195,7 +195,8 @@ class WorkflowTests(unittest.TestCase):
 
         self.assertIn('"Example Agency LLC" official website', queries)
         self.assertIn('"Example Agency LLC" "United Kingdom" website', queries)
-        self.assertIn('site:github.com "Example Agency LLC"', queries)
+        self.assertNotIn('site:github.com "Example Agency LLC"', queries)
+        self.assertFalse(any("site:github.com" in query for query in queries))
 
     def test_query_builder_adds_country_language_terms(self):
         provider = {
@@ -1352,7 +1353,8 @@ class OperationalCommandTests(unittest.TestCase):
         self.assertEqual(task_rows[0]["review_reason"], "precision_second_pass_accepted_lt70")
         self.assertEqual(task_rows[1]["top_candidate_url"], "https://candidate.example")
         self.assertTrue(task_xlsx_exists)
-        self.assertTrue(legacy_task_exists)
+        self.assertFalse(legacy_task_exists)
+        self.assertEqual(summary["legacy_aliases"], {})
 
     def test_build_manual_review_task_flags_high_confidence_ambiguous_identity_risks(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -1633,7 +1635,7 @@ class OperationalCommandTests(unittest.TestCase):
         self.assertTrue(xlsx_exists)
         self.assertIn("https://amazon.example/p-1", rows["p-1"]["provider_detail_url"])
         self.assertEqual(summary["workflow_version"], WORKFLOW_VERSION)
-        self.assertTrue(legacy_xlsx_exists)
+        self.assertFalse(legacy_xlsx_exists)
 
     def test_agent_b_defaults_to_high_risk_rows_without_manual_task(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -2000,7 +2002,7 @@ class OperationalCommandTests(unittest.TestCase):
         self.assertEqual(rows[0]["reason_for_unsure"], "agent_b_row_timeout")
         self.assertIn("agent_b_row_timeout", rows[0]["counter_evidence"])
 
-    def test_agent_c_recommends_and_agent_a_applies_only_safe_rules(self):
+    def test_agent_b_recommends_and_agent_a_applies_only_safe_rules(self):
         with tempfile.TemporaryDirectory() as tmp:
             run_dir = Path(tmp)
             agent_b_rows = [
@@ -2045,7 +2047,7 @@ class OperationalCommandTests(unittest.TestCase):
             config_path = run_dir / "scoring.json"
             config_path.write_text(json.dumps(load_config("config/scoring.json")), encoding="utf-8")
 
-            recommendations = run_agent_c_recommendations(run_dir=run_dir)
+            recommendations = run_agent_b_recommendations(run_dir=run_dir)
             dry_run = apply_agent_optimizations(run_dir=run_dir, config_path=config_path, apply=False)
             applied = apply_agent_optimizations(run_dir=run_dir, config_path=config_path, apply=True)
             config = json.loads(config_path.read_text(encoding="utf-8"))
@@ -2058,7 +2060,8 @@ class OperationalCommandTests(unittest.TestCase):
         self.assertIn("bad-directory.example", config["excluded_domains"])
         self.assertNotIn("single-case.example", config["excluded_domains"])
         self.assertTrue(suggestions_exists)
-        self.assertTrue(legacy_suggestions_exists)
+        self.assertFalse(legacy_suggestions_exists)
+        self.assertNotIn("agent_c_recommendations", recommendations)
 
     def test_agent_a_writes_identity_regression_fixtures_without_config_change(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -2083,7 +2086,7 @@ class OperationalCommandTests(unittest.TestCase):
             config_path = run_dir / "scoring.json"
             config_path.write_text(json.dumps(load_config("config/scoring.json")), encoding="utf-8")
 
-            recommendations = run_agent_c_recommendations(run_dir=run_dir)
+            recommendations = run_agent_b_recommendations(run_dir=run_dir)
             applied = apply_agent_optimizations(run_dir=run_dir, config_path=config_path, apply=True)
             fixture_path = Path(applied["identity_regression_fixture"])
             fixture_exists = fixture_path.exists()
@@ -2140,7 +2143,7 @@ class OperationalCommandTests(unittest.TestCase):
             config_path = run_dir / "scoring.json"
             config_path.write_text(json.dumps(config), encoding="utf-8")
 
-            recommendations = run_agent_c_recommendations(run_dir=run_dir, human_review=human_review)
+            recommendations = run_agent_b_recommendations(run_dir=run_dir, human_review=human_review)
             applied = apply_agent_optimizations(run_dir=run_dir, config_path=config_path, apply=True)
             updated_config = json.loads(config_path.read_text(encoding="utf-8"))
 
@@ -2189,7 +2192,7 @@ class OperationalCommandTests(unittest.TestCase):
             config_path = run_dir / "scoring.json"
             config_path.write_text(json.dumps(load_config("config/scoring.json")), encoding="utf-8")
 
-            recommendations = run_agent_c_recommendations(run_dir=run_dir, human_review=human_review)
+            recommendations = run_agent_b_recommendations(run_dir=run_dir, human_review=human_review)
             applied = apply_agent_optimizations(run_dir=run_dir, config_path=config_path, apply=True)
             with open(applied["no_official_regression_fixture"], newline="", encoding="utf-8") as f:
                 fixture_rows = list(csv.DictReader(f))
@@ -3340,7 +3343,7 @@ class OperationalCommandTests(unittest.TestCase):
         self.assertEqual(summary["source_final_csv"], str(legacy_final))
         self.assertEqual(summary["released_rows"], 1)
         self.assertEqual(canonical_rows[0]["official_domain"], "legacybrand.example")
-        self.assertEqual(legacy_rows[0]["official_domain"], "legacybrand.example")
+        self.assertEqual(legacy_rows[0]["official_domain"], "")
 
     def test_build_balance_report_recommends_current_threshold_and_summarizes_batch(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -8756,7 +8759,7 @@ class OperationalCommandTests(unittest.TestCase):
         self.assertEqual(summary["overall"]["applied_manual_rows"], 2)
         self.assertTrue(report_exists)
         self.assertTrue(xlsx_exists)
-        self.assertTrue(legacy_xlsx_exists)
+        self.assertFalse(legacy_xlsx_exists)
 
     def test_review_learning_treats_typos_and_reject_with_manual_url_as_replace(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -9001,7 +9004,7 @@ class OperationalCommandTests(unittest.TestCase):
         self.assertTrue(summary["quality_overall"]["passed"])
         self.assertNotIn("row_count_mismatch", ";".join(summary["quality_overall"]["failures"]))
         self.assertEqual(final_rows[0]["status"], "manual_accepted")
-        self.assertTrue(legacy_final_exists)
+        self.assertFalse(legacy_final_exists)
         self.assertTrue(manifest["summary"]["quality_passed"])
         self.assertEqual(manifest["summary"]["official_url_rows"], 1)
         self.assertEqual(manifest["summary"]["unresolved_rows"], 0)
@@ -9614,7 +9617,7 @@ class OperationalCommandTests(unittest.TestCase):
         self.assertEqual(report["summary"]["configured_sources"], ["brave"])
         self.assertEqual(report["summary"]["normalized_provider_count"], 1)
         self.assertIn("--labels", report["recommended_commands"]["production_pipeline"])
-        self.assertEqual(report["scale_estimate"]["estimated_search_requests"], 6)
+        self.assertEqual(report["scale_estimate"]["estimated_search_requests"], 5)
 
     def test_preflight_live_check_failure_blocks_production_readiness(self):
         with tempfile.TemporaryDirectory() as tmp, patch.dict(os.environ, {"BRAVE_API_KEY": "brave-test"}, clear=True), patch(

@@ -105,11 +105,11 @@ if [[ "$RUN_AGENT_B" == "1" ]]; then
     AGENT_B_ARGS+=(--limit "$AGENT_B_LIMIT")
   fi
   PYTHONPATH=.vendor_eval:. python3 tools/run_agent_b_verification.py "${AGENT_B_ARGS[@]}"
-  AGENT_C_ARGS=(--run-dir "$RUN_DIR")
+  AGENT_B_RECOMMENDATION_ARGS=(--run-dir "$RUN_DIR")
   if [[ -n "$HUMAN_REVIEW_FILE" ]]; then
-    AGENT_C_ARGS+=(--human-review "$HUMAN_REVIEW_FILE")
+    AGENT_B_RECOMMENDATION_ARGS+=(--human-review "$HUMAN_REVIEW_FILE")
   fi
-  PYTHONPATH=.vendor_eval:. python3 tools/run_agent_b_recommendations.py "${AGENT_C_ARGS[@]}"
+  PYTHONPATH=.vendor_eval:. python3 tools/run_agent_b_recommendations.py "${AGENT_B_RECOMMENDATION_ARGS[@]}"
   if [[ "$APPLY_AGENT_OPTIMIZATIONS" == "1" ]]; then
     PYTHONPATH=.vendor_eval:. python3 tools/apply_agent_optimizations.py --run-dir "$RUN_DIR" --apply
   fi

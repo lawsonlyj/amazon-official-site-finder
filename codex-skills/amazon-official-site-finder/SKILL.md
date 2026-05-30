@@ -70,7 +70,7 @@ Run this from the repo root. Substitute the paths provided by the user.
 
 This command creates/updates `.env` and then runs the full workflow. The configure step prints only a boolean summary and must not print secrets.
 If the user did not provide an output directory, omit `--run-dir`; the script will create `outputs/codex_run_YYYYMMDD_HHMMSS`.
-Use `--run-agent-b` when the user asks for the AgentB optimization loop or candidate-first verification. B checks only high-risk rows by default, writes verification evidence plus suggestions, and the scorer uses country/language search hints, country/location corroboration, service consistency, and high-similarity Amazon listing logo matches as positive identity evidence. Logo-only evidence is review risk, not an automatic accept. Ambiguous-name candidates can still auto-accept when page-level provider identity and marketplace/service evidence agree, which avoids excessive unresolved rows; however specific high-confidence `consulting`/`seller` style names and slug-extended domains without exact logo corroboration are still sent to B/manual review, and AgentB keeps 70-84 score rows in those lanes as `unsure`. High-confidence second-pass accepts at 85+ are not included in the default review task. For rows coming from `review_task`, B keeps recall and replacement candidates as evidence but does not auto-fill a `replace` decision. `--human-review /path/to/filled_review.xlsx` lets B use filled human review notes, including no-official labels, as regression evidence. Add `--apply-agent-optimizations` when A should apply only safe B recommendations and write regression artifacts. Legacy public filenames are still generated.
+Use `--run-agent-b` when the user asks for the AgentB optimization loop or candidate-first verification. B checks only high-risk rows by default, writes verification evidence plus suggestions, and the scorer uses country/language search hints, country/location corroboration, service consistency, and high-similarity Amazon listing logo matches as positive identity evidence. Logo-only evidence is review risk, not an automatic accept. Ambiguous-name candidates can still auto-accept when page-level provider identity and marketplace/service evidence agree, which avoids excessive unresolved rows; however specific high-confidence `consulting`/`seller` style names and slug-extended domains without exact logo corroboration are still sent to B/manual review, and AgentB keeps 70-84 score rows in those lanes as `unsure`. High-confidence second-pass accepts at 85+ are not included in the default review task. For rows coming from `review_task`, B keeps recall and replacement candidates as evidence but does not auto-fill a `replace` decision. `--human-review /path/to/filled_review.xlsx` lets B use filled human review notes, including no-official labels, as regression evidence. Add `--apply-agent-optimizations` when A should apply only safe B recommendations and write regression artifacts. New runs write short canonical filenames by default; legacy names are read as fallback and can be written with `FINDER_WRITE_LEGACY_ALIASES=1`.
 
 For large AgentB checks, use `python3 tools/run_agent_b_verification.py --run-dir outputs/my_run --resume --write-xlsx` so progress is written incrementally and interrupted runs can continue. For batch validation, add `--row-timeout 15 --per-query 1` to mark slow rows `unsure` rather than letting one site block the whole run.
 
@@ -108,7 +108,7 @@ outputs/my_run/agent_b/suggestions.md
 outputs/my_run/manifest.json
 ```
 
-Report these files with absolute paths. Legacy public filenames are still generated for compatibility, including `provider_final_official_websites_second_pass.csv`, `provider_official_websites_second_pass_with_clickable_links.xlsx`, and `manual_official_site_review_task.xlsx`.
+Report these files with absolute paths. Legacy public filenames are not written by default; old files such as `provider_final_official_websites_second_pass.csv`, `provider_official_websites_second_pass_with_clickable_links.xlsx`, and `manual_official_site_review_task.xlsx` are still accepted as fallback inputs, and can be written for external compatibility by setting `FINDER_WRITE_LEGACY_ALIASES=1`.
 
 ## Verification
 
@@ -210,7 +210,7 @@ Codex follow-up checklist after a filled review file:
 
 For precision, prioritize rows whose `status=manual_accepted` and `confidence < 70`.
 
-For recall, inspect `unresolved.csv` and `details/second_pass/results.csv`; focus on unresolved rows with a non-empty candidate URL and confidence near 50-74. Legacy files `provider_unresolved_second_pass.csv` and `unresolved_second_pass_results.csv` are also generated.
+For recall, inspect `unresolved.csv` and `details/second_pass/results.csv`; focus on unresolved rows with a non-empty candidate URL and confidence near 50-74. Legacy files such as `provider_unresolved_second_pass.csv` and `unresolved_second_pass_results.csv` are still readable when opening older run directories.
 
 Accepted official URLs must not be Amazon/Seller Central, social/video platforms, directories, parked/domain-sale pages, login/app/staging/suspended pages, or marketplace profiles.
 

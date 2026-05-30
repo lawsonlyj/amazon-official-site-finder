@@ -4,7 +4,7 @@ from .geo import local_search_terms
 from .text import compact_space, slug
 
 
-def build_queries(provider: dict, *, include_github: bool = True) -> list[str]:
+def build_queries(provider: dict) -> list[str]:
     name = compact_space(provider.get("provider_name", ""))
     locations = provider.get("provider_locations") or []
     services = provider.get("service_apis") or []
@@ -21,13 +21,6 @@ def build_queries(provider: dict, *, include_github: bool = True) -> list[str]:
         queries.append(f'"{name}" "{term}"')
     if slug(name):
         queries.append(f'{slug(name)} website')
-    if include_github:
-        queries.extend(
-            [
-                f'site:github.com "{name}"',
-                f'site:github.com "{name}" website',
-            ]
-        )
     out = []
     for query in queries:
         if query not in out:

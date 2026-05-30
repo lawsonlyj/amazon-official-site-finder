@@ -38,8 +38,6 @@ def _notes(sources: list[str], input_path: str | None) -> list[str]:
         notes.append("Input file does not exist.")
     if not sources:
         notes.append("No search sources configured; discovery will fall back to deterministic domain guesses only.")
-    if any(source in sources for source in ["serpapi", "brave", "tavily", "exa", "ddgs"]):
-        notes.append("GitHub should be covered through site:github.com search queries, not a direct GitHub API dependency.")
     if not any(source in sources for source in PRODUCTION_SOURCES):
         notes.append("No production web search provider is configured; DDGS/domain guesses are exploratory fallbacks.")
     return notes

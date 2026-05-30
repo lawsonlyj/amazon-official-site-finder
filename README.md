@@ -93,7 +93,7 @@ That command runs the workflow in this order:
    Verifies the final CSV, unresolved CSV, quality JSON, and XLSX hyperlink formulas.
 
 9. Optional B loop
-   `tools/run_agent_b_verification.py` re-checks high-risk official/top-candidate URLs first, inspects company pages and lightweight independent search corroboration, and writes structured `accept`/`replace`/`reject`/`unsure` evidence while preserving `manual_decision`, `manual_url`, and `notes`. It also uses country/language search hints when building independent queries. `tools/run_agent_b_recommendations.py` writes B suggestions, and `tools/apply_agent_optimizations.py` is A's safe apply step. When `--pattern-release-json` is provided, `tools/apply_pattern_release_to_run.py` applies the calibrated selected actionable pattern set to unresolved rows, refreshes canonical output files, and keeps the released rows in the review task as `precision_calibrated_pattern_release` spot-checks. The legacy `tools/run_agent_c_recommendations.py` wrapper still works.
+   `tools/run_agent_b_verification.py` re-checks high-risk official/top-candidate URLs first, inspects company pages and lightweight independent search corroboration, and writes structured `accept`/`replace`/`reject`/`unsure` evidence while preserving `manual_decision`, `manual_url`, and `notes`. It also uses country/language search hints when building independent queries. `tools/run_agent_b_recommendations.py` owns the former AgentC suggestion logic, and `tools/apply_agent_optimizations.py` is A's safe apply step. When `--pattern-release-json` is provided, `tools/apply_pattern_release_to_run.py` applies the calibrated selected actionable pattern set to unresolved rows, refreshes canonical output files, and keeps the released rows in the review task as `precision_calibrated_pattern_release` spot-checks. The legacy `tools/run_agent_c_recommendations.py` wrapper still works only as a compatibility entry point.
 
 For Codex-assisted usage, `run_codex_assisted.sh` runs first. It calls `tools/configure_env_from_key_files.py` to create `.env` from local key files without printing secrets, then hands off to `run_workflow.sh`.
 
@@ -125,7 +125,7 @@ outputs/my_run/agent_b/check.xlsx
 outputs/my_run/agent_b/suggestions.md
 ```
 
-Use the XLSX for manual browsing and the CSV for downstream processing. Legacy names such as `provider_final_official_websites_second_pass.csv`, `provider_official_websites_second_pass_with_clickable_links.xlsx`, and `manual_official_site_review_task.xlsx` are still generated for compatibility.
+Use the XLSX for manual browsing and the CSV for downstream processing. New runs use these short canonical names by default. Older names such as `provider_final_official_websites_second_pass.csv`, `provider_official_websites_second_pass_with_clickable_links.xlsx`, and `manual_official_site_review_task.xlsx` are still accepted as input fallbacks; set `FINDER_WRITE_LEGACY_ALIASES=1` only when an external legacy process still needs duplicate output files.
 
 After applying manual review, the important reviewed files are:
 

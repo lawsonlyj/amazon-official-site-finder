@@ -164,7 +164,6 @@ def _queries(*, name: str, location: str, service: str, top_domain: str, tier: s
         f'"{name}" "contact"',
         f'"{name}" "{service}"',
         f'"{name}" "{location}" website' if location else "",
-        f'site:github.com "{name}" website',
     ]
     if clean and clean.casefold() != name.casefold():
         queries.append(f'"{clean}" official website')
