@@ -5039,6 +5039,9 @@ class OperationalCommandTests(unittest.TestCase):
         self.assertEqual(decision["summary"]["filled_policy_validation_support_rows"], 1)
         self.assertEqual(decision["summary"]["filled_policy_validation_blocking_rows"], 0)
         self.assertEqual(decision["summary"]["filled_policy_needs_more_labels_count"], 1)
+        self.assertEqual(decision["summary"]["policy_validation_decision"], "needs_more_labels")
+        self.assertEqual(decision["summary"]["policy_validation_gate_status"], "blocked")
+        self.assertIn("targeted policy-validation", decision["summary"]["policy_validation_required_action"])
         self.assertEqual(policy_eval["summary"]["support_rows"], 1)
         self.assertIn("filled_lane_candidate_for_change_count", decision["summary"])
         self.assertIn("filled_lane_keep_review_count", decision["summary"])
@@ -5083,6 +5086,7 @@ class OperationalCommandTests(unittest.TestCase):
         self.assertIn("Filled Pattern Rule Candidates", decision_md)
         self.assertIn("Filled Policy Validation", decision_md)
         self.assertIn("Filled Policy Rule Candidates", decision_md)
+        self.assertIn("Policy validation decision", decision_md)
         self.assertIn("Threshold decision", decision_md)
         self.assertIn("Next Actions", decision_md)
 

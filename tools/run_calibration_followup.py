@@ -140,6 +140,7 @@ def _build_decision(
     effective_next_actions = list(convergence_next_actions or next_actions)
     effective_next_actions.extend(_policy_validation_next_actions(policy_validation_evaluations))
     policy_summary = _policy_validation_summary(policy_validation_evaluations)
+    policy_decision = _policy_validation_decision(policy_summary)
     summary = {
         "workflow_status": status.get("workflow_status", ""),
         "convergence_state": convergence_summary.get("convergence_state", ""),
@@ -165,6 +166,9 @@ def _build_decision(
         "filled_policy_candidate_for_rule_count": policy_summary["candidate_for_rule_rows"],
         "filled_policy_needs_more_labels_count": policy_summary["needs_more_labels_rows"],
         "filled_policy_reject_pattern_count": policy_summary["reject_pattern_rows"],
+        "policy_validation_decision": policy_decision["decision"],
+        "policy_validation_gate_status": policy_decision["gate_status"],
+        "policy_validation_required_action": policy_decision["required_action"],
         "filled_lane_candidate_for_change_count": (report.get("summary") or {}).get(
             "filled_lane_candidate_for_change_count"
         ),
@@ -274,6 +278,9 @@ def _render_decision_markdown(decision: dict) -> str:
         f"- Filled policy validation labeled/decisive rows: {summary.get('filled_policy_validation_labeled_rows')}/{summary.get('filled_policy_validation_decisive_rows')}",
         f"- Filled policy validation support/block rows: {summary.get('filled_policy_validation_support_rows')}/{summary.get('filled_policy_validation_blocking_rows')}",
         f"- Filled policy candidate/needs-more/reject patterns: {summary.get('filled_policy_candidate_for_rule_count')}/{summary.get('filled_policy_needs_more_labels_count')}/{summary.get('filled_policy_reject_pattern_count')}",
+        f"- Policy validation decision: {summary.get('policy_validation_decision')}",
+        f"- Policy validation gate status: {summary.get('policy_validation_gate_status')}",
+        f"- Policy validation required action: {summary.get('policy_validation_required_action')}",
         f"- Filled lane candidate/keep-review counts: {summary.get('filled_lane_candidate_for_change_count')}/{summary.get('filled_lane_keep_review_count')}",
         f"- Filled pattern candidate/rejected counts: {summary.get('filled_rule_candidate_count')}/{summary.get('filled_rejected_pattern_count')}",
         f"- Filled labeled/decisive rows: {summary.get('filled_labeled_rows')}/{summary.get('filled_decisive_rows')}",
@@ -460,6 +467,44 @@ def _policy_validation_next_actions(reports: list[dict]) -> list[str]:
     if summary["needs_more_labels_rows"]:
         actions.append("Keep supported but thin policy-validation patterns in the next targeted validation task.")
     return actions
+
+
+def _policy_validation_decision(summary: dict) -> dict[str, str]:
+    if not summary.get("file_count"):
+        return {
+            "decision": "not_evaluated",
+            "gate_status": "not_evaluated",
+            "required_action": "No filled policy-validation workbook was supplied.",
+        }
+    if summary.get("decision_quality_issue_rows"):
+        return {
+            "decision": "fix_fill_quality",
+            "gate_status": "blocked",
+            "required_action": "Fix invalid manual decisions or missing manual_url values before using policy-validation evidence.",
+        }
+    if summary.get("reject_pattern_rows") or summary.get("blocking_rows"):
+        return {
+            "decision": "blocked_by_policy_validation",
+            "gate_status": "blocked",
+            "required_action": "Do not automate blocked policy patterns; add blocking regression fixtures for those provider/candidate rows.",
+        }
+    if summary.get("candidate_for_rule_rows"):
+        return {
+            "decision": "candidate_for_rule",
+            "gate_status": "candidate",
+            "required_action": "Add regression tests for every supporting row, then consider applying only the exact validated pattern.",
+        }
+    if summary.get("needs_more_labels_rows") or summary.get("support_rows"):
+        return {
+            "decision": "needs_more_labels",
+            "gate_status": "blocked",
+            "required_action": "Keep this exact pattern in targeted policy-validation tasks until it reaches enough clean decisive labels.",
+        }
+    return {
+        "decision": "not_evaluated",
+        "gate_status": "not_evaluated",
+        "required_action": "No decisive policy-validation evidence is available yet.",
+    }
 
 
 def _render_policy_validation_evaluation(payload: dict) -> str:
