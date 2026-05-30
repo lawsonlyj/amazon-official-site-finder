@@ -5015,7 +5015,11 @@ class OperationalCommandTests(unittest.TestCase):
                 [
                     {"provider_id": "p-low", "review_reason": "precision_second_pass_accepted_lt70"},
                     {"provider_id": "p-release", "review_reason": "precision_calibrated_pattern_release"},
+                    {"provider_id": "p-release-2", "review_reason": "precision_calibrated_pattern_release"},
+                    {"provider_id": "p-release-3", "review_reason": "precision_calibrated_pattern_release"},
                     {"provider_id": "p-protected", "review_reason": "precision_low_confidence_auto_match"},
+                    {"provider_id": "p-protected-2", "review_reason": "precision_low_confidence_auto_match"},
+                    {"provider_id": "p-protected-3", "review_reason": "precision_low_confidence_auto_match"},
                 ],
             )
 
@@ -5038,9 +5042,16 @@ class OperationalCommandTests(unittest.TestCase):
         self.assertIn("precision_second_pass_accepted_lt70", {item["review_reason"] for item in report["label_targets"]})
         high_priority = [item for item in report["label_targets"] if item["priority"] == "high"]
         self.assertEqual(high_priority[0]["review_reason"], "precision_second_pass_accepted_lt70")
+        self.assertEqual(high_priority[0]["target_decisive_rows"], 5)
+        self.assertEqual(high_priority[0]["decisive_rows_needed"], 5)
+        self.assertEqual(report["summary"]["high_priority_decisive_rows_needed"], 5)
+        by_reason = {item["review_reason"]: item for item in report["label_targets"]}
+        self.assertEqual(by_reason["precision_calibrated_pattern_release"]["target_decisive_rows"], 3)
+        self.assertEqual(by_reason["precision_low_confidence_auto_match"]["target_decisive_rows"], 3)
         self.assertIn(str(sample_xlsx), report["next_actions"][0])
         self.assertIn(str(sample_xlsx), md_text)
         self.assertIn("precision_second_pass_accepted_lt70", md_text)
+        self.assertIn("decisive=0/5", md_text)
 
     def test_build_calibration_status_report_flags_candidate_changes_after_labels(self):
         with tempfile.TemporaryDirectory() as tmp:

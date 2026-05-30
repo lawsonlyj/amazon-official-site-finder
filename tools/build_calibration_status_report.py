@@ -104,6 +104,10 @@ def build_calibration_status_report(
             "open_requirement_count": len(open_requirements),
             "label_target_count": len(label_targets),
             "high_priority_label_target_count": sum(1 for target in label_targets if target.get("priority") == "high"),
+            "decisive_rows_needed": sum(_to_int(target.get("decisive_rows_needed")) for target in label_targets),
+            "high_priority_decisive_rows_needed": sum(
+                _to_int(target.get("decisive_rows_needed")) for target in label_targets if target.get("priority") == "high"
+            ),
         },
         "threshold": threshold_status,
         "pattern_release": pattern_status,
@@ -363,13 +367,18 @@ def _label_targets(cycle: dict, balance: dict, sample_eval: dict, artifacts: dic
         recommendation = lane_recommendations.get(reason, {}).get("recommendation") or _default_lane_recommendation(
             reason, protected, needs_more, spot_check
         )
+        rows = _to_int(stats.get("rows"))
+        decisive_rows = _to_int(stats.get("decisive_rows"))
+        target_decisive_rows = _target_decisive_rows(reason, recommendation, rows, protected, needs_more, spot_check)
         targets.append(
             {
                 "review_reason": reason,
                 "priority": _label_priority(reason, recommendation, protected, needs_more, spot_check),
-                "rows": _to_int(stats.get("rows")),
+                "rows": rows,
                 "labeled_rows": _to_int(stats.get("labeled_rows")),
-                "decisive_rows": _to_int(stats.get("decisive_rows")),
+                "decisive_rows": decisive_rows,
+                "target_decisive_rows": target_decisive_rows,
+                "decisive_rows_needed": max(0, target_decisive_rows - decisive_rows),
                 "recommendation": recommendation,
                 "label_goal": _label_goal(reason, recommendation, protected, needs_more, spot_check),
             }
@@ -412,6 +421,27 @@ def _label_priority(reason: str, recommendation: str, protected: set[str], needs
     if recommendation == "needs_more_labels":
         return "normal"
     return "normal"
+
+
+def _target_decisive_rows(
+    reason: str,
+    recommendation: str,
+    rows: int,
+    protected: set[str],
+    needs_more: set[str],
+    spot_check: set[str],
+) -> int:
+    if rows <= 0:
+        return 0
+    if reason in needs_more:
+        return min(rows, 5)
+    if reason in spot_check or recommendation == "spot_check_candidate":
+        return min(rows, 3)
+    if reason in protected or recommendation == "keep_review_lane":
+        return min(rows, 3)
+    if recommendation in {"needs_more_labels", "candidate_for_review_downgrade"}:
+        return min(rows, 5)
+    return min(rows, 5)
 
 
 def _label_goal(reason: str, recommendation: str, protected: set[str], needs_more: set[str], spot_check: set[str]) -> str:
@@ -497,6 +527,7 @@ def _render_markdown(report: dict) -> str:
         f"- Lane needs-more-label rows: {summary['lane_needs_more_label_rows']}",
         f"- Pattern release correct/wrong rows: {summary['pattern_release_correct_rows']}/{summary['pattern_release_wrong_rows']}",
         f"- Label targets: {summary['label_target_count']} total, {summary['high_priority_label_target_count']} high priority",
+        f"- Decisive labels still needed: {summary['decisive_rows_needed']} total, {summary['high_priority_decisive_rows_needed']} high priority",
         "",
         "## Artifacts",
         "",
@@ -510,6 +541,7 @@ def _render_markdown(report: dict) -> str:
         for target in report["label_targets"]:
             lines.append(
                 "- {review_reason} ({priority}, rows={rows}, labeled={labeled_rows}, "
+                "decisive={decisive_rows}/{target_decisive_rows}, needed={decisive_rows_needed}, "
                 "recommendation={recommendation}): {label_goal}".format(**target)
             )
     else:
