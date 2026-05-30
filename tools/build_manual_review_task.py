@@ -112,6 +112,8 @@ def build_manual_review_task(
 
     return {
         "review_rows": len(task_rows),
+        "matched_review_confidence_below": include_matched_confidence_below,
+        "second_pass_review_confidence_below": DEFAULT_SECOND_PASS_REVIEW_CONFIDENCE_CUTOFF,
         "source_final_csv": str(final_path),
         "output_csv": str(output_csv_path),
         "output_xlsx": str(output_xlsx_path) if write_xlsx else "",

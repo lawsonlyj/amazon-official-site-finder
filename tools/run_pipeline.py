@@ -280,6 +280,12 @@ def run_pipeline(
     manual_review_task = build_manual_review_task(run_dir=run_dir, write_xlsx=True)
     manifest["manual_review_task"] = manual_review_task
     manifest["summary"]["manual_review_rows"] = manual_review_task["review_rows"]
+    manifest["summary"]["matched_review_confidence_below"] = manual_review_task.get(
+        "matched_review_confidence_below"
+    )
+    manifest["summary"]["second_pass_review_confidence_below"] = manual_review_task.get(
+        "second_pass_review_confidence_below"
+    )
     manifest.setdefault("outputs", {}).update(
         {
             "manual_review_task_csv": manual_review_task["output_csv"],

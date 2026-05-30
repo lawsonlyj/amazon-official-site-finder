@@ -51,7 +51,12 @@ from tools.apply_pattern_release_experiment import apply_pattern_release_experim
 from tools.apply_pattern_release_to_run import apply_pattern_release_to_run
 from tools.build_release_policy_report import build_release_policy_report
 from tools.build_threshold_boundary_report import build_threshold_boundary_report
-from tools.output_layout import DEFAULT_MATCHED_REVIEW_CONFIDENCE_CUTOFF, DEFAULT_SECOND_PASS_ACCEPT_THRESHOLD, WORKFLOW_VERSION
+from tools.output_layout import (
+    DEFAULT_MATCHED_REVIEW_CONFIDENCE_CUTOFF,
+    DEFAULT_SECOND_PASS_ACCEPT_THRESHOLD,
+    DEFAULT_SECOND_PASS_REVIEW_CONFIDENCE_CUTOFF,
+    WORKFLOW_VERSION,
+)
 
 
 def _write_test_csv(path: Path, rows: list[dict[str, str]]) -> None:
@@ -1504,6 +1509,11 @@ class OperationalCommandTests(unittest.TestCase):
                 task_rows = {row["provider_id"]: row for row in csv.DictReader(f)}
 
         self.assertEqual(summary["review_rows"], 1)
+        self.assertEqual(summary["matched_review_confidence_below"], DEFAULT_MATCHED_REVIEW_CONFIDENCE_CUTOFF)
+        self.assertEqual(
+            summary["second_pass_review_confidence_below"],
+            DEFAULT_SECOND_PASS_REVIEW_CONFIDENCE_CUTOFF,
+        )
         self.assertIn("watch", task_rows)
         self.assertEqual(task_rows["watch"]["review_reason"], "precision_low_confidence_auto_match")
         self.assertNotIn("above", task_rows)
