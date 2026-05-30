@@ -225,6 +225,11 @@ def run_calibration_cycle(
             "calibrated_pattern_release": threshold_boundary["summary"].get("calibrated_pattern_release"),
             "recommended_pattern_release": balance_report["summary"].get("recommended_pattern_release"),
             "recommended_pattern_release_source_path": balance_report["summary"].get("pattern_release_source_path", ""),
+            "recommended_pattern_release_source_kind": _pattern_release_source_kind(
+                balance_report["summary"].get("pattern_release_source_path", ""),
+                release_sim_json,
+                pattern_release_jsons or [],
+            ),
             "pattern_release_correct_rows": balance_report["summary"].get("pattern_release_correct_rows"),
             "pattern_release_wrong_rows": balance_report["summary"].get("pattern_release_wrong_rows"),
             "protected_review_lane_count": balance_report["summary"].get("protected_review_lane_count"),
@@ -369,6 +374,7 @@ def _render_markdown(report: dict) -> str:
         f"- Calibrated pattern release: {summary['calibrated_pattern_release']}",
         f"- Recommended pattern release: {summary['recommended_pattern_release']}",
         f"- Recommended pattern release source: {summary.get('recommended_pattern_release_source_path') or 'not_evaluated'}",
+        f"- Recommended pattern release source kind: {summary.get('recommended_pattern_release_source_kind') or 'not_evaluated'}",
         f"- Pattern release correct/wrong rows: {summary['pattern_release_correct_rows']}/{summary['pattern_release_wrong_rows']}",
         f"- Protected review lanes: {summary['protected_review_lane_count']}",
         f"- Protected review lane rows: {summary['protected_review_lane_rows']}",
@@ -685,6 +691,24 @@ def _write_rows(path: Path, rows: list[dict[str, str]], fields: list[str]) -> No
 
 def _cell_text(value: object) -> str:
     return str(value or "").strip()
+
+
+def _pattern_release_source_kind(source_path: str, generated: Path, extras: list[str | Path]) -> str:
+    if not source_path:
+        return "not_evaluated"
+    source = Path(source_path)
+    if _same_path(source, generated):
+        return "current_cycle"
+    if any(_same_path(source, Path(extra)) for extra in extras):
+        return "supplied_prior"
+    return "unknown"
+
+
+def _same_path(left: Path, right: Path) -> bool:
+    try:
+        return left.resolve() == right.resolve()
+    except OSError:
+        return str(left) == str(right)
 
 
 def _preferred_pattern_release_json(generated: Path, extras: list[str | Path]) -> Path:
