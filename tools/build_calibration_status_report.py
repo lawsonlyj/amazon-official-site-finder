@@ -412,6 +412,8 @@ def _workflow_status(
         if regression_gate_status["status"] == "pass":
             return "candidate_changes_regression_passed"
         return "candidate_changes_require_regression"
+    if regression_gate_status["status"] == "not_run":
+        return "not_converged_regression_gate_not_run"
     return "converged_current_rules"
 
 
@@ -766,6 +768,9 @@ def _next_actions(
     if workflow_status == "not_converged_regression_gate_failed":
         gate_actions = [item["action"] for item in open_requirements if item.get("id") == "fix_regression_gate_failures"]
         return gate_actions or ["Fix regression gate failures before applying threshold or review-lane routing changes."]
+    if workflow_status == "not_converged_regression_gate_not_run":
+        gate_actions = [item["action"] for item in open_requirements if item.get("id") == "run_regression_gate"]
+        return gate_actions or ["Run the calibration regression gate before declaring the current rules converged."]
     sample_xlsx = artifacts.get("sample_xlsx") or "the latest calibration XLSX"
     label_gap_xlsx = artifacts.get("label_gap_xlsx") or sample_xlsx
     high_priority_xlsx = artifacts.get("label_gap_high_priority_xlsx") or label_gap_xlsx

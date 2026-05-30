@@ -5766,6 +5766,47 @@ class OperationalCommandTests(unittest.TestCase):
         self.assertIn("run_regression_gate", {item["id"] for item in report["open_requirements"]})
         self.assertIn("run_calibration_regression_gate.py", report["next_actions"][0])
 
+    def test_build_calibration_status_report_does_not_converge_with_unrun_regression_gate(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            cycle = root / "cycle.json"
+            sample_eval = root / "sample_eval.json"
+            cycle.write_text(
+                json.dumps(
+                    {
+                        "summary": {
+                            "recommended_global_accept_threshold": 75,
+                            "recommended_second_pass_threshold": 75,
+                            "filled_eval_labeled_rows": 8,
+                            "filled_eval_decisive_rows": 8,
+                            "filled_regression_case_rows": 4,
+                        }
+                    }
+                ),
+                encoding="utf-8",
+            )
+            sample_eval.write_text(
+                json.dumps(
+                    {
+                        "summary": {
+                            "labeled_rows": 8,
+                            "decisive_rows": 8,
+                            "lane_candidate_for_change_rows": 0,
+                            "lane_keep_review_rows": 0,
+                            "lane_needs_more_label_rows": 0,
+                        }
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            report = build_calibration_status_report(calibration_cycle_json=cycle, sample_eval_json=sample_eval)
+
+        self.assertEqual(report["summary"]["workflow_status"], "not_converged_regression_gate_not_run")
+        self.assertEqual(report["summary"]["regression_gate_status"], "not_run")
+        self.assertIn("run_regression_gate", {item["id"] for item in report["open_requirements"]})
+        self.assertIn("run_calibration_regression_gate.py", report["next_actions"][0])
+
     def test_build_calibration_status_report_blocks_on_fill_quality_issues(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
