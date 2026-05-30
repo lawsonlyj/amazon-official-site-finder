@@ -19,6 +19,7 @@ LABEL_GAP_PREFIX_FIELDS = [
     "label_goal",
     "label_question",
     "label_decision_hint",
+    "label_decision_impact",
     "label_evidence_source_kind",
     "label_evidence_source_path",
 ]
@@ -127,6 +128,7 @@ def _label_gap_row(row: dict[str, str], target: dict, status_summary: dict) -> d
     out["label_goal"] = str(target.get("label_goal") or "")
     out["label_question"] = _label_question(review_reason)
     out["label_decision_hint"] = _label_decision_hint(review_reason)
+    out["label_decision_impact"] = _label_decision_impact(review_reason, target)
     out["label_evidence_source_kind"] = _label_evidence_source_kind(review_reason, status_summary)
     out["label_evidence_source_path"] = _label_evidence_source_path(review_reason, status_summary)
     return out
@@ -151,6 +153,46 @@ def _label_decision_hint(review_reason: str) -> str:
     if review_reason == "recall_unresolved_top_candidate":
         return base + " An accept here measures recoverable recall from unresolved rows."
     return base
+
+
+def _label_decision_impact(review_reason: str, target: dict) -> str:
+    target_rows = _to_int(target.get("target_decisive_rows"))
+    needed_rows = _to_int(target.get("decisive_rows_needed"))
+    sample_goal = f"{target_rows or needed_rows} decisive labels" if target_rows or needed_rows else "the required decisive labels"
+    remaining_goal = f"{needed_rows} remaining decisive labels" if needed_rows else sample_goal
+    if review_reason == "precision_second_pass_accepted_lt70":
+        return (
+            f"If {remaining_goal} are correct with zero reject/replace blockers, this lane can become a candidate for narrower review downgrade. "
+            "Any reject/replace keeps sub-70 second-pass accepts protected and adds a regression case; unsure does not count as decisive evidence."
+        )
+    if review_reason == "precision_calibrated_pattern_release":
+        return (
+            "A reject/replace blocks wider automatic release for this pattern and turns the row into a regression case. "
+            f"If the spot-check reaches {sample_goal} with zero blockers, the pattern remains a guarded release candidate."
+        )
+    if review_reason == "recall_unresolved_top_candidate":
+        return (
+            "Accept/replace labels measure recoverable recall from unresolved rows, but they do not by themselves lower global thresholds. "
+            "Reject/unsure keeps the candidate manual-only and helps tune unresolved review priority."
+        )
+    if review_reason in {
+        "precision_generic_identity_term_risk",
+        "precision_low_confidence_auto_match",
+        "precision_second_pass_accepted_70_84",
+        "precision_slug_extension_identity_risk",
+    }:
+        return (
+            f"If {sample_goal} are clean with no reject/replace blockers, this protected lane can be considered for a narrow routing downgrade after regression tests. "
+            "Any wrong candidate keeps the lane protected and records the exact failure pattern for AgentA rules."
+        )
+    if review_reason.startswith("precision_"):
+        return (
+            "Wrong labels keep this precision lane protected and become regression examples. "
+            "Clean decisive labels may support a narrow rule or routing change only after repeated evidence."
+        )
+    return (
+        "This label updates calibration evidence. Decisive accept/replace/reject decisions affect reports; unsure preserves manual review until stronger evidence exists."
+    )
 
 
 def _label_evidence_source_kind(review_reason: str, status_summary: dict) -> str:

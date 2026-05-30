@@ -5700,6 +5700,8 @@ class OperationalCommandTests(unittest.TestCase):
         self.assertEqual(out_rows[0]["label_decisive_rows_needed"], "5")
         self.assertIn("official_url", out_rows[0]["label_question"])
         self.assertIn("sub-70 accepts", out_rows[0]["label_decision_hint"])
+        self.assertIn("5 remaining decisive labels", out_rows[0]["label_decision_impact"])
+        self.assertIn("zero reject/replace blockers", out_rows[0]["label_decision_impact"])
         self.assertEqual(out_rows[0]["manual_decision"], "")
         self.assertIn("provider_detail_url", out_rows[0])
         self.assertNotIn("high-1", {row["provider_id"] for row in out_rows})
@@ -5707,6 +5709,7 @@ class OperationalCommandTests(unittest.TestCase):
         self.assertEqual(spot_rows[0]["label_evidence_source_kind"], "supplied_prior")
         self.assertEqual(spot_rows[0]["label_evidence_source_path"], "prior/pattern_release.json")
         self.assertIn("blocks wider automatic release", spot_rows[0]["label_decision_hint"])
+        self.assertIn("A reject/replace blocks wider automatic release", spot_rows[0]["label_decision_impact"])
         self.assertEqual(high_only_summary["task_rows"], 4)
         self.assertEqual({row["label_priority"] for row in high_only_rows}, {"high"})
 
