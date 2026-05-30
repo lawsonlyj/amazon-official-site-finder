@@ -115,6 +115,8 @@ def _current_threshold(policy: dict, thresholds: list[dict]) -> int:
     policy_threshold = _to_int((policy.get("summary") or {}).get("recommended_first_pass_threshold"), 0)
     if policy_threshold:
         return policy_threshold
+    if any(row.get("threshold") == DEFAULT_SECOND_PASS_ACCEPT_THRESHOLD for row in thresholds):
+        return DEFAULT_SECOND_PASS_ACCEPT_THRESHOLD
     if thresholds:
         return _to_int(thresholds[0].get("threshold"), DEFAULT_SECOND_PASS_ACCEPT_THRESHOLD)
     return DEFAULT_SECOND_PASS_ACCEPT_THRESHOLD

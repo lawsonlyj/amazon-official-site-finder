@@ -3529,6 +3529,38 @@ class OperationalCommandTests(unittest.TestCase):
         self.assertIn("Pattern Release", md_text)
         self.assertTrue(json_exists)
 
+    def test_build_balance_report_prefers_current_threshold_when_tied(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            labeled = root / "balance.json"
+            labeled.write_text(
+                json.dumps(
+                    {
+                        "overall": {
+                            "manual_review_false_official_capture_rate": 1.0,
+                            "agent_b_false_official_accept_rate": 0.0,
+                        },
+                        "threshold_simulations": [
+                            {"threshold": 70, "overall_accuracy": 0.85, "official_recall": 0.908, "false_official_rows": 8},
+                            {"threshold": 75, "overall_accuracy": 0.85, "official_recall": 0.908, "false_official_rows": 8},
+                            {"threshold": 80, "overall_accuracy": 0.84, "official_recall": 0.885, "false_official_rows": 7},
+                        ],
+                        "agent_b_recall_release_simulations": [],
+                        "manual_review_lanes": [],
+                        "manual_review_lane_drop_simulations": [],
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            report = build_balance_report(labeled_eval_json=labeled)
+
+        self.assertEqual(report["summary"]["recommended_threshold"], DEFAULT_SECOND_PASS_ACCEPT_THRESHOLD)
+        self.assertEqual(
+            report["thresholds"]["recommendation"]["current_threshold"],
+            DEFAULT_SECOND_PASS_ACCEPT_THRESHOLD,
+        )
+
     def test_build_release_policy_report_recommends_guarded_pattern_release(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -3751,6 +3783,51 @@ class OperationalCommandTests(unittest.TestCase):
         self.assertEqual(report["summary"]["calibrated_pattern_release"], "enabled_with_guard_no_batch_release")
         self.assertIn("high-value precision review band", md_text)
         self.assertTrue(output_json_exists)
+
+    def test_threshold_boundary_uses_current_threshold_when_simulations_are_unsorted(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            labeled = root / "labeled.json"
+            labeled.write_text(
+                json.dumps(
+                    {
+                        "threshold_simulations": [
+                            {
+                                "threshold": 70,
+                                "overall_accuracy": 0.85,
+                                "auto_precision": 0.908,
+                                "official_recall": 0.908,
+                                "false_official_rows": 8,
+                                "over_rejected_rows": 7,
+                            },
+                            {
+                                "threshold": 75,
+                                "overall_accuracy": 0.85,
+                                "auto_precision": 0.908,
+                                "official_recall": 0.908,
+                                "false_official_rows": 8,
+                                "over_rejected_rows": 7,
+                            },
+                            {
+                                "threshold": 80,
+                                "overall_accuracy": 0.84,
+                                "auto_precision": 0.9167,
+                                "official_recall": 0.8851,
+                                "false_official_rows": 7,
+                                "over_rejected_rows": 9,
+                            },
+                        ],
+                        "details": [],
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            report = build_threshold_boundary_report(labeled_eval_json=labeled)
+
+        self.assertEqual(report["summary"]["recommended_global_accept_threshold"], DEFAULT_SECOND_PASS_ACCEPT_THRESHOLD)
+        self.assertEqual(report["summary"]["global_threshold_change"], "keep_current")
+        self.assertEqual(report["thresholds"]["current"]["threshold"], DEFAULT_SECOND_PASS_ACCEPT_THRESHOLD)
 
     def test_build_calibration_review_sample_prioritizes_high_value_rows(self):
         with tempfile.TemporaryDirectory() as tmp:

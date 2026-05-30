@@ -7,6 +7,8 @@ import sys
 from collections import Counter, defaultdict
 from pathlib import Path
 
+from tools.output_layout import DEFAULT_SECOND_PASS_ACCEPT_THRESHOLD
+
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Build a threshold/review-lane balance report from workflow metrics.")
@@ -131,15 +133,15 @@ def build_balance_report(
 def _threshold_recommendation(simulations: list[dict]) -> dict:
     if not simulations:
         return {"recommended_threshold": None, "reason": "No threshold simulation data."}
-    current = simulations[0]
+    current = _current_threshold_simulation(simulations)
     max_accuracy = max(float(row.get("overall_accuracy") or 0) for row in simulations)
     best_accuracy = [row for row in simulations if float(row.get("overall_accuracy") or 0) == max_accuracy]
-    chosen = max(best_accuracy, key=lambda row: (float(row.get("official_recall") or 0), -int(row.get("false_official_rows") or 0)))
-    reason = (
-        "Keeps the highest recall among thresholds tied for best labeled accuracy."
-        if chosen.get("threshold") == current.get("threshold")
-        else "Improves labeled accuracy without lower recall than other best-accuracy candidates."
-    )
+    if current in best_accuracy:
+        chosen = current
+        reason = "Current threshold is tied for best labeled accuracy; keep it to avoid no-op threshold churn."
+    else:
+        chosen = max(best_accuracy, key=lambda row: (float(row.get("official_recall") or 0), -int(row.get("false_official_rows") or 0)))
+        reason = "Improves labeled accuracy without lower recall than other best-accuracy candidates."
     return {
         "current_threshold": current.get("threshold"),
         "recommended_threshold": chosen.get("threshold"),
@@ -147,6 +149,13 @@ def _threshold_recommendation(simulations: list[dict]) -> dict:
         "current": current,
         "chosen": chosen,
     }
+
+
+def _current_threshold_simulation(simulations: list[dict]) -> dict:
+    for row in simulations:
+        if _to_int(row.get("threshold")) == DEFAULT_SECOND_PASS_ACCEPT_THRESHOLD:
+            return row
+    return simulations[0]
 
 
 def _recall_release_recommendation(simulations: list[dict]) -> dict:
