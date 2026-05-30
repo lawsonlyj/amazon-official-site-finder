@@ -4059,6 +4059,8 @@ class OperationalCommandTests(unittest.TestCase):
                 "recall_json": (output_dir / "evidence_patterns_recall.json").exists(),
                 "precision_md": (output_dir / "evidence_patterns_precision.md").exists(),
                 "release_simulation_md": (output_dir / "pattern_release_simulation.md").exists(),
+                "threshold_boundary_json": (output_dir / "threshold_boundary_report.json").exists(),
+                "threshold_boundary_md": (output_dir / "threshold_boundary_report.md").exists(),
                 "sample_xlsx": (output_dir / "pattern_validation_sample_50.xlsx").exists(),
                 "eval_json": (output_dir / "pattern_validation_sample_50_eval_empty.json").exists(),
                 "summary_md": (output_dir / "calibration_cycle_summary.md").exists(),
@@ -4068,12 +4070,16 @@ class OperationalCommandTests(unittest.TestCase):
         self.assertTrue(output_exists["recall_json"])
         self.assertTrue(output_exists["precision_md"])
         self.assertTrue(output_exists["release_simulation_md"])
+        self.assertTrue(output_exists["threshold_boundary_json"])
+        self.assertTrue(output_exists["threshold_boundary_md"])
         self.assertTrue(output_exists["sample_xlsx"])
         self.assertTrue(output_exists["eval_json"])
         self.assertTrue(output_exists["summary_md"])
         self.assertEqual(report["summary"]["empty_eval_labeled_rows"], 0)
         self.assertIn("release_actionable_safe_patterns", report["summary"])
         self.assertIn("actionable_release_validation_rows", report["summary"])
+        self.assertEqual(report["summary"]["recommended_global_accept_threshold"], DEFAULT_SECOND_PASS_ACCEPT_THRESHOLD)
+        self.assertIn("threshold_boundary", report)
 
     def test_run_calibration_cycle_can_evaluate_filled_pattern_sample(self):
         with tempfile.TemporaryDirectory() as tmp:

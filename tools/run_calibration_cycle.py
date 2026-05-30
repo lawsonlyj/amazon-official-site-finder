@@ -11,6 +11,7 @@ from tools.build_calibration_review_sample import build_calibration_review_sampl
 from tools.evaluate_calibration_review_sample import evaluate_calibration_review_sample
 from tools.mine_evidence_patterns import mine_evidence_patterns
 from tools.simulate_pattern_release import simulate_pattern_release
+from tools.build_threshold_boundary_report import build_threshold_boundary_report
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -71,6 +72,8 @@ def run_calibration_cycle(
     precision_md = out_dir / "evidence_patterns_precision.md"
     release_sim_json = out_dir / "pattern_release_simulation.json"
     release_sim_md = out_dir / "pattern_release_simulation.md"
+    threshold_boundary_json = out_dir / "threshold_boundary_report.json"
+    threshold_boundary_md = out_dir / "threshold_boundary_report.md"
     sample_csv = out_dir / f"{sample_prefix}.csv"
     sample_xlsx = out_dir / f"{sample_prefix}.xlsx"
     eval_json = out_dir / f"{sample_prefix}_eval_empty.json"
@@ -110,6 +113,12 @@ def run_calibration_cycle(
         min_support=min_support,
         output_json=release_sim_json,
         output_md=release_sim_md,
+    )
+    threshold_boundary = build_threshold_boundary_report(
+        labeled_eval_json=labeled_eval_json,
+        pattern_release_json=release_sim_json,
+        output_json=threshold_boundary_json,
+        output_md=threshold_boundary_md,
     )
     sample_summary = build_calibration_review_sample(
         review_csv=review_csv,
@@ -155,6 +164,14 @@ def run_calibration_cycle(
             "selected_actionable_release_correct_rows": release_simulation["summary"].get("selected_actionable_correct_recovery_rows"),
             "selected_actionable_release_wrong_rows": release_simulation["summary"].get("selected_actionable_wrong_release_rows"),
             "selected_actionable_release_accuracy": release_simulation["summary"].get("selected_actionable_accuracy"),
+            "recommended_global_accept_threshold": threshold_boundary["summary"].get(
+                "recommended_global_accept_threshold"
+            ),
+            "recommended_second_pass_threshold": threshold_boundary["summary"].get("recommended_second_pass_threshold"),
+            "precision_watch_min": threshold_boundary["summary"].get("precision_watch_min"),
+            "precision_watch_max": threshold_boundary["summary"].get("precision_watch_max"),
+            "raw_agent_b_recall_release": threshold_boundary["summary"].get("raw_agent_b_recall_release"),
+            "calibrated_pattern_release": threshold_boundary["summary"].get("calibrated_pattern_release"),
             "sample_rows": sample_summary.get("sample_rows"),
             "actionable_release_validation_rows": sample_summary.get("sample_reason_counts", {}).get(
                 "actionable_release_validation", 0
@@ -193,6 +210,8 @@ def run_calibration_cycle(
             "precision_md": str(precision_md),
             "release_simulation_json": str(release_sim_json),
             "release_simulation_md": str(release_sim_md),
+            "threshold_boundary_json": str(threshold_boundary_json),
+            "threshold_boundary_md": str(threshold_boundary_md),
             "sample_csv": str(sample_csv),
             "sample_xlsx": str(sample_xlsx),
             "eval_json": str(eval_json),
@@ -209,6 +228,7 @@ def run_calibration_cycle(
         "recall_recommendations": recall_report.get("recommendations", []),
         "precision_recommendations": precision_report.get("recommendations", []),
         "release_simulation_summary": release_simulation.get("summary", {}),
+        "threshold_boundary": threshold_boundary,
         "actionable_release_patterns": release_simulation.get("actionable_safe_patterns", []),
         "selected_actionable_release_patterns": release_simulation.get("selected_actionable_pattern_set", []),
         "sample": sample_summary,
@@ -239,6 +259,11 @@ def _render_markdown(report: dict) -> str:
         f"- Selected actionable release patterns: {summary['selected_actionable_release_patterns']}",
         f"- Selected actionable release correct/wrong rows: {summary['selected_actionable_release_correct_rows']}/{summary['selected_actionable_release_wrong_rows']}",
         f"- Selected actionable release accuracy: {summary['selected_actionable_release_accuracy']}",
+        f"- Recommended global accept threshold: {summary['recommended_global_accept_threshold']}",
+        f"- Recommended second-pass threshold: {summary['recommended_second_pass_threshold']}",
+        f"- Precision watch score band: {summary['precision_watch_min']}-{summary['precision_watch_max']}",
+        f"- Raw AgentB recall release: {summary['raw_agent_b_recall_release']}",
+        f"- Calibrated pattern release: {summary['calibrated_pattern_release']}",
         f"- Sample rows: {summary['sample_rows']}",
         f"- Actionable release validation rows: {summary['actionable_release_validation_rows']}",
         f"- Pattern candidate validation rows: {summary['pattern_validation_rows']}",
