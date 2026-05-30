@@ -182,6 +182,8 @@ When `calibration_cycle_summary.json`, `calibration_status.json`, or `convergenc
 
 When more labels are needed, run `tools/build_calibration_review_sample.py` with the batch `review_task.csv` and `agent_b/check.csv` to produce a small high-value XLSX. Add `--pattern-json` from `tools/mine_evidence_patterns.py` when the next review should validate narrow candidate rules, and set `--max-per-pattern` to keep labels balanced across candidate patterns. Ask the worker to fill `manual_decision`, `manual_url`, and `notes`; then run `tools/evaluate_calibration_review_sample.py` on the filled CSV/XLSX. Use its `review_reason` lane recommendations, `pattern_match`, and `pattern_rule_candidates` outputs before changing thresholds or widening/narrowing review lanes.
 
+Before converting a protected review lane into an automatic routing rule, run `tools/simulate_review_lane_output_policy.py`. It creates an experimental final CSV/XLSX by holding selected `review_reason` lanes out of automatic official-site output, then can evaluate labeled balance and the calibration regression gate. Apply a lane-routing change only if the simulation improves the intended metric without unacceptable over-rejection and the regression gate passes.
+
 Expected reviewed outputs:
 
 ```text

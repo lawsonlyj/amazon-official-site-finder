@@ -58,6 +58,7 @@ from tools.run_calibration_regression_gate import run_calibration_regression_gat
 from tools.simulate_pattern_release import simulate_pattern_release
 from tools.apply_pattern_release_experiment import apply_pattern_release_experiment
 from tools.apply_pattern_release_to_run import apply_pattern_release_to_run
+from tools.simulate_review_lane_output_policy import simulate_review_lane_output_policy
 from tools.build_release_policy_report import build_release_policy_report
 from tools.build_threshold_boundary_report import build_threshold_boundary_report
 from tools.verify_protected_lane_review_task import verify_protected_lane_review_task
@@ -7715,6 +7716,140 @@ class OperationalCommandTests(unittest.TestCase):
         self.assertIn("Fix candidate workflow changes", report["next_actions"][-1])
         self.assertIn("Delivery Recommendation", md_text)
         self.assertIn("overlay.xlsx", md_text)
+
+    def test_simulate_review_lane_output_policy_holds_selected_precision_lane(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            final_csv = root / "official_sites.csv"
+            review_csv = root / "review_task.csv"
+            details_json = root / "details.json"
+            cases_csv = root / "cases.csv"
+            output_csv = root / "policy.csv"
+            output_xlsx = root / "policy.xlsx"
+            summary_json = root / "policy.json"
+            summary_md = root / "policy.md"
+            _write_test_csv(
+                final_csv,
+                [
+                    {
+                        "provider_id": "p-risk",
+                        "provider_name": "Risk Agency",
+                        "provider_detail_url": "https://amazon.example/risk",
+                        "official_url": "https://wrong.example/",
+                        "official_domain": "wrong.example",
+                        "status": "matched",
+                        "decision_source": "auto",
+                        "confidence": "82",
+                        "source_status": "",
+                        "evidence_summary": "",
+                        "candidate_count": "1",
+                        "scored_candidate_count": "1",
+                        "service_apis": "",
+                        "provider_locations": "",
+                        "notes": "",
+                    },
+                    {
+                        "provider_id": "p-safe",
+                        "provider_name": "Safe Agency",
+                        "provider_detail_url": "https://amazon.example/safe",
+                        "official_url": "https://safe.example/",
+                        "official_domain": "safe.example",
+                        "status": "matched",
+                        "decision_source": "auto",
+                        "confidence": "90",
+                        "source_status": "",
+                        "evidence_summary": "",
+                        "candidate_count": "1",
+                        "scored_candidate_count": "1",
+                        "service_apis": "",
+                        "provider_locations": "",
+                        "notes": "",
+                    },
+                ],
+            )
+            _write_test_csv(
+                review_csv,
+                [
+                    {
+                        "provider_id": "p-risk",
+                        "provider_name": "Risk Agency",
+                        "review_reason": "precision_low_confidence_auto_match",
+                    },
+                    {
+                        "provider_id": "p-safe",
+                        "provider_name": "Safe Agency",
+                        "review_reason": "precision_calibrated_pattern_release",
+                    },
+                ],
+            )
+            details_json.write_text(
+                json.dumps(
+                    {
+                        "details": [
+                            {
+                                "provider_id": "p-risk",
+                                "provider_name": "Risk Agency",
+                                "expected_kind": "no_official",
+                                "expected_url": "",
+                                "expected_domain": "",
+                            },
+                            {
+                                "provider_id": "p-safe",
+                                "provider_name": "Safe Agency",
+                                "expected_kind": "official",
+                                "expected_url": "https://safe.example/",
+                                "expected_domain": "safe.example",
+                            },
+                        ]
+                    }
+                ),
+                encoding="utf-8",
+            )
+            _write_test_csv(
+                cases_csv,
+                [
+                    {
+                        "case_type": "precision_blocking_fixture",
+                        "provider_id": "p-risk",
+                        "provider_name": "Risk Agency",
+                        "review_reason": "precision_low_confidence_auto_match",
+                        "candidate_url": "https://wrong.example/",
+                        "official_url": "https://wrong.example/",
+                        "expected_url": "",
+                        "assertion": "candidate_url_or_official_url_must_not_auto_accept",
+                        "notes": "",
+                    }
+                ],
+            )
+
+            report = simulate_review_lane_output_policy(
+                final_csv=final_csv,
+                review_task_csv=review_csv,
+                hold_review_reasons=["precision_low_confidence_auto_match"],
+                output_csv=output_csv,
+                output_xlsx=output_xlsx,
+                labeled_details=details_json,
+                cases_csv=cases_csv,
+                summary_json=summary_json,
+                summary_md=summary_md,
+            )
+            with output_csv.open(newline="", encoding="utf-8-sig") as f:
+                rows = {row["provider_id"]: row for row in csv.DictReader(f)}
+            saved = json.loads(summary_json.read_text(encoding="utf-8"))
+            md_text = summary_md.read_text(encoding="utf-8")
+            output_xlsx_exists = output_xlsx.exists()
+
+        self.assertEqual(rows["p-risk"]["official_url"], "")
+        self.assertEqual(rows["p-risk"]["status"], "needs_review")
+        self.assertEqual(rows["p-risk"]["source_status"], "precision_low_confidence_auto_match")
+        self.assertEqual(rows["p-safe"]["official_url"], "https://safe.example/")
+        self.assertEqual(report["summary"]["held_rows"], 1)
+        self.assertEqual(report["summary"]["balance_overall"]["false_official_rows"], 0)
+        self.assertEqual(report["summary"]["balance_overall"]["overall_accuracy"], 1.0)
+        self.assertEqual(report["summary"]["regression_gate_summary"]["gate_status"], "pass")
+        self.assertEqual(saved["summary"]["held_provider_ids"], ["p-risk"])
+        self.assertTrue(output_xlsx_exists)
+        self.assertIn("Review Lane Output Policy Simulation", md_text)
 
     def test_verify_protected_lane_review_task_checks_links_summary_and_manual_blanks(self):
         with tempfile.TemporaryDirectory() as tmp:
