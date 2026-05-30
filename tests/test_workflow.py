@@ -61,6 +61,7 @@ from tools.apply_pattern_release_to_run import apply_pattern_release_to_run
 from tools.build_release_policy_report import build_release_policy_report
 from tools.build_threshold_boundary_report import build_threshold_boundary_report
 from tools.verify_protected_lane_review_task import verify_protected_lane_review_task
+from tools.reuse_historical_labels_for_task import reuse_historical_labels_for_task
 from tools.output_layout import (
     DEFAULT_MATCHED_REVIEW_CONFIDENCE_CUTOFF,
     DEFAULT_SECOND_PASS_ACCEPT_THRESHOLD,
@@ -7151,6 +7152,98 @@ class OperationalCommandTests(unittest.TestCase):
         self.assertIn("Protected-Lane Priority Review Handoff", md_text)
         self.assertIn("unfetchable_candidate_boundary", md_text)
         self.assertIn("manual_decision", md_text)
+
+    def test_reuse_historical_labels_for_task_reuses_only_trusted_manual_sources(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            task = root / "priority.csv"
+            labels_dir = root / "labels"
+            labels_dir.mkdir()
+            output_csv = root / "prefilled.csv"
+            output_xlsx = root / "prefilled.xlsx"
+            output_json = root / "reuse.json"
+            output_md = root / "reuse.md"
+            _write_test_csv(
+                task,
+                [
+                    {
+                        "provider_id": "p1",
+                        "provider_name": "Provider One",
+                        "review_reason": "precision_generic_identity_term_risk",
+                        "provider_detail_url": "https://amazon.example/p1",
+                        "candidate_url": "https://one.example",
+                        "official_url": "https://one.example",
+                        "manual_decision": "",
+                        "manual_url": "",
+                        "notes": "",
+                    },
+                    {
+                        "provider_id": "p2",
+                        "provider_name": "Provider Two",
+                        "review_reason": "precision_low_confidence_auto_match",
+                        "provider_detail_url": "https://amazon.example/p2",
+                        "candidate_url": "https://two.example",
+                        "official_url": "https://two.example",
+                        "manual_decision": "",
+                        "manual_url": "",
+                        "notes": "",
+                    },
+                    {
+                        "provider_id": "p3",
+                        "provider_name": "Provider Three",
+                        "review_reason": "recall_unresolved_top_candidate",
+                        "provider_detail_url": "https://amazon.example/p3",
+                        "candidate_url": "https://three.example",
+                        "official_url": "",
+                        "manual_decision": "",
+                        "manual_url": "",
+                        "notes": "",
+                    },
+                ],
+            )
+            _write_test_csv(
+                labels_dir / "manual_review_combined_decisions.csv",
+                [
+                    {"provider_id": "p1", "manual_decision": "reject", "manual_url": "", "notes": "wrong company"},
+                    {"provider_id": "p2", "manual_decision": "accept", "manual_url": "", "notes": "correct"},
+                ],
+            )
+            _write_test_csv(
+                labels_dir / "agent_b_verification_results.csv",
+                [{"provider_id": "p3", "manual_decision": "accept", "manual_url": "", "notes": "not trusted"}],
+            )
+            _write_test_csv(
+                labels_dir / "agent_human_review_regression_cases.csv",
+                [{"provider_id": "p2", "manual_decision": "reject", "manual_url": "", "notes": "conflict"}],
+            )
+
+            report = reuse_historical_labels_for_task(
+                task_csv=task,
+                label_paths=[labels_dir],
+                output_csv=output_csv,
+                output_xlsx=output_xlsx,
+                output_json=output_json,
+                output_md=output_md,
+            )
+            with output_csv.open(newline="", encoding="utf-8") as f:
+                rows = list(csv.DictReader(f))
+            saved = json.loads(output_json.read_text(encoding="utf-8"))
+            md_text = output_md.read_text(encoding="utf-8")
+            output_xlsx_exists = output_xlsx.exists()
+
+        by_provider = {row["provider_id"]: row for row in rows}
+        self.assertEqual(report["summary"]["reused_rows"], 1)
+        self.assertEqual(report["summary"]["conflict_rows"], 1)
+        self.assertEqual(report["summary"]["unlabeled_rows"], 1)
+        self.assertEqual(saved["summary"]["reused_rows"], 1)
+        self.assertEqual(by_provider["p1"]["manual_decision"], "reject")
+        self.assertEqual(by_provider["p1"]["historical_label_status"], "reused")
+        self.assertEqual(by_provider["p2"]["manual_decision"], "")
+        self.assertEqual(by_provider["p2"]["historical_label_status"], "conflict")
+        self.assertEqual(by_provider["p3"]["manual_decision"], "")
+        self.assertEqual(by_provider["p3"]["historical_label_status"], "unlabeled")
+        self.assertIn("Provider One", md_text)
+        self.assertTrue(output_xlsx_exists)
 
     def test_build_convergence_audit_keeps_75_75_and_routes_next_protected_labels(self):
         with tempfile.TemporaryDirectory() as tmp:
