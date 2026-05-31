@@ -2,14 +2,18 @@
 
 这个仓库现在是“产品交付版”：只保留能完整运行官网识别 workflow、Codex skill 调用、质量验证、可点击 XLSX 输出、人工复核学习闭环和测试验证的文件。
 
-## 当前模块命名
+## 当前流程命名
 
 当前生产 workflow 仍然是规则化、结构化流程，不默认使用自主 LLM agent。
 
-- **Operation and Optimization**：负责搜索、打分、second-pass、人工表输出、校准门禁和安全优化吸收。
-- **Check and Suggestion**：负责高风险行复核、DOM/结构化证据收集、重复模式建议。
+- **Workflow Body**：给普通 GitHub 用户复用的工作流主体，负责搜索、打分、second-pass、输出官网结果、质量验证和人工表。默认不需要 OpenAI key，也不运行真实多 agent。
+- **Development Workflow**：维护者用来继续优化工作流主体的开发流程。结构是 `Operation and Optimization -> CheckAgent -> 人工复核 -> OptimizationAgent -> Deterministic Gate -> Operation and Optimization`。
+- **Operation and Optimization**：规则化运行层。前半段运行 Workflow Body；后半段只吸收已经通过门禁的安全规则或回归样例。
+- **CheckAgent**：真正的开发阶段 agent 1，只复核高风险行，输出 `accept` / `reject` / `replace` / `unsure`、证据、反证、原因和建议。
+- **OptimizationAgent**：真正的开发阶段 agent 2，读取 CheckAgent 建议、人工标签和指标报告，判断是否值得吸收、是否需要更多标签、模拟或规则修改。
+- **Deterministic Gate**：固定门禁，跑测试、指标和回归样例；只有通过后才允许 Operation and Optimization 应用规则。
 
-历史脚本名里仍保留 `agent_b`、`agent_c`、`agent_optimizations`，只是为了旧命令、旧输出读取兼容；对外文档和新输出目录统一使用上面的新名称。
+历史脚本名里仍保留 `agent_b`、`agent_c`、`agent_optimizations`，只是为了旧命令、旧输出读取兼容；`agent_c` 不再作为当前独立角色，建议功能并入 CheckAgent / Check and Suggestion。
 
 ## 最终目录
 
@@ -34,7 +38,7 @@ amazon-official-site-finder/
     apply_review.py
     build_linked_workbook.py
     build_manual_review_task.py
-    run_agent_b_verification.py        # 旧脚本名；当前对外叫 Check and Suggestion
+    run_agent_b_verification.py        # 旧脚本名；当前开发角色叫 CheckAgent / Check and Suggestion
     run_agent_c_recommendations.py      # 旧命令兼容入口
     apply_agent_optimizations.py        # 旧脚本名；当前对外叫 Operation and Optimization 安全应用
     apply_pattern_release_to_run.py
@@ -160,8 +164,9 @@ run_codex_assisted.sh
            -> tools/plan_unresolved_second_pass.py
            -> tools/build_linked_workbook.py
      -> tools/build_manual_review_task.py
-     -> 开发流程可选 Check and Suggestion：tools/run_agent_b_verification.py + tools/run_agent_b_recommendations.py
+     -> 开发流程可选 CheckAgent / Check and Suggestion：tools/run_agent_b_verification.py + tools/run_agent_b_recommendations.py
         -> 可选读取 filled human-review XLSX，生成 notes 分类、无官网标签和回归样例建议
+     -> 开发流程可选 OptimizationAgent 判断建议 + Deterministic Gate
      -> 开发流程可选 Operation and Optimization 安全应用：tools/apply_agent_optimizations.py --apply
      -> tools/verify_run_outputs.py
 ```
@@ -200,11 +205,11 @@ Codex receives filled manual review workbook
 | `finder/logo.py` | 从候选官网提取 logo/favicon/og:image，并与 Amazon listing logo 做感知哈希相似度比较；作为正向身份加分证据，但 logo-only 不足以自动接受。 |
 | `tools/run_unresolved_second_pass.py` | 对第一轮没解决的商家做二轮补漏，用 Brave/Exa 找更可能的官网；默认接受阈值为 `75`，与 first pass 对齐，同时保留强证据、风险 URL 和身份 cap 约束。 |
 | `tools/build_manual_review_task.py` | 生成简化人工复核 CSV/XLSX，只保留工作人员需要判断和填写的列；普通 auto-match 默认复核 75-82 分，second-pass accepted 仍复核 85 分以下。 |
-| `tools/run_agent_b_verification.py` | Check and Suggestion 的高风险候选优先复核部分。只复核低置信、二轮新增、平台页、logo-only、同名/通用名、身份 cap 等风险行；优先用 title/meta、H1/H2、nav/footer、联系方式、schema.org Organization、页面角色和页面风险做 DOM 结构化验证，只在证据弱或冲突时做轻量独立搜索。脚本名保留 `agent_b` 是为了兼容旧命令。 |
-| `tools/run_agent_b_recommendations.py` | Check and Suggestion 的建议部分。读取复核结果和人工复核学习报告，输出可执行或需人工评估的优化建议。脚本名保留 `agent_b` 是为了兼容旧命令。 |
+| `tools/run_agent_b_verification.py` | CheckAgent / Check and Suggestion 的高风险候选优先复核部分。只复核低置信、二轮新增、平台页、logo-only、同名/通用名、身份 cap 等风险行；优先用 title/meta、H1/H2、nav/footer、联系方式、schema.org Organization、页面角色和页面风险做 DOM 结构化验证，只在证据弱或冲突时做轻量独立搜索。脚本名保留 `agent_b` 是为了兼容旧命令。 |
+| `tools/run_agent_b_recommendations.py` | CheckAgent / Check and Suggestion 的建议部分。读取复核结果和人工复核学习报告，输出可执行或需人工评估的优化建议。脚本名保留 `agent_b` 是为了兼容旧命令；真正是否吸收由 OptimizationAgent 判断，再交给 Deterministic Gate。 |
 | `tools/run_review_learning.py` | 读取填好的复核表，合并人工反馈，输出 reviewed 结果、人工标签和优化建议。 |
-| `tools/run_agent_c_recommendations.py` | 旧名称兼容入口，转调 Check and Suggestion 建议实现。 |
-| `tools/apply_agent_optimizations.py` | Operation and Optimization 的安全应用器，只自动写入可解释、可回滚的 excluded_domains 配置，并生成 human/identity/no_official/reachability 回归样例。脚本名保留 `agent` 是为了兼容旧命令。 |
+| `tools/run_agent_c_recommendations.py` | 旧名称兼容入口，转调 CheckAgent / Check and Suggestion 建议实现。 |
+| `tools/apply_agent_optimizations.py` | Operation and Optimization 的安全应用器，只自动写入可解释、可回滚的 excluded_domains 配置，并生成 human/identity/no_official/reachability 回归样例。脚本名保留 `agent` 是为了兼容旧命令；它不是自主 agent，必须在 OptimizationAgent 和 Deterministic Gate 放行后使用。 |
 | `tools/build_linked_workbook.py` | 生成链接可点击的 XLSX。 |
 | `tools/verify_run_outputs.py` | 检查最终 CSV、unresolved CSV、质量 JSON、XLSX 链接公式是否正常。 |
 | `tools/evaluate_workflow_balance.py` | 调参评估工具。用基线结果、候选结果和人工标黄复核表计算 false official、over-reject、precision、recall、manual review rows，并按 `review_reason` 输出各人工复核 lane 的负担/风险和“删除该 lane 会漏掉多少已知错误”的模拟；同时模拟 Check and Suggestion unresolved recall 候选在不同证据阈值下自动放行会恢复多少正确官网、放出多少错误官网。旧基线目录已清理时，可用 `--labeled-details` 读取已保存的 `balance_eval_details.csv/json` 标签，对当前候选结果重新复算同一组指标。 |

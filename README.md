@@ -30,7 +30,15 @@ Or, when Codex has local key files:
 
 ### Maintainers: Development Workflow
 
-Run this only when you are improving the workflow itself, validating new rules, or applying calibrated suggestions:
+Run this only when you are improving the workflow itself, validating new rules, or applying calibrated suggestions. The maintainer flow is separate from the reusable Workflow Body:
+
+```text
+Operation and Optimization -> CheckAgent -> human review -> OptimizationAgent -> deterministic gate -> Operation and Optimization
+```
+
+`CheckAgent` and `OptimizationAgent` are development-stage agent roles. They may judge evidence and suggest changes, but they do not directly change production results or scoring rules. The deterministic gate must pass before Operation and Optimization absorbs a rule or regression fixture.
+
+Start a development run like this:
 
 ```bash
 ./run_codex_assisted.sh \
@@ -43,7 +51,7 @@ Run this only when you are improving the workflow itself, validating new rules, 
 
 Optional maintainer flags include `--human-review`, `--apply-operation-optimizations`, and `--pattern-release-json`. They are not part of the normal user path.
 
-Legacy flags such as `--run-agent-b` and `--apply-agent-optimizations` are still accepted for old scripts, but the current public names are **Check and Suggestion** and **Operation and Optimization**.
+Legacy flags such as `--run-agent-b` and `--apply-agent-optimizations` are still accepted for old scripts. `agent_c` is only a legacy wrapper; suggestion behavior belongs to CheckAgent / Check and Suggestion in the development workflow.
 
 ## Inputs
 
@@ -144,7 +152,7 @@ outputs/dev_run/operation_optimization/applied.json
 
 These files are for calibration, regression fixtures, and safe workflow improvement. They are not required for normal users.
 
-See [docs/DEVELOPMENT_WORKFLOW_CN.md](docs/DEVELOPMENT_WORKFLOW_CN.md) for the development workflow, including CheckAgent/OptimizationAgent design boundaries.
+See [docs/DEVELOPMENT_WORKFLOW_CN.md](docs/DEVELOPMENT_WORKFLOW_CN.md) for the development workflow, including the CheckAgent, OptimizationAgent, human-label, and deterministic-gate boundaries.
 
 ## Make Targets
 

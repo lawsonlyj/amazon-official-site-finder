@@ -12,9 +12,9 @@ Use this skill to operate the `amazon-official-site-finder` workflow. The workfl
 Separate two modes in user-facing responses:
 
 - **Workflow Body**: normal reusable workflow for GitHub users. It runs structured search, scoring, second-pass, review task generation, output verification, and reviewed output generation. This is the default.
-- **Development Workflow**: maintainer workflow for calibration and improvement. It can add Operation and Optimization, Check and Suggestion, human high-value labels, regression fixtures, and deterministic gates.
+- **Development Workflow**: maintainer workflow for calibration and improvement. It is `Operation and Optimization -> CheckAgent -> human review -> OptimizationAgent -> deterministic gate -> Operation and Optimization`. CheckAgent and OptimizationAgent are development-stage agent roles; the normal Workflow Body remains structured and deterministic.
 
-Legacy script names still include `agent_b` and `agent_optimizations` for compatibility. Do not describe the normal Workflow Body as autonomous multi-agent execution. Only use Development Workflow tools when the user explicitly asks to optimize, calibrate, compare rules, run Check and Suggestion, or work on maintainer/development flow.
+Legacy script names still include `agent_b`, `agent_c`, and `agent_optimizations` for compatibility. Treat `agent_c` as a legacy wrapper for suggestion behavior, not as a current standalone role. Do not describe the normal Workflow Body as autonomous multi-agent execution. Only use Development Workflow tools when the user explicitly asks to optimize, calibrate, compare rules, run CheckAgent/Check and Suggestion, or work on maintainer/development flow.
 
 ## Default User Experience
 
@@ -175,6 +175,25 @@ This calls `tools/run_review_learning.py`, which merges the filled manual decisi
 
 Use the development workflow only when the user asks to optimize, calibrate, compare rules, run Check and Suggestion, or continue workflow development. The normal GitHub user path should not include these steps.
 
+The development loop is:
+
+```text
+Operation and Optimization
+  -> rules-based main workflow: search, score, second-pass, official-site output, review task
+CheckAgent
+  -> real agent role for high-risk rows only: accept / reject / replace / unsure, evidence, counter-evidence, reasons, suggestions
+Human review
+  -> small high-value labels to calibrate CheckAgent and scoring rules
+OptimizationAgent
+  -> real agent role that reads CheckAgent suggestions, human labels, and metric reports, then decides whether a change is useful or needs more labels/simulation/tests
+Deterministic gate
+  -> fixed tests, metrics, and regression checks; only passing changes may be applied
+Operation and Optimization
+  -> absorb safe rules or regression fixtures and rerun the workflow
+```
+
+When using this skill as Codex, keep Workflow Body outputs and Development Workflow outputs separate in the final report. Do not let CheckAgent or OptimizationAgent directly overwrite production results or config; changes must pass the deterministic gate first.
+
 Development command:
 
 ```bash
@@ -186,11 +205,11 @@ Development command:
   --run-check-suggestion
 ```
 
-Check and Suggestion checks high-risk rows, writes evidence plus suggestions, and uses structured DOM evidence from candidate pages. Add `--human-review /path/to/filled_review.xlsx` to use filled human labels as regression evidence. Add `--apply-operation-optimizations` only when Operation and Optimization should apply safe recommendations and write regression artifacts.
+CheckAgent / Check and Suggestion checks high-risk rows, writes evidence plus suggestions, and uses structured DOM evidence from candidate pages. Add `--human-review /path/to/filled_review.xlsx` to use filled human labels as regression evidence. Add `--apply-operation-optimizations` only when Operation and Optimization should apply safe recommendations and write regression artifacts after the gate passes.
 
 For large Check and Suggestion runs, use `python3 tools/run_agent_b_verification.py --run-dir outputs/dev_run --resume --write-xlsx`. For batch validation, add `--row-timeout 15 --per-query 1`.
 
-For calibration work, follow `docs/DEVELOPMENT_WORKFLOW_CN.md`. Treat candidate rules as advisory until Operation and Optimization adds regression tests and a deterministic gate passes.
+For calibration work, follow `docs/DEVELOPMENT_WORKFLOW_CN.md`. Treat CheckAgent and OptimizationAgent conclusions as advisory until Operation and Optimization adds regression tests and a deterministic gate passes.
 
 Expected reviewed outputs:
 

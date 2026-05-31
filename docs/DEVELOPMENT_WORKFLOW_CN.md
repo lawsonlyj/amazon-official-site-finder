@@ -29,27 +29,52 @@
 开发工作流流程是维护者用来继续优化工作流主体的过程：
 
 ```text
-Operation and Optimization 跑工作流主体
-  -> Check and Suggestion 复核高风险行并提出建议
-  -> 人工提供少量高价值标签
-  -> Operation and Optimization 只吸收安全、可解释、可测试的规则
-  -> deterministic gate 验证指标、回归样例和测试
-  -> 合入工作流主体
+Operation and Optimization
+  -> 规则化主流程
+  -> 搜索、打分、second-pass、输出官网结果和人工表
+
+CheckAgent
+  -> 真正的 agent 1
+  -> 只复核高风险行
+  -> 判断 accept / reject / replace / unsure
+  -> 输出证据、反证、原因、建议
+
+人工复核
+  -> 少量高价值标签
+  -> 校准 CheckAgent 和评分规则
+
+OptimizationAgent
+  -> 真正的 agent 2
+  -> 读取 CheckAgent 建议、人工标签、指标报告
+  -> 判断建议是否值得吸收
+  -> 判断是否需要更多标签、模拟或规则修改
+
+Deterministic Gate
+  -> 固定门禁
+  -> 跑测试、看指标、看回归样例
+  -> 只有通过后才允许应用规则
+
+Operation and Optimization
+  -> 吸收安全规则或回归样例
+  -> 重新跑 workflow
 ```
 
 特点：
 
 - 用来开发、校准、验证规则。
-- 可以接入真正的 CheckAgent / OptimizationAgent，但 agent 只参与判断和建议。
+- 可以接入真正的 CheckAgent / OptimizationAgent，但它们只参与开发阶段的判断和建议。
 - agent 输出不能直接改生产结果或配置。
 - 任何规则吸收都必须经过测试、回归样例和指标门禁。
 
-## 当前命名
+## 开发角色命名
 
-- **Operation and Optimization**：运行主流程，并在开发阶段应用安全优化。
-- **Check and Suggestion**：只复核高风险行，收集 DOM/证据，提出建议。
+- **Operation and Optimization**：规则化运行层。负责搜索、打分、second-pass、输出官网结果和人工表；在开发循环末尾只吸收已经通过门禁的安全规则或回归样例。
+- **CheckAgent**：真正的 agent 1。只看高风险行和结构化证据，判断 `accept` / `reject` / `replace` / `unsure`，输出证据、反证、原因和建议。
+- **人工复核**：少量高价值标签，不做全量人工重跑。标签用于校准 CheckAgent、评分规则和回归样例。
+- **OptimizationAgent**：真正的 agent 2。读取 CheckAgent 建议、人工标签和指标报告，判断建议是否值得吸收，或是否需要更多标签、模拟、回归测试、规则修改。
+- **Deterministic Gate**：固定门禁。用测试、指标、回归样例决定是否允许应用规则，防止 agent 直接改默认生产规则。
 
-历史脚本名仍保留 `agent_b`、`agent_c`、`agent_optimizations`，只是为了旧命令兼容。
+当前仓库里的 `check_suggestion/`、`operation_optimization/` 是开发输出目录。历史脚本名仍保留 `agent_b`、`agent_c`、`agent_optimizations`，只是为了旧命令兼容；对外不要再把 `agent_c` 描述为独立角色，建议功能已经归入 CheckAgent / Check and Suggestion。
 
 ## 普通用户不要默认运行的内容
 
@@ -123,6 +148,7 @@ Operation and Optimization 只能自动吸收以下安全内容：
 - 重复出现的通用坏域名或平台/目录域名，写入 `excluded_domains`。
 - 人工标签生成的回归样例。
 - no-official、identity、reachability 等可回滚 fixture。
+- 已通过模拟、回归测试和指标门禁的窄口证据组合规则。
 
 不能自动吸收：
 
@@ -131,15 +157,17 @@ Operation and Optimization 只能自动吸收以下安全内容：
 - 会扩大自动接受范围但没有人工标签验证的规则。
 - 只靠 agent 判断、没有结构化证据和测试的修改。
 
-## 未来真实 Agent 接入边界
+## 真实 Agent 接入边界
 
-如果以后接入真正意义上的 agent，建议只放在开发工作流流程中：
+真正意义上的 agent 只放在开发工作流流程中，不放进普通 Workflow Body：
 
 ```text
-工作流主体输出结构化证据
+Workflow Body 输出结构化证据
   -> CheckAgent 判断高风险行并提出建议
+  -> 人工复核补少量高价值标签
   -> OptimizationAgent 判断建议是否值得改规则
-  -> deterministic gate 决定是否允许应用
+  -> Deterministic Gate 决定是否允许应用
+  -> Operation and Optimization 吸收安全规则或回归样例
 ```
 
 CheckAgent 应只读取：
@@ -166,7 +194,7 @@ OptimizationAgent 输出：
 - 需要新增哪些回归测试
 - 是否阻断本次建议
 
-最后仍由 deterministic gate 执行，不允许 agent 直接改默认生产规则。
+最后仍由 Deterministic Gate 执行，不允许 agent 直接改默认生产规则或最终官网结果。
 
 ## 发布到 main 的原则
 
