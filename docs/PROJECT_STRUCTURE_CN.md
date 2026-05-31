@@ -38,6 +38,9 @@ amazon-official-site-finder/
     apply_review.py
     build_linked_workbook.py
     build_manual_review_task.py
+    run_check_agent.py                # 真实 LLM CheckAgent；开发流程显式启用
+    run_optimization_agent.py         # 真实 LLM OptimizationAgent；开发流程显式启用
+    build_development_cycle_report.py # 汇总每轮 Development Workflow 指标
     run_agent_b_verification.py        # 旧脚本名；当前开发角色叫 CheckAgent / Check and Suggestion
     run_agent_c_recommendations.py      # 旧命令兼容入口
     apply_agent_optimizations.py        # 旧脚本名；当前对外叫 Operation and Optimization 安全应用
@@ -205,6 +208,9 @@ Codex receives filled manual review workbook
 | `finder/logo.py` | 从候选官网提取 logo/favicon/og:image，并与 Amazon listing logo 做感知哈希相似度比较；作为正向身份加分证据，但 logo-only 不足以自动接受。 |
 | `tools/run_unresolved_second_pass.py` | 对第一轮没解决的商家做二轮补漏，用 Brave/Exa 找更可能的官网；默认接受阈值为 `75`，与 first pass 对齐，同时保留强证据、风险 URL 和身份 cap 约束。 |
 | `tools/build_manual_review_task.py` | 生成简化人工复核 CSV/XLSX，只保留工作人员需要判断和填写的列；普通 auto-match 默认复核 75-82 分，second-pass accepted 仍复核 85 分以下。 |
+| `tools/run_check_agent.py` | 真实 LLM CheckAgent 入口。只读取 `check_suggestion/check.csv` 等高风险行和结构化证据，输出到 `development/check_agent/`；没有 `OPENAI_API_KEY` 或 API 失败时只写 blocker summary，不改 Workflow Body 输出。 |
+| `tools/run_optimization_agent.py` | 真实 LLM OptimizationAgent 入口。读取 CheckAgent、人工标签、balance/convergence/gate 报告，判断建议是否值得吸收；输出到 `development/optimization_agent/`，不直接改配置或最终官网。 |
+| `tools/build_development_cycle_report.py` | 每轮 Development Workflow 指标汇总器。把有标签评估、CheckAgent summary、OptimizationAgent decision 和 deterministic gate 汇总到 `development/cycle_N/metrics.json/md`。 |
 | `tools/run_agent_b_verification.py` | CheckAgent / Check and Suggestion 的高风险候选优先复核部分。只复核低置信、二轮新增、平台页、logo-only、同名/通用名、身份 cap 等风险行；优先用 title/meta、H1/H2、nav/footer、联系方式、schema.org Organization、页面角色和页面风险做 DOM 结构化验证，只在证据弱或冲突时做轻量独立搜索。脚本名保留 `agent_b` 是为了兼容旧命令。 |
 | `tools/run_agent_b_recommendations.py` | CheckAgent / Check and Suggestion 的建议部分。读取复核结果和人工复核学习报告，输出可执行或需人工评估的优化建议。脚本名保留 `agent_b` 是为了兼容旧命令；真正是否吸收由 OptimizationAgent 判断，再交给 Deterministic Gate。 |
 | `tools/run_review_learning.py` | 读取填好的复核表，合并人工反馈，输出 reviewed 结果、人工标签和优化建议。 |

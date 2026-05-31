@@ -49,7 +49,17 @@ Start a development run like this:
   --run-check-suggestion
 ```
 
-Optional maintainer flags include `--human-review`, `--apply-operation-optimizations`, and `--pattern-release-json`. They are not part of the normal user path.
+To run the real development agents, add `OPENAI_API_KEY` to `.env` and explicitly opt in:
+
+```bash
+./run_workflow.sh "/path/to/provider_details.csv" "outputs/dev_run" \
+  --run-check-agent \
+  --run-optimization-agent \
+  --application-gates-json "outputs/dev_run/calibration_cycle/calibration_application_gates.json" \
+  --development-cycle 1
+```
+
+Optional maintainer flags include `--human-review`, `--run-check-agent`, `--run-optimization-agent`, `--apply-operation-optimizations`, and `--pattern-release-json`. They are not part of the normal user path.
 
 Legacy flags such as `--run-agent-b` and `--apply-agent-optimizations` are still accepted for old scripts. `agent_c` is only a legacy wrapper; suggestion behavior belongs to CheckAgent / Check and Suggestion in the development workflow.
 
@@ -148,6 +158,18 @@ outputs/dev_run/check_suggestion/check.xlsx
 outputs/dev_run/check_suggestion/suggestions.json
 outputs/dev_run/check_suggestion/suggestions.md
 outputs/dev_run/operation_optimization/applied.json
+```
+
+When real Development Workflow agents are explicitly enabled, additional artifacts are written:
+
+```text
+outputs/dev_run/development/check_agent/check.csv
+outputs/dev_run/development/check_agent/check.jsonl
+outputs/dev_run/development/check_agent/summary.json
+outputs/dev_run/development/optimization_agent/decision.json
+outputs/dev_run/development/optimization_agent/decision.md
+outputs/dev_run/development/cycle_N/metrics.json
+outputs/dev_run/development/cycle_N/metrics.md
 ```
 
 These files are for calibration, regression fixtures, and safe workflow improvement. They are not required for normal users.

@@ -104,6 +104,25 @@ Operation and Optimization
   --run-check-suggestion
 ```
 
+如果要运行真正的开发 agent，必须先在 `.env` 里配置 `OPENAI_API_KEY`，再显式启用：
+
+```bash
+./run_workflow.sh \
+  "/path/to/provider_details.csv" \
+  "outputs/dev_run" \
+  --run-check-agent \
+  --run-optimization-agent \
+  --application-gates-json "outputs/dev_run/calibration_cycle/calibration_application_gates.json" \
+  --development-cycle 1
+```
+
+其中：
+
+- `tools/run_check_agent.py` 调用真实 LLM CheckAgent，只读取高风险行和结构化证据，输出到 `development/check_agent/`。
+- `tools/run_optimization_agent.py` 调用真实 LLM OptimizationAgent，读取 CheckAgent、人工标签、指标和门禁，输出到 `development/optimization_agent/`。
+- `tools/build_development_cycle_report.py` 汇总一轮开发循环指标，输出到 `development/cycle_N/`。
+- 如果没有 `OPENAI_API_KEY` 或 API 不可用，agent 脚本会失败闭合，只写 blocker summary，不会改 `official_sites.csv`、`config/scoring.json` 或评分代码。
+
 如果有人工复核文件：
 
 ```bash
@@ -132,6 +151,13 @@ outputs/dev_run/check_suggestion/check.csv
 outputs/dev_run/check_suggestion/check.xlsx
 outputs/dev_run/check_suggestion/suggestions.json
 outputs/dev_run/check_suggestion/suggestions.md
+outputs/dev_run/development/check_agent/check.csv
+outputs/dev_run/development/check_agent/check.jsonl
+outputs/dev_run/development/check_agent/summary.json
+outputs/dev_run/development/optimization_agent/decision.json
+outputs/dev_run/development/optimization_agent/decision.md
+outputs/dev_run/development/cycle_N/metrics.json
+outputs/dev_run/development/cycle_N/metrics.md
 outputs/dev_run/operation_optimization/applied.json
 outputs/dev_run/operation_optimization/identity_cases.csv
 outputs/dev_run/operation_optimization/human_cases.csv

@@ -15,6 +15,8 @@ ENV_KEYS = [
     "SERPER_API_KEY",
     "FIRECRAWL_API_KEY",
     "EXA_API_KEY",
+    "OPENAI_API_KEY",
+    "FINDER_DEV_AGENT_MODEL",
     "DDGS_ENABLED",
     "FINDER_CACHE_DIR",
     "FINDER_HTTP_TIMEOUT",
@@ -27,25 +29,32 @@ ENV_KEYS = [
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Create/update .env from local API key files without printing secrets.")
-    parser.add_argument("--brave-key-file", required=True, help="Path to a file containing the Brave Search API key.")
+    parser.add_argument("--brave-key-file", help="Path to a file containing the Brave Search API key.")
     parser.add_argument("--exa-key-file", help="Path to a file containing the Exa API key.")
+    parser.add_argument("--openai-key-file", help="Path to a file containing the OpenAI API key for maintainer-only development agents.")
     parser.add_argument("--env", default=".env", help="Target .env path. Default: .env in the repo root.")
     parser.add_argument("--example", default=".env.example", help="Template env file. Default: .env.example.")
     args = parser.parse_args(argv)
 
     brave = extract_key_from_file(args.brave_key_file, "BRAVE_API_KEY")
     exa = extract_key_from_file(args.exa_key_file, "EXA_API_KEY") if args.exa_key_file else ""
-    if not brave:
+    openai = extract_key_from_file(args.openai_key_file, "OPENAI_API_KEY") if args.openai_key_file else ""
+    if args.brave_key_file and not brave:
         raise SystemExit("Could not extract BRAVE_API_KEY from the provided file.")
+    if args.openai_key_file and not openai:
+        raise SystemExit("Could not extract OPENAI_API_KEY from the provided file.")
 
     env_path = Path(args.env)
     example_path = Path(args.example)
     values = read_env(example_path if example_path.exists() else None)
     if env_path.exists():
         values.update(read_env(env_path))
-    values["BRAVE_API_KEY"] = brave
+    if brave:
+        values["BRAVE_API_KEY"] = brave
     if exa:
         values["EXA_API_KEY"] = exa
+    if openai:
+        values["OPENAI_API_KEY"] = openai
     values.setdefault("DDGS_ENABLED", "0")
     values.setdefault("FINDER_CACHE_DIR", ".cache")
     values.setdefault("FINDER_HTTP_TIMEOUT", "12")
@@ -60,6 +69,7 @@ def main(argv: list[str] | None = None) -> int:
         "env_path": str(env_path.resolve()),
         "brave_configured": bool(values.get("BRAVE_API_KEY")),
         "exa_configured": bool(values.get("EXA_API_KEY")),
+        "openai_configured": bool(values.get("OPENAI_API_KEY")),
         "keys_printed": False,
     }
     print(json.dumps(summary, ensure_ascii=False, indent=2))

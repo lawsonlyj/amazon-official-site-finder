@@ -85,6 +85,34 @@ def agent_a_paths(run_dir: str | Path) -> dict[str, Path]:
     }
 
 
+def check_agent_paths(run_dir: str | Path) -> dict[str, Path]:
+    root = run_root(run_dir)
+    return {
+        "csv": root / "development/check_agent/check.csv",
+        "jsonl": root / "development/check_agent/check.jsonl",
+        "summary": root / "development/check_agent/summary.json",
+    }
+
+
+def optimization_agent_paths(run_dir: str | Path) -> dict[str, Path]:
+    root = run_root(run_dir)
+    return {
+        "json": root / "development/optimization_agent/decision.json",
+        "md": root / "development/optimization_agent/decision.md",
+    }
+
+
+def development_cycle_paths(run_dir: str | Path, cycle: int | str) -> dict[str, Path]:
+    root = run_root(run_dir)
+    cycle_name = str(cycle)
+    if not cycle_name.startswith("cycle_"):
+        cycle_name = f"cycle_{cycle_name}"
+    return {
+        "json": root / f"development/{cycle_name}/metrics.json",
+        "md": root / f"development/{cycle_name}/metrics.md",
+    }
+
+
 def reviewed_paths(run_dir: str | Path) -> dict[str, Path]:
     root = run_root(run_dir)
     return {

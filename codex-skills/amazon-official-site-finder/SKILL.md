@@ -207,6 +207,18 @@ Development command:
 
 CheckAgent / Check and Suggestion checks high-risk rows, writes evidence plus suggestions, and uses structured DOM evidence from candidate pages. Add `--human-review /path/to/filled_review.xlsx` to use filled human labels as regression evidence. Add `--apply-operation-optimizations` only when Operation and Optimization should apply safe recommendations and write regression artifacts after the gate passes.
 
+For repository developers working on the skill/workflow itself, real LLM agents are explicit opt-in and require `OPENAI_API_KEY` in `.env`:
+
+```bash
+./run_workflow.sh "/path/to/provider_details.csv" "outputs/dev_run" \
+  --run-check-agent \
+  --run-optimization-agent \
+  --application-gates-json "outputs/dev_run/calibration_cycle/calibration_application_gates.json" \
+  --development-cycle 1
+```
+
+Real CheckAgent writes `development/check_agent/*`; real OptimizationAgent writes `development/optimization_agent/*`; cycle metrics write `development/cycle_N/*`. These scripts fail closed when the OpenAI key/API is unavailable and must not overwrite Workflow Body outputs.
+
 For large Check and Suggestion runs, use `python3 tools/run_agent_b_verification.py --run-dir outputs/dev_run --resume --write-xlsx`. For batch validation, add `--row-timeout 15 --per-query 1`.
 
 For calibration work, follow `docs/DEVELOPMENT_WORKFLOW_CN.md`. Treat CheckAgent and OptimizationAgent conclusions as advisory until Operation and Optimization adds regression tests and a deterministic gate passes.

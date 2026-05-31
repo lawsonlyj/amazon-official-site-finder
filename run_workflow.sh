@@ -2,7 +2,7 @@
 set -euo pipefail
 
 if [[ $# -lt 2 ]]; then
-  echo "Usage: ./run_workflow.sh /path/to/input.csv outputs/run_dir [labels.csv] [--run-check-suggestion] [--apply-operation-optimizations] [--check-limit N] [--human-review file.xlsx] [--pattern-release-json file.json]" >&2
+  echo "Usage: ./run_workflow.sh /path/to/input.csv outputs/run_dir [labels.csv] [--run-check-suggestion] [--run-check-agent] [--run-optimization-agent] [--apply-operation-optimizations] [--check-limit N] [--human-review file.xlsx] [--pattern-release-json file.json]" >&2
   exit 2
 fi
 
@@ -10,15 +10,30 @@ SOURCE_CSV="$1"
 RUN_DIR="$2"
 LABELS_CSV=""
 RUN_CHECK_SUGGESTION=0
+RUN_CHECK_AGENT=0
+RUN_OPTIMIZATION_AGENT=0
 APPLY_OPERATION_OPTIMIZATIONS=0
 CHECK_LIMIT=0
 HUMAN_REVIEW_FILE=""
 PATTERN_RELEASE_JSONS=()
+BALANCE_REPORT_JSON=""
+CONVERGENCE_AUDIT_JSON=""
+APPLICATION_GATES_JSON=""
+DEVELOPMENT_CYCLE=""
 shift 2
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --run-check-suggestion|--run-agent-b)
+      RUN_CHECK_SUGGESTION=1
+      ;;
+    --run-check-agent)
+      RUN_CHECK_AGENT=1
+      RUN_CHECK_SUGGESTION=1
+      ;;
+    --run-optimization-agent)
+      RUN_OPTIMIZATION_AGENT=1
+      RUN_CHECK_AGENT=1
       RUN_CHECK_SUGGESTION=1
       ;;
     --apply-operation-optimizations|--apply-agent-optimizations)
@@ -37,6 +52,22 @@ while [[ $# -gt 0 ]]; do
     --pattern-release-json)
       PATTERN_RELEASE_JSONS+=("${2:-}")
       RUN_CHECK_SUGGESTION=1
+      shift
+      ;;
+    --balance-report-json)
+      BALANCE_REPORT_JSON="${2:-}"
+      shift
+      ;;
+    --convergence-audit-json)
+      CONVERGENCE_AUDIT_JSON="${2:-}"
+      shift
+      ;;
+    --application-gates-json)
+      APPLICATION_GATES_JSON="${2:-}"
+      shift
+      ;;
+    --development-cycle)
+      DEVELOPMENT_CYCLE="${2:-}"
       shift
       ;;
     -*)
@@ -113,6 +144,36 @@ if [[ "$RUN_CHECK_SUGGESTION" == "1" ]]; then
   if [[ "$APPLY_OPERATION_OPTIMIZATIONS" == "1" ]]; then
     PYTHONPATH=.vendor_eval:. python3 tools/apply_agent_optimizations.py --run-dir "$RUN_DIR" --apply
   fi
+  if [[ "$RUN_CHECK_AGENT" == "1" ]]; then
+    CHECK_AGENT_ARGS=(--run-dir "$RUN_DIR")
+    if [[ "$CHECK_LIMIT" != "0" ]]; then
+      CHECK_AGENT_ARGS+=(--limit "$CHECK_LIMIT")
+    fi
+    PYTHONPATH=.vendor_eval:. python3 tools/run_check_agent.py "${CHECK_AGENT_ARGS[@]}"
+  fi
+  if [[ "$RUN_OPTIMIZATION_AGENT" == "1" ]]; then
+    OPTIMIZATION_AGENT_ARGS=(--run-dir "$RUN_DIR")
+    if [[ -n "$BALANCE_REPORT_JSON" ]]; then
+      OPTIMIZATION_AGENT_ARGS+=(--balance-report-json "$BALANCE_REPORT_JSON")
+    fi
+    if [[ -n "$CONVERGENCE_AUDIT_JSON" ]]; then
+      OPTIMIZATION_AGENT_ARGS+=(--convergence-audit-json "$CONVERGENCE_AUDIT_JSON")
+    fi
+    if [[ -n "$APPLICATION_GATES_JSON" ]]; then
+      OPTIMIZATION_AGENT_ARGS+=(--application-gates-json "$APPLICATION_GATES_JSON")
+    fi
+    PYTHONPATH=.vendor_eval:. python3 tools/run_optimization_agent.py "${OPTIMIZATION_AGENT_ARGS[@]}"
+  fi
+  if [[ -n "$DEVELOPMENT_CYCLE" ]]; then
+    CYCLE_ARGS=(--run-dir "$RUN_DIR" --cycle "$DEVELOPMENT_CYCLE")
+    if [[ -n "$BALANCE_REPORT_JSON" ]]; then
+      CYCLE_ARGS+=(--labeled-eval-json "$BALANCE_REPORT_JSON")
+    fi
+    if [[ -n "$APPLICATION_GATES_JSON" ]]; then
+      CYCLE_ARGS+=(--application-gates-json "$APPLICATION_GATES_JSON")
+    fi
+    PYTHONPATH=.vendor_eval:. python3 tools/build_development_cycle_report.py "${CYCLE_ARGS[@]}"
+  fi
   if [[ "${#PATTERN_RELEASE_JSONS[@]}" -gt 0 ]]; then
     PATTERN_RELEASE_ARGS=(--run-dir "$RUN_DIR" --write-xlsx)
     if [[ -n "$LABELS_CSV" ]]; then
@@ -141,6 +202,16 @@ if [[ "$RUN_CHECK_SUGGESTION" == "1" ]]; then
   echo "Check CSV: $RUN_DIR/check_suggestion/check.csv"
   echo "Check XLSX: $RUN_DIR/check_suggestion/check.xlsx"
   echo "Suggestions: $RUN_DIR/check_suggestion/suggestions.md"
+fi
+if [[ "$RUN_CHECK_AGENT" == "1" ]]; then
+  echo "CheckAgent CSV: $RUN_DIR/development/check_agent/check.csv"
+  echo "CheckAgent summary: $RUN_DIR/development/check_agent/summary.json"
+fi
+if [[ "$RUN_OPTIMIZATION_AGENT" == "1" ]]; then
+  echo "OptimizationAgent decision: $RUN_DIR/development/optimization_agent/decision.md"
+fi
+if [[ -n "$DEVELOPMENT_CYCLE" ]]; then
+  echo "Development cycle metrics: $RUN_DIR/development/cycle_$DEVELOPMENT_CYCLE/metrics.md"
 fi
 if [[ "${#PATTERN_RELEASE_JSONS[@]}" -gt 0 ]]; then
   echo "Pattern release summary: $RUN_DIR/operation_optimization/pattern_release_applied.json"

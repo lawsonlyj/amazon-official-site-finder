@@ -41,6 +41,9 @@ from tools.configure_env_from_key_files import extract_key_from_file, main as co
 from tools.run_agent_b_verification import run_agent_b_verification
 from tools.run_agent_b_recommendations import run_agent_b_recommendations
 from tools.apply_agent_optimizations import apply_agent_optimizations
+from tools.run_check_agent import run_check_agent
+from tools.run_optimization_agent import run_optimization_agent
+from tools.build_development_cycle_report import build_development_cycle_report
 from tools.evaluate_workflow_balance import evaluate_balance, evaluate_balance_from_details
 from tools.build_balance_report import build_balance_report
 from tools.build_calibration_label_gap_task import build_calibration_label_gap_task
@@ -81,6 +84,16 @@ def _write_test_csv(path: Path, rows: list[dict[str, str]]) -> None:
         writer = csv.DictWriter(f, fieldnames=list(rows[0].keys()))
         writer.writeheader()
         writer.writerows(rows)
+
+
+class _FakeJsonClient:
+    def __init__(self, responses: list[dict]):
+        self.responses = list(responses)
+        self.payloads: list[dict] = []
+
+    def complete_json(self, *, system_prompt: str, user_payload: dict, max_tokens: int = 1400):
+        self.payloads.append({"system_prompt": system_prompt, "user_payload": user_payload, "max_tokens": max_tokens})
+        return self.responses.pop(0)
 
 
 class WorkflowTests(unittest.TestCase):
@@ -130,6 +143,33 @@ class WorkflowTests(unittest.TestCase):
             key_file.write_text(r"{\rtf1\ansi BRAVE_API_KEY=rtf-secret-key\par}", encoding="utf-8")
 
             self.assertEqual(extract_key_from_file(key_file, "BRAVE_API_KEY"), "rtf-secret-key")
+
+    def test_configure_env_can_add_openai_key_without_printing_secret(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            openai_file = root / "openaikey.rtf"
+            env_file = root / ".env"
+            example_file = root / ".env.example"
+            openai_file.write_text(r"{\rtf1\ansi OPENAI_API_KEY=openai-secret-key-123\par}", encoding="utf-8")
+            example_file.write_text("OPENAI_API_KEY=\nFINDER_DEV_AGENT_MODEL=gpt-4.1-mini\n", encoding="utf-8")
+
+            out = io.StringIO()
+            with redirect_stdout(out):
+                configure_env_main(
+                    [
+                        "--openai-key-file",
+                        str(openai_file),
+                        "--env",
+                        str(env_file),
+                        "--example",
+                        str(example_file),
+                    ]
+                )
+
+            text = env_file.read_text(encoding="utf-8")
+            self.assertIn("OPENAI_API_KEY=openai-secret-key-123", text)
+            self.assertIn("FINDER_DEV_AGENT_MODEL=gpt-4.1-mini", text)
+            self.assertNotIn("openai-secret-key-123", out.getvalue())
 
     def test_normalizer_merges_duplicate_provider_rows_and_skips_description_row(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -2139,6 +2179,210 @@ class OperationalCommandTests(unittest.TestCase):
         self.assertEqual(rows[0]["agent_b_decision"], "unsure")
         self.assertEqual(rows[0]["reason_for_unsure"], "agent_b_row_timeout")
         self.assertIn("agent_b_row_timeout", rows[0]["counter_evidence"])
+
+    def test_check_agent_reviews_only_high_risk_rows_and_preserves_core_outputs(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            run_dir = Path(tmp)
+            core_rows = [
+                {
+                    "provider_id": "safe",
+                    "provider_name": "Safe Brand",
+                    "provider_detail_url": "https://amazon.example/safe",
+                    "official_url": "https://safe.example",
+                    "status": "matched",
+                    "confidence": "96",
+                }
+            ]
+            check_rows = [
+                {
+                    "provider_id": "safe",
+                    "provider_name": "Safe Brand",
+                    "provider_detail_url": "https://amazon.example/safe",
+                    "candidate_url": "https://safe.example",
+                    "candidate_domain": "safe.example",
+                    "agent_b_decision": "accept",
+                    "confidence": "96",
+                    "evidence_score": "92",
+                    "supporting_facts": "strong_identity",
+                    "counter_evidence": "",
+                    "reason_for_unsure": "",
+                    "review_reason": "",
+                    "source_status": "matched",
+                    "source_confidence": "96",
+                },
+                {
+                    "provider_id": "risk",
+                    "provider_name": "Risk Brand",
+                    "provider_detail_url": "https://amazon.example/risk",
+                    "candidate_url": "https://risk.example",
+                    "candidate_domain": "risk.example",
+                    "agent_b_decision": "unsure",
+                    "confidence": "61",
+                    "evidence_score": "61",
+                    "supporting_facts": "page_contains_provider_name",
+                    "counter_evidence": "identity_gap_location_or_service_context_missing",
+                    "reason_for_unsure": "insufficient_or_conflicting_evidence",
+                    "review_reason": "precision_low_confidence_auto_match",
+                    "source_status": "matched",
+                    "source_confidence": "61",
+                },
+            ]
+            _write_test_csv(run_dir / "official_sites.csv", core_rows)
+            _write_test_csv(run_dir / "check_suggestion/check.csv", check_rows)
+            original_core = (run_dir / "official_sites.csv").read_text(encoding="utf-8")
+            client = _FakeJsonClient(
+                [
+                    {
+                        "decision": "unsure",
+                        "confidence": 66,
+                        "supporting_facts": ["provider name appears"],
+                        "counter_evidence": ["location evidence is weak"],
+                        "reason_for_unsure": "needs_human_confirmation",
+                        "suggestions": ["collect more country evidence before changing rules"],
+                    }
+                ]
+            )
+
+            summary = run_check_agent(run_dir=run_dir, client=client)
+            with (run_dir / "development/check_agent/check.csv").open(newline="", encoding="utf-8") as f:
+                rows = list(csv.DictReader(f))
+            jsonl_lines = (run_dir / "development/check_agent/check.jsonl").read_text(encoding="utf-8").splitlines()
+            core_after = (run_dir / "official_sites.csv").read_text(encoding="utf-8")
+
+        self.assertEqual(summary["status"], "completed")
+        self.assertEqual(summary["input_rows"], 1)
+        self.assertEqual(rows[0]["provider_id"], "risk")
+        self.assertEqual(rows[0]["check_agent_decision"], "unsure")
+        self.assertEqual(rows[0]["manual_decision"], "unsure")
+        self.assertEqual(rows[0]["provider_detail_url"], "https://amazon.example/risk")
+        self.assertEqual(len(jsonl_lines), 1)
+        self.assertEqual(core_after, original_core)
+        self.assertIn("provider_detail_url", client.payloads[0]["user_payload"]["provider"])
+
+    def test_check_agent_missing_openai_key_fails_closed_without_core_output_changes(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            run_dir = Path(tmp)
+            _write_test_csv(
+                run_dir / "check_suggestion/check.csv",
+                [
+                    {
+                        "provider_id": "p-1",
+                        "provider_name": "Risk Brand",
+                        "provider_detail_url": "https://amazon.example/p-1",
+                        "candidate_url": "https://risk.example",
+                        "candidate_domain": "risk.example",
+                        "review_reason": "precision_low_confidence_auto_match",
+                        "confidence": "70",
+                        "evidence_score": "65",
+                    }
+                ],
+            )
+            _write_test_csv(run_dir / "official_sites.csv", [{"provider_id": "p-1", "official_url": "https://risk.example"}])
+            original_core = (run_dir / "official_sites.csv").read_text(encoding="utf-8")
+            with patch.dict(os.environ, {}, clear=True):
+                summary = run_check_agent(run_dir=run_dir)
+            check_csv_exists = (run_dir / "development/check_agent/check.csv").exists()
+            summary_exists = (run_dir / "development/check_agent/summary.json").exists()
+            core_after = (run_dir / "official_sites.csv").read_text(encoding="utf-8")
+
+        self.assertEqual(summary["status"], "blocked")
+        self.assertEqual(summary["reason"], "missing_openai_api_key")
+        self.assertFalse(check_csv_exists)
+        self.assertTrue(summary_exists)
+        self.assertEqual(core_after, original_core)
+
+    def test_optimization_agent_schema_and_gate_prevent_direct_application(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            run_dir = Path(tmp)
+            _write_test_csv(
+                run_dir / "development/check_agent/check.csv",
+                [
+                    {
+                        "provider_id": "p-1",
+                        "provider_name": "Risk Brand",
+                        "provider_detail_url": "https://amazon.example/p-1",
+                        "candidate_url": "https://risk.example",
+                        "check_agent_decision": "reject",
+                        "confidence": "90",
+                        "supporting_facts": "none",
+                        "counter_evidence": "platform page",
+                    }
+                ],
+            )
+            gates = {
+                "summary": {"allowed_gate_count": 0, "not_allowed_gate_count": 1},
+                "checks": [{"gate": "review_lane_change", "allowed": False, "can_apply_now": False}],
+            }
+            gates_path = run_dir / "calibration_application_gates.json"
+            gates_path.write_text(json.dumps(gates), encoding="utf-8")
+            client = _FakeJsonClient(
+                [
+                    {
+                        "overall_decision": "apply_candidate",
+                        "should_apply_now": True,
+                        "recommendations": [{"action": "tighten_identity_rule", "evidence": "one row"}],
+                        "blocked_reasons": [],
+                        "needed_labels": [],
+                        "needed_tests": ["identity regression"],
+                        "risk_assessment": "Gate must pass before applying.",
+                    }
+                ]
+            )
+
+            summary = run_optimization_agent(run_dir=run_dir, application_gates_json=gates_path, client=client)
+            decision_json_exists = (run_dir / "development/optimization_agent/decision.json").exists()
+            decision_md_exists = (run_dir / "development/optimization_agent/decision.md").exists()
+
+        self.assertEqual(summary["overall"]["status"], "completed")
+        self.assertFalse(summary["overall"]["effective_apply_allowed"])
+        self.assertEqual(summary["decision"]["overall_decision"], "needs_regression_test")
+        self.assertIn("deterministic_gate_not_passed", summary["decision"]["blocked_reasons"])
+        self.assertTrue(decision_json_exists)
+        self.assertTrue(decision_md_exists)
+
+    def test_development_cycle_report_combines_metrics_agents_and_gate(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            run_dir = Path(tmp)
+            eval_path = run_dir / "balance_eval_labeled100_latest.json"
+            eval_path.write_text(
+                json.dumps(
+                    {
+                        "overall": {
+                            "labeled_rows": 100,
+                            "auto_precision": 0.95,
+                            "official_recall": 0.92,
+                            "overall_accuracy": 0.9,
+                            "false_official_rows": 4,
+                            "over_rejected_rows": 6,
+                            "manual_review_rows": 115,
+                        }
+                    }
+                ),
+                encoding="utf-8",
+            )
+            check_summary = run_dir / "development/check_agent/summary.json"
+            check_summary.parent.mkdir(parents=True)
+            check_summary.write_text(
+                json.dumps({"status": "completed", "output_rows": 3, "decision_counts": {"unsure": 2, "reject": 1}}),
+                encoding="utf-8",
+            )
+            opt_summary = run_dir / "development/optimization_agent/decision.json"
+            opt_summary.parent.mkdir(parents=True)
+            opt_summary.write_text(
+                json.dumps({"overall": {"status": "completed", "overall_decision": "needs_more_labels", "effective_apply_allowed": False}}),
+                encoding="utf-8",
+            )
+            gate_path = run_dir / "calibration_application_gates.json"
+            gate_path.write_text(json.dumps({"summary": {"allowed_gate_count": 0, "not_allowed_gate_count": 2}}), encoding="utf-8")
+
+            report = build_development_cycle_report(run_dir=run_dir, cycle=1, application_gates_json=gate_path)
+            metrics_exists = (run_dir / "development/cycle_1/metrics.json").exists()
+
+        self.assertEqual(report["summary"]["auto_precision"], 0.95)
+        self.assertEqual(report["summary"]["check_agent_rows"], 3)
+        self.assertEqual(report["summary"]["optimization_decision"], "needs_more_labels")
+        self.assertEqual(report["summary"]["gate_blocked_count"], 2)
+        self.assertTrue(metrics_exists)
 
     def test_agent_b_recommends_and_agent_a_applies_only_safe_rules(self):
         with tempfile.TemporaryDirectory() as tmp:

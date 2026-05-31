@@ -2,9 +2,11 @@ SOURCE_CSV ?=
 RUN_DIR ?= outputs/my_run
 LABELS ?= tests/fixtures/golden_expected_websites.csv
 REVIEW ?=
+DEVELOPMENT_CYCLE ?= 1
+APPLICATION_GATES_JSON ?=
 PYTHONPATH_VALUE ?= .vendor_eval:.
 
-.PHONY: help test install-optional pipeline second-pass review-task check-suggestion agent-b review-learning check-suggestions agent-b-suggestions agent-c apply-operation-optimizations apply-agent-optimizations verify
+.PHONY: help test install-optional pipeline second-pass review-task check-suggestion agent-b review-learning check-suggestions agent-b-suggestions agent-c check-agent optimization-agent development-cycle apply-operation-optimizations apply-agent-optimizations verify
 
 help:
 	@echo "Targets:"
@@ -20,6 +22,9 @@ help:
 	@echo "  Development workflow:"
 	@echo "  check-suggestion  Run candidate-first high-risk checks for RUN_DIR"
 	@echo "  check-suggestions Generate Check and Suggestion optimization suggestions for RUN_DIR"
+	@echo "  check-agent       Run real LLM CheckAgent for RUN_DIR; requires OPENAI_API_KEY"
+	@echo "  optimization-agent Run real LLM OptimizationAgent for RUN_DIR; requires OPENAI_API_KEY"
+	@echo "  development-cycle Write Development Workflow cycle metrics for RUN_DIR"
 	@echo "  apply-operation-optimizations Apply safe operation optimization suggestions"
 	@echo ""
 	@echo "Example:"
@@ -90,6 +95,21 @@ check-suggestions:
 agent-b-suggestions: check-suggestions
 
 agent-c: check-suggestions
+
+check-agent:
+	PYTHONPATH=$(PYTHONPATH_VALUE) python3 tools/run_check_agent.py \
+	  --run-dir "$(RUN_DIR)"
+
+optimization-agent:
+	PYTHONPATH=$(PYTHONPATH_VALUE) python3 tools/run_optimization_agent.py \
+	  --run-dir "$(RUN_DIR)" \
+	  $(if $(APPLICATION_GATES_JSON),--application-gates-json "$(APPLICATION_GATES_JSON)",)
+
+development-cycle:
+	PYTHONPATH=$(PYTHONPATH_VALUE) python3 tools/build_development_cycle_report.py \
+	  --run-dir "$(RUN_DIR)" \
+	  --cycle "$(DEVELOPMENT_CYCLE)" \
+	  $(if $(APPLICATION_GATES_JSON),--application-gates-json "$(APPLICATION_GATES_JSON)",)
 
 apply-operation-optimizations:
 	PYTHONPATH=$(PYTHONPATH_VALUE) python3 tools/apply_agent_optimizations.py \
