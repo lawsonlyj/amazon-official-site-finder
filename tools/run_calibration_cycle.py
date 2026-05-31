@@ -31,9 +31,13 @@ from tools.apply_calibration_regression_cases import apply_calibration_regressio
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Run the repeatable calibration-material generation cycle.")
     parser.add_argument("--labeled-eval-json", required=True, help="Labeled balance JSON from evaluate_workflow_balance.py.")
-    parser.add_argument("--labeled-agent-b-csv", required=True, help="AgentB check.csv for the labeled calibration run.")
+    parser.add_argument(
+        "--labeled-agent-b-csv",
+        required=True,
+        help="Check and Suggestion check.csv for the labeled calibration run.",
+    )
     parser.add_argument("--review-csv", required=True, help="Target batch review_task.csv.")
-    parser.add_argument("--batch-agent-b-csv", required=True, help="Target batch agent_b/check.csv.")
+    parser.add_argument("--batch-agent-b-csv", required=True, help="Target batch check_suggestion/check.csv.")
     parser.add_argument("--batch-total-rows", type=int, default=0, help="Total rows in the target batch.")
     parser.add_argument("--output-dir", required=True)
     parser.add_argument("--sample-prefix", default="pattern_validation_sample_50")
@@ -68,7 +72,7 @@ def main(argv: list[str] | None = None) -> int:
         default=[],
         help=(
             "Optional trusted historical manual-label CSV file or directory to prefill protected-lane review tasks. "
-            "Repeatable. AgentB/automatic outputs are ignored by the reuse tool."
+            "Repeatable. Check and Suggestion/automatic outputs are ignored by the reuse tool."
         ),
     )
     args = parser.parse_args(argv)
@@ -910,7 +914,7 @@ def _render_markdown(report: dict) -> str:
         f"- Recommended second-pass threshold: {summary['recommended_second_pass_threshold']}",
         f"- Precision watch score band: {summary['precision_watch_min']}-{summary['precision_watch_max']}",
         f"- Matched-review confidence cutoff: <{summary['recommended_matched_review_confidence_below']}",
-        f"- Raw AgentB recall release: {summary['raw_agent_b_recall_release']}",
+        f"- Raw Check and Suggestion recall release: {summary['raw_agent_b_recall_release']}",
         f"- Calibrated pattern release: {summary['calibrated_pattern_release']}",
         f"- Recommended pattern release: {summary['recommended_pattern_release']}",
         f"- Recommended pattern release source: {summary.get('recommended_pattern_release_source_path') or 'not_evaluated'}",

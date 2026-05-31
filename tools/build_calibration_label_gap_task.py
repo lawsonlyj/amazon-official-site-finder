@@ -190,7 +190,7 @@ def _label_decision_impact(review_reason: str, target: dict) -> str:
     }:
         return (
             f"If {sample_goal} are clean with no reject/replace blockers, this protected lane can be considered for a narrow routing downgrade after regression tests. "
-            "Any wrong candidate keeps the lane protected and records the exact failure pattern for AgentA rules."
+            "Any wrong candidate keeps the lane protected and records the exact failure pattern for Operation and Optimization rules."
         )
     if review_reason.startswith("precision_"):
         return (
@@ -227,13 +227,13 @@ def _scenario_actions(review_reason: str, target: dict) -> dict[str, str]:
     if review_reason == "recall_unresolved_top_candidate":
         return {
             "if_clean_action": "Use accept/replace rows to mine exact recall patterns; do not lower global thresholds from this lane alone.",
-            "if_blocked_action": "Keep unresolved top candidates manual-only and add bad candidate features to AgentB/risky URL checks.",
+            "if_blocked_action": "Keep unresolved top candidates manual-only and add bad candidate features to Check and Suggestion/risky URL checks.",
             "if_unsure_action": "Keep unresolved recall rows manual-only and refine evidence fields for future review.",
         }
     if review_reason.startswith("precision_"):
         return {
             "if_clean_action": "Consider a narrow routing downgrade only for this exact protected lane after regression tests and no remaining label gaps.",
-            "if_blocked_action": "Keep this lane protected and add the wrong rows as regression fixtures for AgentA scoring/risk rules.",
+            "if_blocked_action": "Keep this lane protected and add the wrong rows as regression fixtures for Operation and Optimization scoring/risk rules.",
             "if_unsure_action": "Keep this lane protected; unsure labels are not decisive enough to reduce manual review.",
         }
     return {

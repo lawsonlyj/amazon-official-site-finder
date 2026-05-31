@@ -1663,9 +1663,9 @@ class OperationalCommandTests(unittest.TestCase):
                 else [],
             ):
                 summary = run_agent_b_verification(run_dir=run_dir, write_xlsx=True)
-            with (run_dir / "agent_b/check.csv").open(newline="", encoding="utf-8") as f:
+            with (run_dir / "check_suggestion/check.csv").open(newline="", encoding="utf-8") as f:
                 rows = {row["provider_id"]: row for row in csv.DictReader(f)}
-            xlsx_exists = (run_dir / "agent_b/check.xlsx").exists()
+            xlsx_exists = (run_dir / "check_suggestion/check.xlsx").exists()
             legacy_xlsx_exists = (run_dir / "agent_b_verification_results.xlsx").exists()
 
         self.assertEqual(summary["decision_counts"]["accept"], 1)
@@ -1718,9 +1718,9 @@ class OperationalCommandTests(unittest.TestCase):
                 "tools.run_agent_b_verification.collect_candidates_for_queries"
             ) as collect:
                 summary = run_agent_b_verification(run_dir=run_dir, write_xlsx=False)
-            with (run_dir / "agent_b/check.csv").open(newline="", encoding="utf-8") as f:
+            with (run_dir / "check_suggestion/check.csv").open(newline="", encoding="utf-8") as f:
                 out = list(csv.DictReader(f))[0]
-            details = [json.loads(line) for line in (run_dir / "agent_b/check.jsonl").read_text(encoding="utf-8").splitlines()]
+            details = [json.loads(line) for line in (run_dir / "check_suggestion/check.jsonl").read_text(encoding="utf-8").splitlines()]
 
         self.assertEqual(summary["decision_counts"], {"accept": 1})
         self.assertEqual(out["agent_b_decision"], "accept")
@@ -1767,7 +1767,7 @@ class OperationalCommandTests(unittest.TestCase):
                 "tools.run_agent_b_verification.collect_candidates_for_queries", return_value=[]
             ):
                 summary = run_agent_b_verification(run_dir=run_dir, write_xlsx=False)
-            with (run_dir / "agent_b/check.csv").open(newline="", encoding="utf-8") as f:
+            with (run_dir / "check_suggestion/check.csv").open(newline="", encoding="utf-8") as f:
                 out = {row["provider_id"]: row for row in csv.DictReader(f)}
 
         self.assertEqual(summary["decision_counts"], {"reject": 2})
@@ -1839,7 +1839,7 @@ class OperationalCommandTests(unittest.TestCase):
                 "tools.run_agent_b_verification.collect_candidates_for_queries", return_value=[]
             ):
                 summary = run_agent_b_verification(run_dir=run_dir, write_xlsx=False)
-            with (run_dir / "agent_b/check.csv").open(newline="", encoding="utf-8") as f:
+            with (run_dir / "check_suggestion/check.csv").open(newline="", encoding="utf-8") as f:
                 checked_ids = [row["provider_id"] for row in csv.DictReader(f)]
 
         self.assertEqual(summary["input_rows"], 4)
@@ -1887,7 +1887,7 @@ class OperationalCommandTests(unittest.TestCase):
                 "tools.run_agent_b_verification.collect_candidates_for_queries", return_value=[]
             ):
                 summary = run_agent_b_verification(run_dir=run_dir, write_xlsx=False)
-            with (run_dir / "agent_b/check.csv").open(newline="", encoding="utf-8") as f:
+            with (run_dir / "check_suggestion/check.csv").open(newline="", encoding="utf-8") as f:
                 rows = list(csv.DictReader(f))
 
         self.assertEqual(summary["decision_counts"], {"unsure": 1})
@@ -1936,7 +1936,7 @@ class OperationalCommandTests(unittest.TestCase):
                 "tools.run_agent_b_verification.collect_candidates_for_queries", return_value=[]
             ):
                 summary = run_agent_b_verification(run_dir=run_dir, write_xlsx=False)
-            with (run_dir / "agent_b/check.csv").open(newline="", encoding="utf-8") as f:
+            with (run_dir / "check_suggestion/check.csv").open(newline="", encoding="utf-8") as f:
                 rows = list(csv.DictReader(f))
 
         self.assertEqual(summary["decision_counts"], {"unsure": 1})
@@ -1997,7 +1997,7 @@ class OperationalCommandTests(unittest.TestCase):
                 "finder.scoring.fetch_text", side_effect=fake_fetch
             ), patch("tools.run_agent_b_verification.collect_candidates_for_queries", return_value=replacement_candidates):
                 summary = run_agent_b_verification(run_dir=run_dir, write_xlsx=False)
-            with (run_dir / "agent_b/check.csv").open(newline="", encoding="utf-8") as f:
+            with (run_dir / "check_suggestion/check.csv").open(newline="", encoding="utf-8") as f:
                 rows = list(csv.DictReader(f))
 
         self.assertEqual(summary["decision_counts"], {"unsure": 1})
@@ -2069,8 +2069,8 @@ class OperationalCommandTests(unittest.TestCase):
             ]
             _write_test_csv(run_dir / "official_sites.csv", final_rows)
             _write_test_csv(run_dir / "review_task.csv", manual_rows)
-            _write_test_csv(run_dir / "agent_b/check.csv", existing_agent_b)
-            (run_dir / "agent_b/check.jsonl").write_text(
+            _write_test_csv(run_dir / "check_suggestion/check.csv", existing_agent_b)
+            (run_dir / "check_suggestion/check.jsonl").write_text(
                 json.dumps({"provider_id": "p-1", "provider_name": "Existing Brand", "decision": "accept"}) + "\n",
                 encoding="utf-8",
             )
@@ -2087,9 +2087,9 @@ class OperationalCommandTests(unittest.TestCase):
                 "tools.run_agent_b_verification.collect_candidates_for_queries", return_value=[]
             ):
                 summary = run_agent_b_verification(run_dir=run_dir, write_xlsx=False, resume=True)
-            with (run_dir / "agent_b/check.csv").open(newline="", encoding="utf-8") as f:
+            with (run_dir / "check_suggestion/check.csv").open(newline="", encoding="utf-8") as f:
                 rows = list(csv.DictReader(f))
-            jsonl_lines = (run_dir / "agent_b/check.jsonl").read_text(encoding="utf-8").strip().splitlines()
+            jsonl_lines = (run_dir / "check_suggestion/check.jsonl").read_text(encoding="utf-8").strip().splitlines()
 
         self.assertEqual(summary["output_rows"], 2)
         self.assertEqual(summary["resumed_rows"], 1)
@@ -2131,7 +2131,7 @@ class OperationalCommandTests(unittest.TestCase):
                 "tools.run_agent_b_verification.collect_candidates_for_queries", return_value=[]
             ):
                 summary = run_agent_b_verification(run_dir=run_dir, write_xlsx=False, row_timeout=1)
-            with (run_dir / "agent_b/check.csv").open(newline="", encoding="utf-8") as f:
+            with (run_dir / "check_suggestion/check.csv").open(newline="", encoding="utf-8") as f:
                 rows = list(csv.DictReader(f))
 
         self.assertEqual(summary["output_rows"], 1)
@@ -2189,7 +2189,7 @@ class OperationalCommandTests(unittest.TestCase):
             dry_run = apply_agent_optimizations(run_dir=run_dir, config_path=config_path, apply=False)
             applied = apply_agent_optimizations(run_dir=run_dir, config_path=config_path, apply=True)
             config = json.loads(config_path.read_text(encoding="utf-8"))
-            suggestions_exists = (run_dir / "agent_b/suggestions.json").exists()
+            suggestions_exists = (run_dir / "check_suggestion/suggestions.json").exists()
             legacy_suggestions_exists = (run_dir / "agent_c_optimization_recommendations.json").exists()
 
         self.assertEqual(recommendations["overall"]["safe_config_action_count"], 1)
@@ -2395,7 +2395,7 @@ class OperationalCommandTests(unittest.TestCase):
             candidate = root / "candidate.csv"
             review = root / "review.csv"
             review_task = run_dir / "review_task.csv"
-            agent_b = run_dir / "agent_b/check.csv"
+            agent_b = run_dir / "check_suggestion/check.csv"
             unresolved = run_dir / "unresolved.csv"
             _write_test_csv(
                 baseline,
@@ -2587,7 +2587,7 @@ class OperationalCommandTests(unittest.TestCase):
             candidate = root / "candidate.csv"
             human = root / "human.csv"
             review = run_dir / "review_task.csv"
-            agent_b = run_dir / "agent_b/check.csv"
+            agent_b = run_dir / "check_suggestion/check.csv"
             unresolved = run_dir / "unresolved.csv"
             human.write_text("provider_id,manual_decision,manual_url\n", encoding="utf-8")
             _write_test_csv(
@@ -3383,7 +3383,7 @@ class OperationalCommandTests(unittest.TestCase):
                 review_rows = list(csv.DictReader(f))
             manifest_data = json.loads(manifest.read_text(encoding="utf-8"))
             xlsx_exists = (run_dir / "official_sites.xlsx").exists()
-            summary_exists = (run_dir / "agent_a/pattern_release_applied.json").exists()
+            summary_exists = (run_dir / "operation_optimization/pattern_release_applied.json").exists()
 
         self.assertEqual(summary["released_rows"], 1)
         self.assertEqual(summary["unresolved_rows"], 0)
@@ -3699,7 +3699,7 @@ class OperationalCommandTests(unittest.TestCase):
         self.assertIn("Protected Lanes", md_text)
         self.assertIn("Spot-Check Candidates", md_text)
         self.assertIn("Needs More Labels", md_text)
-        self.assertIn("AgentB Recall Release Simulation", md_text)
+        self.assertIn("Check and Suggestion Recall Release Simulation", md_text)
         self.assertIn(str(pattern_release), md_text)
         self.assertIn("Prefer narrow pattern release over global threshold relaxation", md_text)
         self.assertIn("Pattern Release", md_text)
@@ -5762,7 +5762,7 @@ class OperationalCommandTests(unittest.TestCase):
         self.assertEqual(report["pattern_recommendations"][0]["recommendation"], "needs_more_labels")
         self.assertEqual(report["pattern_rule_candidates"]["needs_more_labels"][0]["pattern"], "has:schema_org_organization_seen")
         self.assertIn("Keep this pattern in calibration samples", report["pattern_rule_candidates"]["needs_more_labels"][0]["required_action"])
-        self.assertIn("Keep AgentB risky accepts in manual review", md_text)
+        self.assertIn("Keep Check and Suggestion risky accepts in manual review", md_text)
         self.assertIn("Review Lane Guidance", md_text)
         self.assertIn("Pattern Validation", md_text)
         self.assertIn("Candidate Rule Export", md_text)

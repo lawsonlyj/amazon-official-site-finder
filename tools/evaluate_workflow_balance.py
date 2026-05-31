@@ -646,7 +646,7 @@ def _find_unresolved(run_dir: Path) -> Path:
 
 
 def _find_agent_b(run_dir: Path) -> Path | None:
-    for name in ("agent_b/check.csv", "agent_b_verification_results.csv"):
+    for name in ("check_suggestion/check.csv", "agent_b/check.csv", "agent_b_verification_results.csv"):
         path = run_dir / name
         if path.exists():
             return path

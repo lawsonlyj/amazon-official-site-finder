@@ -64,7 +64,7 @@ echo "Done."
 echo "Reviewed final CSV: $RUN_DIR/reviewed/official_sites.csv"
 echo "Reviewed clickable XLSX: $RUN_DIR/reviewed/official_sites.xlsx"
 echo "Learning report: $RUN_DIR/reviewed/learning.md"
-echo "AgentB suggestions: $RUN_DIR/agent_b/suggestions.md"
+echo "Suggestions: $RUN_DIR/check_suggestion/suggestions.md"
 if [[ "$UPDATE_CONFIG" == "1" ]]; then
-  echo "Config optimization: enabled for safe repeated patterns."
+  echo "Operation optimization: enabled for safe repeated patterns."
 fi

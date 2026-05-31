@@ -17,7 +17,11 @@ from finder.text import base_domain_label, domain_from_url, slug, tokens
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Mine labeled evidence patterns for safer threshold/rule tuning.")
     parser.add_argument("--balance-json", required=True, help="Output from tools/evaluate_workflow_balance.py.")
-    parser.add_argument("--agent-b-csv", required=True, help="AgentB check.csv with supporting_facts/counter_evidence.")
+    parser.add_argument(
+        "--agent-b-csv",
+        required=True,
+        help="Check and Suggestion check.csv with supporting_facts/counter_evidence.",
+    )
     parser.add_argument("--scope", choices=["recall", "precision"], default="recall")
     parser.add_argument("--max-pattern-size", type=int, default=3)
     parser.add_argument("--min-support", type=int, default=2)
@@ -312,7 +316,7 @@ def _recommendations(scope: str, safe: list[dict], risky: list[dict], min_suppor
         out.append(f"Best candidate pattern: {best['pattern']} recovers {best['correct_recovery_rows']} labeled row(s).")
     else:
         out.append(
-            f"No zero-error {scope} evidence pattern reached support >= {min_support}; keep the current manual/AgentB lane instead of relaxing rules."
+            f"No zero-error {scope} evidence pattern reached support >= {min_support}; keep the current manual/Check and Suggestion lane instead of relaxing rules."
         )
     if risky:
         worst = risky[0]

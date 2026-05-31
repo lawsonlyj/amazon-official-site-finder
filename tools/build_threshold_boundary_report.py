@@ -234,7 +234,7 @@ def _review_band(current: dict, precision_boundary: dict, observed_precision_ris
         "min": current_threshold,
         "max": max_score,
         "cutoff": max_score + 1,
-        "reason": "Rows accepted in this band should remain accepted but prioritized for AgentB/manual precision checks. The upper bound also includes observed labeled false-official scores in the low-confidence auto-match lane.",
+        "reason": "Rows accepted in this band should remain accepted but prioritized for Check and Suggestion/manual precision checks. The upper bound also includes observed labeled false-official scores in the low-confidence auto-match lane.",
     }
 
 
@@ -252,7 +252,7 @@ def _raw_agent_b_release(simulations: list[dict], policy: dict) -> dict:
             "threshold": _to_int(chosen.get("agent_b_evidence_threshold"), 0),
             "correct_recovery_rows": _to_int(chosen.get("correct_recovery_rows"), 0),
             "wrong_release_rows": 0,
-            "reason": "At least one AgentB evidence threshold had labeled recall gain without wrong releases.",
+            "reason": "At least one Check and Suggestion evidence threshold had labeled recall gain without wrong releases.",
         }
     if not simulations:
         return {
@@ -260,7 +260,7 @@ def _raw_agent_b_release(simulations: list[dict], policy: dict) -> dict:
             "threshold": None,
             "correct_recovery_rows": 0,
             "wrong_release_rows": 0,
-            "reason": "No AgentB recall-release simulation data.",
+            "reason": "No Check and Suggestion recall-release simulation data.",
         }
     best = max(
         simulations,
@@ -275,7 +275,7 @@ def _raw_agent_b_release(simulations: list[dict], policy: dict) -> dict:
         "threshold": _to_int(best.get("agent_b_evidence_threshold"), 0),
         "correct_recovery_rows": _to_int(best.get("correct_recovery_rows"), 0),
         "wrong_release_rows": _to_int(best.get("wrong_release_rows"), 0),
-        "reason": "Every simulated raw AgentB recall-release threshold released at least one labeled wrong candidate.",
+        "reason": "Every simulated raw Check and Suggestion recall-release threshold released at least one labeled wrong candidate.",
     }
 
 
@@ -341,7 +341,7 @@ def _recommendations(
             f"Use scores {summary['precision_watch_min']}-{summary['precision_watch_max']} as the high-value precision review band; set matched-review cutoff to <{summary['recommended_matched_review_confidence_below']}. Raising the global threshold to {precision_boundary['threshold']} is a review-lane signal, not a default accept rule."
         )
     if recall_release.get("recommendation") == "manual_only":
-        out.append("Do not auto-release unresolved rows from raw AgentB recall candidates; keep them as manual or pattern-mined evidence.")
+        out.append("Do not auto-release unresolved rows from raw Check and Suggestion recall candidates; keep them as manual or pattern-mined evidence.")
     if str(pattern_boundary.get("recommendation", "")).startswith("enabled_with_guard"):
         out.append("Allow only selected actionable pattern release with the risky-subdomain guard and manual spot checks.")
     return out
@@ -387,7 +387,7 @@ def _render_markdown(report: dict) -> str:
             f"- Precision review band: {summary['precision_watch_min']}-{summary['precision_watch_max']}",
             f"- Matched-review confidence cutoff: <{summary['recommended_matched_review_confidence_below']}",
             f"- Observed low-confidence false-official max score: {summary['observed_low_confidence_false_official_max']}",
-            f"- Raw AgentB recall release: {summary['raw_agent_b_recall_release']}",
+            f"- Raw Check and Suggestion recall release: {summary['raw_agent_b_recall_release']}",
             f"- Calibrated pattern release: {summary['calibrated_pattern_release']}",
             f"- Selected actionable correct/wrong rows: {summary['selected_actionable_correct_rows']}/{summary['selected_actionable_wrong_rows']}",
             "",

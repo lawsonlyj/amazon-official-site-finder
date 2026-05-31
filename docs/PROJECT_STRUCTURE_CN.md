@@ -2,6 +2,15 @@
 
 这个仓库现在是“产品交付版”：只保留能完整运行官网识别 workflow、Codex skill 调用、质量验证、可点击 XLSX 输出、人工复核学习闭环和测试验证的文件。
 
+## 当前模块命名
+
+当前生产 workflow 仍然是规则化、结构化流程，不默认使用自主 LLM agent。
+
+- **Operation and Optimization**：负责搜索、打分、second-pass、人工表输出、校准门禁和安全优化吸收。
+- **Check and Suggestion**：负责高风险行复核、DOM/结构化证据收集、重复模式建议。
+
+历史脚本名里仍保留 `agent_b`、`agent_c`、`agent_optimizations`，只是为了旧命令、旧输出读取兼容；对外文档和新输出目录统一使用上面的新名称。
+
 ## 最终目录
 
 ```text
@@ -25,9 +34,9 @@ amazon-official-site-finder/
     apply_review.py
     build_linked_workbook.py
     build_manual_review_task.py
-    run_agent_b_verification.py
+    run_agent_b_verification.py        # 旧脚本名；当前对外叫 Check and Suggestion
     run_agent_c_recommendations.py      # 旧命令兼容入口
-    apply_agent_optimizations.py
+    apply_agent_optimizations.py        # 旧脚本名；当前对外叫 Operation and Optimization 安全应用
     apply_pattern_release_to_run.py
     build_policy_validation_task.py
     evaluate_policy_validation_task.py
@@ -151,9 +160,9 @@ run_codex_assisted.sh
            -> tools/plan_unresolved_second_pass.py
            -> tools/build_linked_workbook.py
      -> tools/build_manual_review_task.py
-     -> 可选 B：tools/run_agent_b_verification.py + tools/run_agent_b_recommendations.py
+     -> 可选 Check and Suggestion：tools/run_agent_b_verification.py + tools/run_agent_b_recommendations.py
         -> 可选读取 filled human-review XLSX，生成 notes 分类、无官网标签和回归样例建议
-     -> 可选 A 安全应用：tools/apply_agent_optimizations.py --apply
+     -> 可选 Operation and Optimization 安全应用：tools/apply_agent_optimizations.py --apply
      -> tools/verify_run_outputs.py
 ```
 
@@ -171,7 +180,7 @@ Codex receives filled manual review workbook
      -> 对重复出现且安全的排除域名更新 config/scoring.json
      -> tools/build_linked_workbook.py
   -> tools/run_agent_b_recommendations.py
-     -> 汇总 AgentB、人工复核 XLSX 和学习报告里的重复模式
+     -> 汇总 Check and Suggestion、人工复核 XLSX 和学习报告里的重复模式
   -> tools/apply_agent_optimizations.py --apply
      -> 只应用安全、可解释的 excluded_domains 更新，并写出 human/identity/no_official/reachability 回归样例
   -> tools/verify_run_outputs.py
@@ -194,39 +203,39 @@ Codex receives filled manual review workbook
 | `finder/logo.py` | 从候选官网提取 logo/favicon/og:image，并与 Amazon listing logo 做感知哈希相似度比较；作为正向身份加分证据，但 logo-only 不足以自动接受。 |
 | `tools/run_unresolved_second_pass.py` | 对第一轮没解决的商家做二轮补漏，用 Brave/Exa 找更可能的官网；默认接受阈值为 `75`，与 first pass 对齐，同时保留强证据、风险 URL 和身份 cap 约束。 |
 | `tools/build_manual_review_task.py` | 生成简化人工复核 CSV/XLSX，只保留工作人员需要判断和填写的列；普通 auto-match 默认复核 75-82 分，second-pass accepted 仍复核 85 分以下。 |
-| `tools/run_agent_b_verification.py` | B 的高风险候选优先复核部分。只复核低置信、二轮新增、平台页、logo-only、同名/通用名、身份 cap 等风险行；优先用 title/meta、H1/H2、nav/footer、联系方式、schema.org Organization、页面角色和页面风险做 DOM 结构化验证，只在证据弱或冲突时做轻量独立搜索。 |
-| `tools/run_agent_b_recommendations.py` | B 的建议部分。读取 B 复核结果和人工复核学习报告，输出可执行或需人工评估的优化建议。 |
+| `tools/run_agent_b_verification.py` | Check and Suggestion 的高风险候选优先复核部分。只复核低置信、二轮新增、平台页、logo-only、同名/通用名、身份 cap 等风险行；优先用 title/meta、H1/H2、nav/footer、联系方式、schema.org Organization、页面角色和页面风险做 DOM 结构化验证，只在证据弱或冲突时做轻量独立搜索。脚本名保留 `agent_b` 是为了兼容旧命令。 |
+| `tools/run_agent_b_recommendations.py` | Check and Suggestion 的建议部分。读取复核结果和人工复核学习报告，输出可执行或需人工评估的优化建议。脚本名保留 `agent_b` 是为了兼容旧命令。 |
 | `tools/run_review_learning.py` | 读取填好的复核表，合并人工反馈，输出 reviewed 结果、人工标签和优化建议。 |
-| `tools/run_agent_c_recommendations.py` | 旧名称兼容入口，转调 AgentB 建议实现。 |
-| `tools/apply_agent_optimizations.py` | A 的安全应用器，只自动写入可解释、可回滚的 excluded_domains 配置，并生成 human/identity/no_official/reachability 回归样例。 |
+| `tools/run_agent_c_recommendations.py` | 旧名称兼容入口，转调 Check and Suggestion 建议实现。 |
+| `tools/apply_agent_optimizations.py` | Operation and Optimization 的安全应用器，只自动写入可解释、可回滚的 excluded_domains 配置，并生成 human/identity/no_official/reachability 回归样例。脚本名保留 `agent` 是为了兼容旧命令。 |
 | `tools/build_linked_workbook.py` | 生成链接可点击的 XLSX。 |
 | `tools/verify_run_outputs.py` | 检查最终 CSV、unresolved CSV、质量 JSON、XLSX 链接公式是否正常。 |
-| `tools/evaluate_workflow_balance.py` | 调参评估工具。用基线结果、候选结果和人工标黄复核表计算 false official、over-reject、precision、recall、manual review rows，并按 `review_reason` 输出各人工复核 lane 的负担/风险和“删除该 lane 会漏掉多少已知错误”的模拟；同时模拟 AgentB unresolved recall 候选在不同证据阈值下自动放行会恢复多少正确官网、放出多少错误官网。旧基线目录已清理时，可用 `--labeled-details` 读取已保存的 `balance_eval_details.csv/json` 标签，对当前候选结果重新复算同一组指标。 |
-| `tools/build_balance_report.py` | 汇总 100 条有标签评估、300/全量无标签 AgentB 分布和 `simulate_pattern_release.py` 的 pattern-release 结果，生成可重复的阈值、review lane、AgentB recall 是否只能人工处理、以及是否可采用窄口证据组合放行的建议报告。 |
-| `tools/build_release_policy_report.py` | 汇总基线/候选有标签评估、pattern-release 模拟和 100/300 条应用结果，生成最终发布策略报告：阈值是否保持、原始 AgentB recall 是否只能人工处理、窄口 pattern release 是否可在风险子域 guard 下启用。 |
-| `tools/build_threshold_boundary_report.py` | 汇总阈值模拟、AgentB recall 模拟和 pattern-release 结果，明确全局接受阈值、precision watch 复核分数段，以及哪些放宽只能进入人工/AgentB 证据而不能直接自动接受。 |
+| `tools/evaluate_workflow_balance.py` | 调参评估工具。用基线结果、候选结果和人工标黄复核表计算 false official、over-reject、precision、recall、manual review rows，并按 `review_reason` 输出各人工复核 lane 的负担/风险和“删除该 lane 会漏掉多少已知错误”的模拟；同时模拟 Check and Suggestion unresolved recall 候选在不同证据阈值下自动放行会恢复多少正确官网、放出多少错误官网。旧基线目录已清理时，可用 `--labeled-details` 读取已保存的 `balance_eval_details.csv/json` 标签，对当前候选结果重新复算同一组指标。 |
+| `tools/build_balance_report.py` | 汇总 100 条有标签评估、300/全量无标签 Check and Suggestion 分布和 `simulate_pattern_release.py` 的 pattern-release 结果，生成可重复的阈值、review lane、Check and Suggestion recall 是否只能人工处理、以及是否可采用窄口证据组合放行的建议报告。 |
+| `tools/build_release_policy_report.py` | 汇总基线/候选有标签评估、pattern-release 模拟和 100/300 条应用结果，生成最终发布策略报告：阈值是否保持、原始 Check and Suggestion recall 是否只能人工处理、窄口 pattern release 是否可在风险子域 guard 下启用。 |
+| `tools/build_threshold_boundary_report.py` | 汇总阈值模拟、Check and Suggestion recall 模拟和 pattern-release 结果，明确全局接受阈值、precision watch 复核分数段，以及哪些放宽只能进入人工/Check and Suggestion 证据而不能直接自动接受。 |
 | `tools/build_calibration_status_report.py` | 汇总 calibration cycle、balance report、threshold boundary 和填表评估，输出顶层收敛状态：是否仍需人工标签、阈值是否保持、pattern release 是否只可 guarded 启用、候选 lane/rule 改动是否必须先加回归测试；同时列出校准样本路径、各 `review_reason` 标注目标、优先级和还缺多少 decisive 标签。 |
-| `tools/check_calibration_application_gate.py` | 读取 `calibration_status.json` 中的 `application_gates`，在 A 应用阈值、review lane 或 pattern-release 改动前给出可执行放行/阻断结果；默认只有 `can_apply_now=true` 才成功，`--allow-candidate` 只允许无 blocker 的 candidate gate。 |
+| `tools/check_calibration_application_gate.py` | 读取 `calibration_status.json` 中的 `application_gates`，在 Operation and Optimization 应用阈值、review lane 或 pattern-release 改动前给出可执行放行/阻断结果；默认只有 `can_apply_now=true` 才成功，`--allow-candidate` 只允许无 blocker 的 candidate gate。 |
 | `tools/apply_calibration_regression_cases.py` | 读取人工校准生成的 `calibration_regression_cases.csv` 和候选 `official_sites.csv`，只按精确 provider/URL 人工样例应用覆盖：阻断已知错误 URL、恢复已知正确 URL、生成 corrected CSV/XLSX 和 gate 报告；这是安全的人类标签覆盖层，不是泛化评分规则。 |
 | `tools/build_calibration_label_gap_task.py` | 读取 `calibration_status.json` 和校准样本，按各 lane 的 decisive-label 缺口生成更小的人工审核 CSV/XLSX，只包含继续判断收敛所需的行；支持按 priority 过滤，并在输出前置列写入审核问题、填写提示和 pattern-release 来源。 |
 | `tools/build_protected_lane_review_task.py` | 读取 `calibration_status.json`、校准样本和已填标签，生成下一轮 protected-lane 小审核 CSV/XLSX；用于 decisive 缺口已关闭但风险 lane 仍需继续抽检的阶段，会排除已填过的 provider，并默认跳过已验证的 guarded pattern-release 行。 |
 | `tools/build_protected_lane_priority_task.py` | 从 full protected-lane 审核表里自动抽取更小的均衡优先审核包，覆盖低置信 accept、unresolved recall、同名/通用名、slug extension、国家/语言、logo-only/near-match、页面不可达和缺 provider name 等边界；用于人工容量有限时先拿最有决策价值的标签。 |
-| `tools/reuse_historical_labels_for_task.py` | 对 protected-lane priority/full 审核表扫描历史人工标签文件，只从 `manual_review_combined_decisions`、`agent_human_review_regression_cases`、`agent_no_official_regression_cases` 等可信人工来源复用标签，生成预填 CSV/XLSX 和复用报告；AgentB/自动二轮结果不会被当成人工标签。 |
+| `tools/reuse_historical_labels_for_task.py` | 对 protected-lane priority/full 审核表扫描历史人工标签文件，只从 `manual_review_combined_decisions`、`agent_human_review_regression_cases`、`agent_no_official_regression_cases` 等可信人工来源复用标签，生成预填 CSV/XLSX 和复用报告；Check and Suggestion/自动二轮结果不会被当成人工标签。 |
 | `tools/verify_protected_lane_review_task.py` | protected-lane 审核表交给人工前/填回后的验证器。交付前检查必需列、重复 provider/reason、Amazon `provider_detail_url` 保留、manual 列是否为空、summary 计数是否一致，以及 XLSX 是否有可点击链接公式；填回后可用 `--allow-filled --require-filled` 检查 decision 是否只能是 accept/replace/reject/unsure，且 replace 必须填写 `manual_url`。`run_calibration_followup.py` 会对 protected-lane priority/full 填回表自动执行这类验证，失败则停止合并标签。 |
 | `tools/build_convergence_audit.py` | 读取 `calibration_status.json`、有标签 balance JSON、protected-lane 完整表 summary 和 priority task summary，输出 `convergence_audit.json/md`：明确当前阈值是否保持 75/75、review lane 是否仍需保护、guarded pattern release 是否只是受控候选，并优先提示先填 `protected_lanes_priority_task.xlsx`，再用完整 protected-lane 表决定是否降低保护通道。 |
 | `tools/run_calibration_cycle.py` | 一键生成下一轮校准材料：recall/precision 证据组合报告、recall pattern 放行模拟、protected/spot-check/more-label review lane balance report、selected actionable pattern-release set、均衡 pattern-validation 审核表、label-gap 精简审核表、high-priority-only `label_gap_high_priority_task.csv/xlsx`、protected-lane 完整审核表、`protected_lanes_priority_task.csv/xlsx` 优先审核表及两类验证报告、收敛审计 `convergence_audit.json/md`、空表评估、application gate checks 和 cycle summary；可用 `--reuse-label-path` 传入历史人工标签文件/目录，额外生成 `protected_lanes_*_prefilled.csv/xlsx`、复用报告和 allow-filled 验证报告，减少重复人工审核；有填表样本且传入 `--candidate-final-csv` 时，会额外生成 `calibration_regression_overlay_official_sites.csv/xlsx`、overlay gate 和 overlay balance，把已有人类回归样例精确应用为 corrected final 并直接报告有标签 accuracy/precision/recall；可用 `--pattern-release-json` 带入已验证的 pattern-release 模拟，避免下一轮报告和样本丢失已确认策略；也可重复传入 `--filled-sample` 合并多份已填好的样本并汇总 pattern 采纳/拒绝建议，同时输出 `pattern_rule_candidates.json/md`，把候选规则、需更多标签和必须阻断的 pattern 分开。 |
-| `tools/simulate_review_lane_output_policy.py` | 受控模拟某些 `review_reason` 通道或更窄的 AgentB evidence `--hold-pattern` 不再自动输出官网，而是临时变成 `needs_review`。可同时输出实验 CSV/XLSX、有标签 accuracy/precision/recall、回归门结果，用来判断 protected lane 是否真的适合改成生产路由规则，避免只看 precision 而忽略 over-rejected 正确官网。 |
+| `tools/simulate_review_lane_output_policy.py` | 受控模拟某些 `review_reason` 通道或更窄的 Check and Suggestion evidence `--hold-pattern` 不再自动输出官网，而是临时变成 `needs_review`。可同时输出实验 CSV/XLSX、有标签 accuracy/precision/recall、回归门结果，用来判断 protected lane 是否真的适合改成生产路由规则，避免只看 precision 而忽略 over-rejected 正确官网。 |
 | `tools/run_calibration_followup.py` | 人工填完 label-gap/sample/protected-lane/policy-validation XLSX 后的续跑入口。读取上一轮 `calibration_cycle_summary.json`，复用原输入、pattern-release、policy 和采样参数，合并新的 `--filled-sample`，并可用 `--filled-policy-validation` 合并候选策略验证表，重跑校准并写出 `calibration_followup_decision.json/md`；对 protected-lane priority/full 填回表会先自动验表并写 `filled_protected_sample_verification.json/md`，对 policy-validation 填回表会写 `filled_policy_validation_evaluation.json/md`，decision 文件会内嵌 convergence audit、filled lane recommendations、`pattern_rule_candidates` 和 policy pattern 摘要，明确当前阈值、review lane、guarded pattern release 和候选规则是否可继续调整。 |
 
 校准输出中的 `calibration_cycle_summary.json`、`calibration_status.json` 和 `convergence_audit.json` 会单独写 `delivery_recommendation`。如果其 decision 为 `use_regression_overlay_final`，当前交付文件应使用 overlay 后的 CSV/XLSX；这只是精确应用人工回归标签的输出修正，不代表阈值、review lane 或 pattern-release 规则已经可以发布。
-| `tools/mine_evidence_patterns.py` | 证据组合挖掘工具。读取有标签 balance JSON 和 AgentB 证据，找出零错误但仍需更多标签验证的候选规则，以及会释放错误官网的危险组合。 |
-| `tools/simulate_pattern_release.py` | 规则放行模拟工具。读取有标签 balance JSON、AgentB 证据和 pattern JSON，计算每个窄 pattern 如果被 A 自动放行，会恢复多少 over-rejected 正确官网、释放多少错误官网，以及 precision/recall/accuracy 的变化；同时区分纯统计安全和可解释的 actionable safe pattern，并输出 selected actionable pattern set，优先选择“身份锚点 + 佐证锚点”的零错误组合；docs/help/support/api/app/login 类子域不会计入可释放候选。 |
-| `tools/apply_pattern_release_experiment.py` | 规则放行实验应用器。不会修改默认 workflow，只复制 `official_sites.csv` 并对匹配候选 pattern 的 unresolved 行填入 AgentB candidate，优先使用 selected actionable pattern set，输出实验版 CSV/XLSX，用于再跑有标签评估；同时阻断 docs/help/support/api/app/login 类非官网主页子域。 |
-| `tools/apply_pattern_release_to_run.py` | 校准规则正式应用器。读取已验证的 pattern-release JSON 和本次 run 的 `agent_b/check.csv`，只对匹配 selected actionable pattern set 的 unresolved 行写入官网，刷新 `official_sites.csv/xlsx`、`unresolved.csv`、`quality.json`、`review_task.*` 和 manifest，并把释放行保留为 `precision_calibrated_pattern_release` 抽查项；同样阻断 docs/help/support/api/app/login 类子域。 |
-| `tools/build_policy_validation_task.py` | 候选策略验证表生成器。读取 review-lane holdout pattern、pattern-release JSON 和 AgentB 证据，只抽出被候选规则影响且还没有决定性人工标签的行，生成带 `manual_decision`、`manual_url`、`notes` 的可点击 XLSX，用于在真正改默认规则前补最少量高价值标签。 |
-| `tools/evaluate_policy_validation_task.py` | 候选策略验证表评估器。读取填好的 policy validation CSV/XLSX，区分 holdout/release 被人工支持还是阻断，并按 exact pattern 输出 `candidate_for_rule`、`needs_more_labels`、`reject_pattern`，供 A 决定是否加回归测试并吸收规则。 |
-| `tools/build_calibration_review_sample.py` | 从大批量 review task 和 AgentB 输出里抽取高价值人工标注样本，优先覆盖 timeout、AgentB reject、风险 lane accept、recall unresolved 和 unsure 行；也可通过 `--pattern-json` 优先抽取证据组合候选规则的验证样本，并用 `--max-per-pattern` 避免单个 pattern 过度占用审核量。 |
-| `tools/evaluate_calibration_review_sample.py` | 读取填好的校准样本 CSV/XLSX，按 sample reason、`review_reason` lane、AgentB decision 和 `pattern_match` 汇总人工标签；输出 lane 级保留/降级/继续采样建议，并生成结构化 `pattern_rule_candidates`，供 A 在加回归测试后再决定是否吸收规则。 |
+| `tools/mine_evidence_patterns.py` | 证据组合挖掘工具。读取有标签 balance JSON 和 Check and Suggestion 证据，找出零错误但仍需更多标签验证的候选规则，以及会释放错误官网的危险组合。 |
+| `tools/simulate_pattern_release.py` | 规则放行模拟工具。读取有标签 balance JSON、Check and Suggestion 证据和 pattern JSON，计算每个窄 pattern 如果被 Operation and Optimization 自动放行，会恢复多少 over-rejected 正确官网、释放多少错误官网，以及 precision/recall/accuracy 的变化；同时区分纯统计安全和可解释的 actionable safe pattern，并输出 selected actionable pattern set，优先选择“身份锚点 + 佐证锚点”的零错误组合；docs/help/support/api/app/login 类子域不会计入可释放候选。 |
+| `tools/apply_pattern_release_experiment.py` | 规则放行实验应用器。不会修改默认 workflow，只复制 `official_sites.csv` 并对匹配候选 pattern 的 unresolved 行填入 Check and Suggestion candidate，优先使用 selected actionable pattern set，输出实验版 CSV/XLSX，用于再跑有标签评估；同时阻断 docs/help/support/api/app/login 类非官网主页子域。 |
+| `tools/apply_pattern_release_to_run.py` | 校准规则正式应用器。读取已验证的 pattern-release JSON 和本次 run 的 `check_suggestion/check.csv`，只对匹配 selected actionable pattern set 的 unresolved 行写入官网，刷新 `official_sites.csv/xlsx`、`unresolved.csv`、`quality.json`、`review_task.*` 和 manifest，并把释放行保留为 `precision_calibrated_pattern_release` 抽查项；同样阻断 docs/help/support/api/app/login 类子域。 |
+| `tools/build_policy_validation_task.py` | 候选策略验证表生成器。读取 review-lane holdout pattern、pattern-release JSON 和 Check and Suggestion 证据，只抽出被候选规则影响且还没有决定性人工标签的行，生成带 `manual_decision`、`manual_url`、`notes` 的可点击 XLSX，用于在真正改默认规则前补最少量高价值标签。 |
+| `tools/evaluate_policy_validation_task.py` | 候选策略验证表评估器。读取填好的 policy validation CSV/XLSX，区分 holdout/release 被人工支持还是阻断，并按 exact pattern 输出 `candidate_for_rule`、`needs_more_labels`、`reject_pattern`，供 Operation and Optimization 决定是否加回归测试并吸收规则。 |
+| `tools/build_calibration_review_sample.py` | 从大批量 review task 和 Check and Suggestion 输出里抽取高价值人工标注样本，优先覆盖 timeout、Check and Suggestion reject、风险 lane accept、recall unresolved 和 unsure 行；也可通过 `--pattern-json` 优先抽取证据组合候选规则的验证样本，并用 `--max-per-pattern` 避免单个 pattern 过度占用审核量。 |
+| `tools/evaluate_calibration_review_sample.py` | 读取填好的校准样本 CSV/XLSX，按 sample reason、`review_reason` lane、Check and Suggestion decision 和 `pattern_match` 汇总人工标签；输出 lane 级保留/降级/继续采样建议，并生成结构化 `pattern_rule_candidates`，供 Operation and Optimization 在加回归测试后再决定是否吸收规则。 |
 | `tools/apply_review.py` | 人工复核后，把人工 decision 应用回已有 run。 |
 | `tests/` | 自动化测试，确保精简或改代码后 workflow 没坏。 |
 | `docs/guides/` | 给工作人员看的 PDF 教程。 |
@@ -242,9 +251,9 @@ outputs/my_run/unresolved.csv
 outputs/my_run/quality.json
 outputs/my_run/review_task.xlsx
 outputs/my_run/review_task.csv
-outputs/my_run/agent_b/check.csv
-outputs/my_run/agent_b/check.xlsx
-outputs/my_run/agent_b/suggestions.md
+outputs/my_run/check_suggestion/check.csv
+outputs/my_run/check_suggestion/check.xlsx
+outputs/my_run/check_suggestion/suggestions.md
 ```
 
 `details/input/`、`details/first_pass/`、`details/second_pass/` 保存中间证据和调试文件。新版默认只写短文件名；旧版公开文件名仍可作为读取 fallback，例如 `provider_final_official_websites_second_pass.csv` 和 `manual_official_site_review_task.xlsx`。只有设置 `FINDER_WRITE_LEGACY_ALIASES=1` 时才额外写出旧名副本。
@@ -257,8 +266,8 @@ outputs/my_run/reviewed/official_sites.xlsx
 outputs/my_run/reviewed/unresolved.csv
 outputs/my_run/reviewed/learning.md
 outputs/my_run/reviewed/labels.csv
-outputs/my_run/agent_b/suggestions.md
-outputs/my_run/agent_a/applied.json
+outputs/my_run/check_suggestion/suggestions.md
+outputs/my_run/operation_optimization/applied.json
 ```
 
 ## 本地生成但不提交的目录

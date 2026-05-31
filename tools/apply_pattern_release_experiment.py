@@ -19,7 +19,7 @@ from tools.mine_evidence_patterns import features_for_review_agent_row
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Apply evidence-pattern releases to an experimental final CSV.")
     parser.add_argument("--final-csv", required=True, help="Base official_sites.csv to copy.")
-    parser.add_argument("--agent-b-csv", required=True, help="AgentB check.csv with candidate evidence.")
+    parser.add_argument("--agent-b-csv", required=True, help="Check and Suggestion check.csv with candidate evidence.")
     parser.add_argument(
         "--pattern-json",
         action="append",

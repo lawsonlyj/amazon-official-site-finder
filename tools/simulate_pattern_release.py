@@ -13,9 +13,9 @@ from tools.mine_evidence_patterns import features_for_review_agent_row
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="Simulate narrow AgentB evidence-pattern release rules.")
+    parser = argparse.ArgumentParser(description="Simulate narrow Check and Suggestion evidence-pattern release rules.")
     parser.add_argument("--balance-json", required=True, help="Output from tools/evaluate_workflow_balance.py.")
-    parser.add_argument("--agent-b-csv", required=True, help="AgentB check.csv used by the balance run.")
+    parser.add_argument("--agent-b-csv", required=True, help="Check and Suggestion check.csv used by the balance run.")
     parser.add_argument(
         "--pattern-json",
         action="append",

@@ -97,9 +97,14 @@ def apply_pattern_release_to_run(
     quality_json_path = paths["quality_json"]
     quality_md_path = paths["quality_md"]
     xlsx_path = paths["xlsx"]
-    agent_b_csv = agent_b_paths(run_dir)["csv"]
+    agent_b_csv = first_existing(
+        run_dir,
+        agent_b_paths(run_dir)["csv"],
+        "agent_b/check.csv",
+        "agent_b_verification_results.csv",
+    ) or agent_b_paths(run_dir)["csv"]
     if not agent_b_csv.exists():
-        raise FileNotFoundError(f"AgentB check.csv not found: {agent_b_csv}")
+        raise FileNotFoundError(f"check-and-suggestion check.csv not found: {agent_b_csv}")
 
     backup_dir = _backup_outputs(
         [
@@ -176,7 +181,7 @@ def apply_pattern_release_to_run(
         "workbook": xlsx_summary,
     }
 
-    summary_path = Path(summary_json) if summary_json else run_dir / "agent_a/pattern_release_applied.json"
+    summary_path = Path(summary_json) if summary_json else run_dir / "operation_optimization/pattern_release_applied.json"
     summary_path.parent.mkdir(parents=True, exist_ok=True)
     summary_path.write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
     summary["summary_json"] = str(summary_path)

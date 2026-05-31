@@ -20,9 +20,10 @@ from tools.output_layout import (
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="Generate AgentB optimization suggestions from AgentB checks and review learning.")
+    parser = argparse.ArgumentParser(description="Generate check-and-suggestion optimization suggestions from check results and review learning.")
     parser.add_argument("--run-dir", required=True)
-    parser.add_argument("--agent-b-csv")
+    parser.add_argument("--check-csv", dest="agent_b_csv")
+    parser.add_argument("--agent-b-csv", dest="agent_b_csv")
     parser.add_argument("--learning-summary")
     parser.add_argument("--human-review", help="Optional filled human review CSV/XLSX to convert into recommendations and fixtures.")
     parser.add_argument("--output-json")
@@ -52,7 +53,8 @@ def run_agent_b_recommendations(
 ) -> dict:
     run_dir = Path(run_dir)
     agent_b_path = Path(agent_b_csv) if agent_b_csv else (
-        first_existing(run_dir, "agent_b/check.csv", "agent_b_verification_results.csv") or run_dir / "agent_b/check.csv"
+        first_existing(run_dir, "check_suggestion/check.csv", "agent_b/check.csv", "agent_b_verification_results.csv")
+        or run_dir / "check_suggestion/check.csv"
     )
     learning_path = Path(learning_summary) if learning_summary else (
         first_existing(run_dir, "reviewed/learning.json", "manual_review_learning_summary.json")
@@ -129,7 +131,7 @@ def analyze_recommendations(
                     "count": count,
                     "safe_to_apply": True,
                     "action": "add_to_excluded_domains",
-                    "reason": "Multiple AgentB rejects or known directory/platform domain.",
+                    "reason": "Multiple check-and-suggestion rejects or known directory/platform domain.",
                 }
             )
 
@@ -151,7 +153,7 @@ def analyze_recommendations(
         recommendations.append(
             {
                 "type": "threshold_review",
-                "title": "Low-score accepts confirmed by AgentB",
+                "title": "Low-score accepts confirmed by check-and-suggestion",
                 "count": len(low_score_accepts),
                 "safe_to_apply": False,
                 "action": "evaluate_strong_evidence_rule_or_threshold",
@@ -413,7 +415,7 @@ def _first(row: dict[str, str], *keys: str) -> str:
 
 def _write_markdown(path: Path, summary: dict) -> None:
     lines = [
-        "# AgentB Optimization Suggestions",
+        "# Check and Suggestion Optimization Suggestions",
         "",
         "## Overall",
         "",
@@ -578,9 +580,11 @@ def _update_manifest(path: Path, summary: dict) -> None:
     if not path.exists():
         return
     manifest = json.loads(path.read_text(encoding="utf-8"))
-    manifest["agent_b_suggestions"] = summary
-    manifest.setdefault("outputs", {}).update({f"agent_b_suggestions_{key}": value for key, value in summary["outputs"].items()})
-    manifest.setdefault("legacy_aliases", {})["agent_b_suggestions"] = summary.get("legacy_aliases", {})
+    manifest["check_suggestion_suggestions"] = summary
+    manifest.setdefault("outputs", {}).update(
+        {f"check_suggestion_suggestions_{key}": value for key, value in summary["outputs"].items()}
+    )
+    manifest.setdefault("legacy_aliases", {})["check_suggestion_suggestions"] = summary.get("legacy_aliases", {})
     path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
 
 

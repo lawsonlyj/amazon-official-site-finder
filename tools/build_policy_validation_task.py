@@ -58,7 +58,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--final-csv", required=True, help="Candidate official_sites.csv.")
     parser.add_argument("--review-task-csv", required=True, help="review_task.csv/manual_official_site_review_task.csv.")
-    parser.add_argument("--agent-b-csv", required=True, help="AgentB check.csv.")
+    parser.add_argument("--agent-b-csv", required=True, help="Check and Suggestion check.csv.")
     parser.add_argument(
         "--hold-review-reason",
         action="append",
@@ -69,13 +69,13 @@ def main(argv: list[str] | None = None) -> int:
         "--hold-pattern",
         action="append",
         default=[],
-        help="AgentB evidence feature pattern to validate as a holdout policy. Repeatable. Use 'feature AND feature'.",
+        help="Check and Suggestion evidence feature pattern to validate as a holdout policy. Repeatable. Use 'feature AND feature'.",
     )
     parser.add_argument(
         "--release-pattern",
         action="append",
         default=[],
-        help="AgentB evidence feature pattern to validate as a release policy. Repeatable.",
+        help="Check and Suggestion evidence feature pattern to validate as a release policy. Repeatable.",
     )
     parser.add_argument(
         "--release-pattern-json",

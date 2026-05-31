@@ -13,7 +13,7 @@ from tools.output_layout import agent_a_paths, first_existing, publish_agent_a_a
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="Apply only safe AgentB optimization suggestions.")
+    parser = argparse.ArgumentParser(description="Apply only safe operation optimization suggestions.")
     parser.add_argument("--run-dir", required=True)
     parser.add_argument("--recommendations-json")
     parser.add_argument("--config", default="config/scoring.json")
@@ -39,8 +39,13 @@ def apply_agent_optimizations(
 ) -> dict:
     run_dir = Path(run_dir)
     recommendations_path = Path(recommendations_json) if recommendations_json else (
-        first_existing(run_dir, "agent_b/suggestions.json", "agent_c_optimization_recommendations.json")
-        or run_dir / "agent_b/suggestions.json"
+        first_existing(
+            run_dir,
+            "check_suggestion/suggestions.json",
+            "agent_b/suggestions.json",
+            "agent_c_optimization_recommendations.json",
+        )
+        or run_dir / "check_suggestion/suggestions.json"
     )
     config_path = Path(config_path)
     data = json.loads(recommendations_path.read_text(encoding="utf-8")) if recommendations_path.exists() else {}
@@ -205,11 +210,11 @@ def _update_manifest(path: Path, summary: dict) -> None:
     if not path.exists():
         return
     manifest = json.loads(path.read_text(encoding="utf-8"))
-    manifest["agent_a_applied_optimizations"] = summary
-    manifest.setdefault("outputs", {})["agent_a_applied_optimizations_summary"] = summary.get("outputs", {}).get(
-        "applied", str(path.parent / "agent_a/applied.json")
+    manifest["operation_optimization"] = summary
+    manifest.setdefault("outputs", {})["operation_optimization_applied"] = summary.get("outputs", {}).get(
+        "applied", str(path.parent / "operation_optimization/applied.json")
     )
-    manifest.setdefault("legacy_aliases", {})["agent_a"] = summary.get("legacy_aliases", {})
+    manifest.setdefault("legacy_aliases", {})["operation_optimization"] = summary.get("legacy_aliases", {})
     path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
 
 

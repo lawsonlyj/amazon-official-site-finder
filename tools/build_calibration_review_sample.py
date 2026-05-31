@@ -49,7 +49,9 @@ SAMPLE_FIELDS = [
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="Build a high-value manual calibration sample from review and AgentB outputs.")
+    parser = argparse.ArgumentParser(
+        description="Build a high-value manual calibration sample from review and Check and Suggestion outputs."
+    )
     parser.add_argument("--review-csv", required=True)
     parser.add_argument("--agent-b-csv", required=True)
     parser.add_argument("--output-csv", required=True)

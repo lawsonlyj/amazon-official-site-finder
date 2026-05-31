@@ -292,7 +292,7 @@ def _decision_impact(row: dict[str, str], priority_reason: str) -> str:
     if review_reason == "recall_unresolved_top_candidate":
         return (
             "Accept/replace labels can justify a narrow recall rule only if rejects stay at zero; reject/unsure keeps "
-            "raw AgentB recall manual-only."
+            "raw Check and Suggestion recall manual-only."
         )
     if "logo" in priority_reason:
         return "Tests whether logo evidence can support identity only with name/service/country corroboration."

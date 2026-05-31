@@ -32,9 +32,9 @@ def main(argv: list[str] | None = None) -> int:
         "--hold-pattern",
         action="append",
         default=[],
-        help="AgentB evidence feature pattern to hold out. Repeatable. Use 'feature AND feature'.",
+        help="Check and Suggestion evidence feature pattern to hold out. Repeatable. Use 'feature AND feature'.",
     )
-    parser.add_argument("--agent-b-csv", help="AgentB check.csv, required when --hold-pattern is used.")
+    parser.add_argument("--agent-b-csv", help="Check and Suggestion check.csv, required when --hold-pattern is used.")
     parser.add_argument("--output-csv", required=True)
     parser.add_argument("--output-xlsx")
     parser.add_argument("--labeled-details", help="Optional labeled balance details CSV/JSON for metric evaluation.")

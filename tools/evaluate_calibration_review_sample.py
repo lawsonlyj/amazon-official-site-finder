@@ -231,11 +231,11 @@ def _recommendations(details: list[dict[str, str]]) -> list[str]:
     risky_accept_bad = [row for row in agent_b_accepts if row["calibration_outcome"] in {"candidate_incorrect", "recall_candidate_not_useful"}]
     if risky_accept_bad:
         recommendations.append(
-            "Keep AgentB risky accepts in manual review; human labels still show incorrect accepted candidates in risky lanes."
+            "Keep Check and Suggestion risky accepts in manual review; human labels still show incorrect accepted candidates in risky lanes."
         )
     elif len(agent_b_accepts) >= 10:
         recommendations.append(
-            "AgentB risky accepts had no labeled corrections in this sample; consider a narrow release rule only for the exact evidence pattern."
+            "Check and Suggestion risky accepts had no labeled corrections in this sample; consider a narrow release rule only for the exact evidence pattern."
         )
 
     if precision_bad:
@@ -266,7 +266,7 @@ def _recommendations(details: list[dict[str, str]]) -> list[str]:
             "Add recall examples from accepted/replaced unresolved rows to query and low-score strong-identity tests instead of lowering the global threshold."
         )
     if recall_rows and _ratio(len(recall_useful), len(recall_rows)) is not None and len(recall_useful) < len(recall_rows):
-        recommendations.append("Keep unresolved recall rows as human/AgentB evidence only; not every top candidate is useful.")
+        recommendations.append("Keep unresolved recall rows as human/Check and Suggestion evidence only; not every top candidate is useful.")
 
     timeout_rows = [row for row in decisive if row["sample_reason"] == "timeout_needs_manual" or row["reason_for_unsure"] == "agent_b_row_timeout"]
     timeout_useful = [
@@ -275,7 +275,7 @@ def _recommendations(details: list[dict[str, str]]) -> list[str]:
         if row["calibration_outcome"] in {"candidate_correct", "recall_candidate_useful"}
     ]
     if timeout_rows and _ratio(len(timeout_useful), len(timeout_rows)) and _ratio(len(timeout_useful), len(timeout_rows)) >= 0.5:
-        recommendations.append("Retry AgentB timeout rows with resume/longer timeout before manual review; many timed-out rows are useful candidates.")
+        recommendations.append("Retry Check and Suggestion timeout rows with resume/longer timeout before manual review; many timed-out rows are useful candidates.")
     elif timeout_rows:
         recommendations.append("Keep timeout rows in manual review priority; current labels do not justify auto-accepting timed-out candidates.")
 

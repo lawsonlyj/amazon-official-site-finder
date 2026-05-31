@@ -897,13 +897,13 @@ def _label_target_scenario_actions(
     if reason == "recall_unresolved_top_candidate":
         return {
             "if_clean_action": "Use accept/replace rows to mine exact recall patterns; do not lower global thresholds from this lane alone.",
-            "if_blocked_action": "Keep unresolved top candidates manual-only and add bad candidate features to AgentB/risky URL checks.",
+            "if_blocked_action": "Keep unresolved top candidates manual-only and add bad candidate features to Check and Suggestion/risky URL checks.",
             "if_unsure_action": "Keep unresolved recall rows manual-only and refine evidence fields for future review.",
         }
     if reason in protected or recommendation == "keep_review_lane":
         return {
             "if_clean_action": "Consider a narrow routing downgrade only for this exact protected lane after regression tests and no remaining label gaps.",
-            "if_blocked_action": "Keep this lane protected and add the wrong rows as regression fixtures for AgentA scoring/risk rules.",
+            "if_blocked_action": "Keep this lane protected and add the wrong rows as regression fixtures for Operation and Optimization scoring/risk rules.",
             "if_unsure_action": "Keep this lane protected; unsure labels are not decisive enough to reduce manual review.",
         }
     if recommendation == "candidate_for_review_downgrade":

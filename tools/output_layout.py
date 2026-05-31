@@ -5,7 +5,7 @@ import shutil
 from pathlib import Path
 
 
-WORKFLOW_VERSION = "agent-loop-v6.3-calibrated-release"
+WORKFLOW_VERSION = "operation-check-v6.4-calibrated-release"
 DEFAULT_SECOND_PASS_ACCEPT_THRESHOLD = 75
 DEFAULT_MATCHED_REVIEW_CONFIDENCE_CUTOFF = 83
 DEFAULT_SECOND_PASS_REVIEW_CONFIDENCE_CUTOFF = 85
@@ -59,29 +59,29 @@ def review_task_paths(run_dir: str | Path) -> dict[str, Path]:
 def agent_b_paths(run_dir: str | Path) -> dict[str, Path]:
     root = run_root(run_dir)
     return {
-        "csv": root / "agent_b/check.csv",
-        "jsonl": root / "agent_b/check.jsonl",
-        "xlsx": root / "agent_b/check.xlsx",
-        "summary": root / "agent_b/summary.json",
+        "csv": root / "check_suggestion/check.csv",
+        "jsonl": root / "check_suggestion/check.jsonl",
+        "xlsx": root / "check_suggestion/check.xlsx",
+        "summary": root / "check_suggestion/summary.json",
     }
 
 
 def agent_b_suggestion_paths(run_dir: str | Path) -> dict[str, Path]:
     root = run_root(run_dir)
     return {
-        "json": root / "agent_b/suggestions.json",
-        "md": root / "agent_b/suggestions.md",
+        "json": root / "check_suggestion/suggestions.json",
+        "md": root / "check_suggestion/suggestions.md",
     }
 
 
 def agent_a_paths(run_dir: str | Path) -> dict[str, Path]:
     root = run_root(run_dir)
     return {
-        "applied": root / "agent_a/applied.json",
-        "identity_cases": root / "agent_a/identity_cases.csv",
-        "human_cases": root / "agent_a/human_cases.csv",
-        "no_official_cases": root / "agent_a/no_official_cases.csv",
-        "reachability_cases": root / "agent_a/reachability_cases.csv",
+        "applied": root / "operation_optimization/applied.json",
+        "identity_cases": root / "operation_optimization/identity_cases.csv",
+        "human_cases": root / "operation_optimization/human_cases.csv",
+        "no_official_cases": root / "operation_optimization/no_official_cases.csv",
+        "reachability_cases": root / "operation_optimization/reachability_cases.csv",
     }
 
 
@@ -225,6 +225,10 @@ def publish_agent_b_aliases(run_dir: str | Path, paths: dict[str, Path]) -> dict
         return {}
     root = run_root(run_dir)
     aliases = {
+        "agent_b_check_csv": root / "agent_b/check.csv",
+        "agent_b_check_jsonl": root / "agent_b/check.jsonl",
+        "agent_b_check_xlsx": root / "agent_b/check.xlsx",
+        "agent_b_summary": root / "agent_b/summary.json",
         "agent_b_verification_results_csv": root / "agent_b_verification_results.csv",
         "agent_b_verification_results_jsonl": root / "agent_b_verification_results.jsonl",
         "agent_b_verification_results_xlsx": root / "agent_b_verification_results.xlsx",
@@ -232,6 +236,10 @@ def publish_agent_b_aliases(run_dir: str | Path, paths: dict[str, Path]) -> dict
     }
     copy_aliases(
         [
+            (paths["csv"], aliases["agent_b_check_csv"]),
+            (paths["jsonl"], aliases["agent_b_check_jsonl"]),
+            (paths["xlsx"], aliases["agent_b_check_xlsx"]),
+            (paths["summary"], aliases["agent_b_summary"]),
             (paths["csv"], aliases["agent_b_verification_results_csv"]),
             (paths["jsonl"], aliases["agent_b_verification_results_jsonl"]),
             (paths["xlsx"], aliases["agent_b_verification_results_xlsx"]),
@@ -246,11 +254,15 @@ def publish_agent_b_suggestion_aliases(run_dir: str | Path, paths: dict[str, Pat
         return {}
     root = run_root(run_dir)
     aliases = {
+        "agent_b_suggestions_json": root / "agent_b/suggestions.json",
+        "agent_b_suggestions_md": root / "agent_b/suggestions.md",
         "agent_c_optimization_recommendations_json": root / "agent_c_optimization_recommendations.json",
         "agent_c_optimization_recommendations_md": root / "agent_c_optimization_recommendations.md",
     }
     copy_aliases(
         [
+            (paths["json"], aliases["agent_b_suggestions_json"]),
+            (paths["md"], aliases["agent_b_suggestions_md"]),
             (paths["json"], aliases["agent_c_optimization_recommendations_json"]),
             (paths["md"], aliases["agent_c_optimization_recommendations_md"]),
         ]
@@ -263,6 +275,11 @@ def publish_agent_a_aliases(run_dir: str | Path, paths: dict[str, Path]) -> dict
         return {}
     root = run_root(run_dir)
     aliases = {
+        "agent_a_applied": root / "agent_a/applied.json",
+        "agent_a_identity_cases": root / "agent_a/identity_cases.csv",
+        "agent_a_human_cases": root / "agent_a/human_cases.csv",
+        "agent_a_no_official_cases": root / "agent_a/no_official_cases.csv",
+        "agent_a_reachability_cases": root / "agent_a/reachability_cases.csv",
         "agent_a_applied_optimizations_summary": root / "agent_a_applied_optimizations_summary.json",
         "agent_identity_constraint_regression_cases": root / "agent_identity_constraint_regression_cases.csv",
         "agent_human_review_regression_cases": root / "agent_human_review_regression_cases.csv",
@@ -271,6 +288,11 @@ def publish_agent_a_aliases(run_dir: str | Path, paths: dict[str, Path]) -> dict
     }
     copy_aliases(
         [
+            (paths["applied"], aliases["agent_a_applied"]),
+            (paths["identity_cases"], aliases["agent_a_identity_cases"]),
+            (paths["human_cases"], aliases["agent_a_human_cases"]),
+            (paths["no_official_cases"], aliases["agent_a_no_official_cases"]),
+            (paths["reachability_cases"], aliases["agent_a_reachability_cases"]),
             (paths["applied"], aliases["agent_a_applied_optimizations_summary"]),
             (paths["identity_cases"], aliases["agent_identity_constraint_regression_cases"]),
             (paths["human_cases"], aliases["agent_human_review_regression_cases"]),

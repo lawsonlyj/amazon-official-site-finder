@@ -160,7 +160,7 @@ def _current_threshold_simulation(simulations: list[dict]) -> dict:
 
 def _recall_release_recommendation(simulations: list[dict]) -> dict:
     if not simulations:
-        return {"recommendation": "not_evaluated", "reason": "No AgentB recall release simulation data."}
+        return {"recommendation": "not_evaluated", "reason": "No Check and Suggestion recall release simulation data."}
     zero_wrong = [
         row
         for row in simulations
@@ -176,7 +176,7 @@ def _recall_release_recommendation(simulations: list[dict]) -> dict:
             "threshold": chosen.get("agent_b_evidence_threshold"),
             "correct_recovery_rows": chosen.get("correct_recovery_rows"),
             "wrong_release_rows": chosen.get("wrong_release_rows"),
-            "reason": "A simulated AgentB evidence threshold recovers labeled official sites without releasing labeled wrong candidates.",
+            "reason": "A simulated Check and Suggestion evidence threshold recovers labeled official sites without releasing labeled wrong candidates.",
             "chosen": chosen,
         }
     best = max(
@@ -192,7 +192,7 @@ def _recall_release_recommendation(simulations: list[dict]) -> dict:
         "threshold": best.get("agent_b_evidence_threshold"),
         "correct_recovery_rows": best.get("correct_recovery_rows"),
         "wrong_release_rows": best.get("wrong_release_rows"),
-        "reason": "Every simulated AgentB recall-release threshold releases at least one labeled wrong candidate; keep recall candidates manual-only.",
+        "reason": "Every simulated Check and Suggestion recall-release threshold releases at least one labeled wrong candidate; keep recall candidates manual-only.",
         "chosen": best,
     }
 
@@ -384,12 +384,12 @@ def _recommendations(
         names = ", ".join(row["review_reason"] for row in lane_policy["needs_more_labels"])
         out.append(f"Collect more labels before changing low-evidence review lanes: {names}.")
     if overall.get("agent_b_false_official_accept_rate") == 0.0:
-        out.append("Keep AgentB conservative on high-risk rows; it is not releasing labeled false official rows.")
+        out.append("Keep Check and Suggestion conservative on high-risk rows; it is not releasing labeled false official rows.")
     if recall_release.get("recommendation") == "manual_only":
-        out.append("Keep AgentB unresolved recall candidates manual-only; simulated auto-release would add labeled wrong official URLs.")
+        out.append("Keep Check and Suggestion unresolved recall candidates manual-only; simulated auto-release would add labeled wrong official URLs.")
     elif recall_release.get("recommendation") == "narrow_auto_release_candidate":
         out.append(
-            f"Consider a narrow AgentB recall release at evidence threshold {recall_release.get('threshold')} after adding regression tests."
+            f"Consider a narrow Check and Suggestion recall release at evidence threshold {recall_release.get('threshold')} after adding regression tests."
         )
     if pattern_release.get("recommendation") == "narrow_pattern_release_candidate":
         out.append(
@@ -403,7 +403,7 @@ def _recommendations(
     if batch_review.get("review_rate") and batch_review["review_rate"] > 0.4:
         out.append("Review workload is high on the batch sample; require more labels before widening review lanes.")
     if batch_agent_b.get("timeout_rate") and batch_agent_b["timeout_rate"] > 0.1:
-        out.append("Use AgentB row timeout/resume for batch checks and treat timeout rows as manual-review priority.")
+        out.append("Use Check and Suggestion row timeout/resume for batch checks and treat timeout rows as manual-review priority.")
     if batch_agent_b.get("replace_rate") == 0:
         out.append("Keep replacement candidates as evidence-only for high-risk review tasks.")
     return out
@@ -431,7 +431,7 @@ def _render_markdown(report: dict) -> str:
             f"- Over-rejected rows: {summary.get('over_rejected_rows')}",
             f"- Manual review rows: {summary.get('manual_review_rows')}",
             f"- Manual false-official capture rate: {summary.get('manual_review_false_official_capture_rate')}",
-            f"- AgentB false-official accept rate: {summary.get('agent_b_false_official_accept_rate')}",
+            f"- Check and Suggestion false-official accept rate: {summary.get('agent_b_false_official_accept_rate')}",
             f"- Protected review lanes: {summary.get('protected_review_lane_count')}",
             f"- Protected review lane rows: {summary.get('protected_review_lane_rows')}",
             "",
@@ -439,9 +439,9 @@ def _render_markdown(report: dict) -> str:
             "",
             f"- Recommended threshold: {summary.get('recommended_threshold')}",
             f"- Reason: {summary.get('recommended_threshold_reason')}",
-            f"- AgentB recall release: {summary.get('recommended_agent_b_recall_release')}",
-            f"- AgentB recall release threshold: {summary.get('recommended_agent_b_recall_release_threshold')}",
-            f"- AgentB recall release correct/wrong rows: {summary.get('agent_b_recall_release_correct_rows')}/{summary.get('agent_b_recall_release_wrong_rows')}",
+            f"- Check and Suggestion recall release: {summary.get('recommended_agent_b_recall_release')}",
+            f"- Check and Suggestion recall release threshold: {summary.get('recommended_agent_b_recall_release_threshold')}",
+            f"- Check and Suggestion recall release correct/wrong rows: {summary.get('agent_b_recall_release_correct_rows')}/{summary.get('agent_b_recall_release_wrong_rows')}",
             f"- Pattern release: {summary.get('recommended_pattern_release')}",
             f"- Pattern release source: {summary.get('pattern_release_source_path') or 'not_evaluated'}",
             f"- Pattern release correct/wrong rows: {summary.get('pattern_release_correct_rows')}/{summary.get('pattern_release_wrong_rows')}",
@@ -451,9 +451,9 @@ def _render_markdown(report: dict) -> str:
             "",
             f"- Review rows: {summary.get('batch_review_rows')}",
             f"- Review rate: {summary.get('batch_review_rate')}",
-            f"- AgentB rows: {summary.get('batch_agent_b_rows')}",
-            f"- AgentB unsure rate: {summary.get('batch_agent_b_unsure_rate')}",
-            f"- AgentB timeout rows: {summary.get('batch_agent_b_timeout_rows')}",
+            f"- Check and Suggestion rows: {summary.get('batch_agent_b_rows')}",
+            f"- Check and Suggestion unsure rate: {summary.get('batch_agent_b_unsure_rate')}",
+            f"- Check and Suggestion timeout rows: {summary.get('batch_agent_b_timeout_rows')}",
             "",
             "## Review Lanes",
             "",
@@ -496,12 +496,12 @@ def _render_markdown(report: dict) -> str:
                     labeled=row.get("labeled_rows"),
                 )
             )
-    lines.extend(["", "## AgentB Decisions", ""])
+    lines.extend(["", "## Check and Suggestion Decisions", ""])
     for reason, counts in report.get("batch_agent_b", {}).get("reason_decision_counts", {}).items():
         parts = ", ".join(f"{key}={value}" for key, value in counts.items())
         lines.append(f"- {reason}: {parts}")
     if report.get("agent_b_recall_release_simulations"):
-        lines.extend(["", "## AgentB Recall Release Simulation", ""])
+        lines.extend(["", "## Check and Suggestion Recall Release Simulation", ""])
         for row in report["agent_b_recall_release_simulations"]:
             lines.append(
                 "- threshold {threshold}: release={release}, correct={correct}, wrong={wrong}, precision={precision}".format(

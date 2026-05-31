@@ -60,7 +60,7 @@ SUPPORTING_PATHS = ["/", "/about", "/contact", "/services", "/privacy", "/terms"
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="Run AgentB candidate-first official-site verification.")
+    parser = argparse.ArgumentParser(description="Run check-and-suggestion candidate-first official-site verification.")
     parser.add_argument("--run-dir", required=True)
     parser.add_argument("--config", default="config/scoring.json")
     parser.add_argument("--output-csv")
@@ -135,7 +135,7 @@ def run_agent_b_verification(
             json_rows.append(existing_json.get(key) or _details_from_output_row(existing_rows[key]))
             resumed_rows += 1
             continue
-        print(f"agent-b {index}/{len(rows)} {row.get('provider_name', '')}", file=sys.stderr)
+        print(f"check-suggestion {index}/{len(rows)} {row.get('provider_name', '')}", file=sys.stderr)
         result = _verify_row_with_timeout(row, config=config, per_query=per_query, row_timeout=row_timeout)
         result_rows.append(result["row"])
         json_rows.append(result["details"])
@@ -148,7 +148,7 @@ def run_agent_b_verification(
 
     xlsx_summary = {}
     if write_xlsx:
-        xlsx_summary = build_workbook([("AgentB_Verification", output_csv_path)], output_xlsx_path)
+        xlsx_summary = build_workbook([("Check_Suggestion", output_csv_path)], output_xlsx_path)
 
     summary = {
         "workflow_version": WORKFLOW_VERSION,
@@ -254,7 +254,7 @@ def _verify_row_with_timeout(row: dict[str, str], *, config: dict, per_query: in
         if process.is_alive():
             process.kill()
             process.join(1)
-        print(f"warning: AgentB row timed out after {row_timeout}s: {row.get('provider_name', '')}", file=sys.stderr)
+        print(f"warning: check-and-suggestion row timed out after {row_timeout}s: {row.get('provider_name', '')}", file=sys.stderr)
         return _timeout_result(row, row_timeout)
     try:
         message = output_queue.get(timeout=1)
@@ -263,7 +263,7 @@ def _verify_row_with_timeout(row: dict[str, str], *, config: dict, per_query: in
     if message.get("ok"):
         return message["result"]
     print(
-        f"warning: AgentB row failed: {message.get('error_type', 'error')}: {message.get('error', '')}",
+        f"warning: check-and-suggestion row failed: {message.get('error_type', 'error')}: {message.get('error', '')}",
         file=sys.stderr,
     )
     return _timeout_result(row, row_timeout, reason=f"agent_b_row_error:{message.get('error_type', 'error')}")
@@ -303,7 +303,9 @@ def _timeout_result(row: dict[str, str], row_timeout: int, *, reason: str = "age
         "supporting_facts": "",
         "counter_evidence": reason,
         "reason_for_unsure": reason,
-        "notes": f"AgentB unsure: row timed out after {row_timeout}s" if reason == "agent_b_row_timeout" else f"AgentB unsure: {reason}",
+        "notes": f"Check-and-suggestion unsure: row timed out after {row_timeout}s"
+        if reason == "agent_b_row_timeout"
+        else f"Check-and-suggestion unsure: {reason}",
         "independent_search_queries": "; ".join(search_queries),
         "replacement_url": "",
         "replacement_domain": "",
@@ -780,16 +782,16 @@ def _is_recall_review_reason(reason: str) -> bool:
 
 def _notes_for(decision: str, candidate: dict, replacement: dict[str, str]) -> str:
     if decision == "replace":
-        return f"AgentB replacement: {replacement.get('facts', '')}".strip()
+        return f"Check-and-suggestion replacement: {replacement.get('facts', '')}".strip()
     facts = candidate.get("supporting_facts") or candidate.get("counter_evidence") or []
-    return f"AgentB {decision}: {'; '.join(facts[:5])}".strip()
+    return f"Check-and-suggestion {decision}: {'; '.join(facts[:5])}".strip()
 
 
 def _safe_collect(queries: list[str], *, per_query: int) -> list[SearchCandidate]:
     try:
         return collect_candidates_for_queries(queries, per_query=per_query)
     except Exception as exc:
-        print(f"warning: AgentB independent search failed: {type(exc).__name__}: {exc}", file=sys.stderr)
+        print(f"warning: check-and-suggestion independent search failed: {type(exc).__name__}: {exc}", file=sys.stderr)
         return []
 
 
@@ -921,14 +923,16 @@ def _has_identity_gap(provider: dict[str, str], combined_text: str, supporting_f
 
 def _max_pages_to_fetch() -> int:
     try:
-        return max(1, int(os.getenv("FINDER_AGENT_B_MAX_PAGES", "4")))
+        value = os.getenv("FINDER_CHECK_SUGGESTION_MAX_PAGES") or os.getenv("FINDER_AGENT_B_MAX_PAGES", "4")
+        return max(1, int(value))
     except ValueError:
         return 4
 
 
 def _default_row_timeout() -> int:
     try:
-        return max(0, int(os.getenv("FINDER_AGENT_B_ROW_TIMEOUT", "0")))
+        value = os.getenv("FINDER_CHECK_SUGGESTION_ROW_TIMEOUT") or os.getenv("FINDER_AGENT_B_ROW_TIMEOUT", "0")
+        return max(0, int(value))
     except ValueError:
         return 0
 
@@ -1049,9 +1053,9 @@ def _update_manifest(path: Path, summary: dict) -> None:
     if not path.exists():
         return
     manifest = json.loads(path.read_text(encoding="utf-8"))
-    manifest["agent_b_verification"] = summary
-    manifest.setdefault("outputs", {}).update({f"agent_b_{key}": value for key, value in summary["outputs"].items()})
-    manifest.setdefault("legacy_aliases", {})["agent_b"] = summary.get("legacy_aliases", {})
+    manifest["check_suggestion_verification"] = summary
+    manifest.setdefault("outputs", {}).update({f"check_suggestion_{key}": value for key, value in summary["outputs"].items()})
+    manifest.setdefault("legacy_aliases", {})["check_suggestion"] = summary.get("legacy_aliases", {})
     path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
 
 

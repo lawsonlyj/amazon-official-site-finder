@@ -4,7 +4,7 @@ LABELS ?= tests/fixtures/golden_expected_websites.csv
 REVIEW ?=
 PYTHONPATH_VALUE ?= .vendor_eval:.
 
-.PHONY: help test install-optional pipeline second-pass review-task agent-b review-learning agent-b-suggestions agent-c apply-agent-optimizations verify
+.PHONY: help test install-optional pipeline second-pass review-task check-suggestion agent-b review-learning check-suggestions agent-b-suggestions agent-c apply-operation-optimizations apply-agent-optimizations verify
 
 help:
 	@echo "Targets:"
@@ -13,10 +13,10 @@ help:
 	@echo "  pipeline          Run full workflow; requires SOURCE_CSV=/path/to/input.csv"
 	@echo "  second-pass       Re-run unresolved second-pass for RUN_DIR"
 	@echo "  review-task       Rebuild simplified manual review CSV/XLSX for RUN_DIR"
-	@echo "  agent-b           Run candidate-first verification for RUN_DIR"
+	@echo "  check-suggestion  Run candidate-first high-risk checks for RUN_DIR"
 	@echo "  review-learning   Apply filled REVIEW=/path/to/review.xlsx and write learning report"
-	@echo "  agent-b-suggestions Generate AgentB optimization suggestions for RUN_DIR"
-	@echo "  apply-agent-optimizations Apply safe AgentB config suggestions"
+	@echo "  check-suggestions Generate Check and Suggestion optimization suggestions for RUN_DIR"
+	@echo "  apply-operation-optimizations Apply safe operation optimization suggestions"
 	@echo "  verify            Verify final handoff outputs for RUN_DIR"
 	@echo ""
 	@echo "Example:"
@@ -64,10 +64,12 @@ review-task:
 	  --run-dir "$(RUN_DIR)" \
 	  --write-xlsx
 
-agent-b:
+check-suggestion:
 	PYTHONPATH=$(PYTHONPATH_VALUE) python3 tools/run_agent_b_verification.py \
 	  --run-dir "$(RUN_DIR)" \
 	  --write-xlsx
+
+agent-b: check-suggestion
 
 review-learning:
 	@if [ -z "$(REVIEW)" ]; then echo "Set REVIEW=/path/to/filled_manual_review.csv-or.xlsx"; exit 2; fi
@@ -78,16 +80,20 @@ review-learning:
 	  --write-xlsx \
 	  --update-config
 
-agent-b-suggestions:
+check-suggestions:
 	PYTHONPATH=$(PYTHONPATH_VALUE) python3 tools/run_agent_b_recommendations.py \
 	  --run-dir "$(RUN_DIR)"
 
-agent-c: agent-b-suggestions
+agent-b-suggestions: check-suggestions
 
-apply-agent-optimizations:
+agent-c: check-suggestions
+
+apply-operation-optimizations:
 	PYTHONPATH=$(PYTHONPATH_VALUE) python3 tools/apply_agent_optimizations.py \
 	  --run-dir "$(RUN_DIR)" \
 	  --apply
+
+apply-agent-optimizations: apply-operation-optimizations
 
 verify:
 	python3 tools/verify_run_outputs.py \

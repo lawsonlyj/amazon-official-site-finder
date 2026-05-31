@@ -169,7 +169,7 @@ def _recommendations(
     ]
     if raw_agent_b_wrong > 0:
         out.append(
-            f"Do not auto-release unresolved rows by raw AgentB score: the labeled simulation recovers {raw_agent_b_correct} correct row(s) but releases {raw_agent_b_wrong} wrong row(s)."
+            f"Do not auto-release unresolved rows by raw Check and Suggestion score: the labeled simulation recovers {raw_agent_b_correct} correct row(s) but releases {raw_agent_b_wrong} wrong row(s)."
         )
     if calibrated_policy.startswith("enabled_with_guard"):
         out.append(

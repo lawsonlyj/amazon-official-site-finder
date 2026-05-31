@@ -12,9 +12,9 @@ Usage:
 Optional:
   --run-dir outputs/my_run
   --labels /path/to/golden_expected_websites.csv
-  --run-agent-b
-  --apply-agent-optimizations
-  --agent-b-limit N
+  --run-check-suggestion
+  --apply-operation-optimizations
+  --check-limit N
   --human-review /path/to/filled_review.xlsx
   --pattern-release-json /path/to/pattern_release_simulation.json
 USAGE
@@ -25,9 +25,9 @@ EXA_KEY_FILE=""
 SOURCE_CSV=""
 RUN_DIR=""
 LABELS_CSV=""
-RUN_AGENT_B=0
-APPLY_AGENT_OPTIMIZATIONS=0
-AGENT_B_LIMIT=0
+RUN_CHECK_SUGGESTION=0
+APPLY_OPERATION_OPTIMIZATIONS=0
+CHECK_LIMIT=0
 HUMAN_REVIEW_FILE=""
 PATTERN_RELEASE_JSONS=()
 
@@ -53,27 +53,27 @@ while [[ $# -gt 0 ]]; do
       LABELS_CSV="${2:-}"
       shift 2
       ;;
-    --run-agent-b)
-      RUN_AGENT_B=1
+    --run-check-suggestion|--run-agent-b)
+      RUN_CHECK_SUGGESTION=1
       shift
       ;;
-    --apply-agent-optimizations)
-      APPLY_AGENT_OPTIMIZATIONS=1
-      RUN_AGENT_B=1
+    --apply-operation-optimizations|--apply-agent-optimizations)
+      APPLY_OPERATION_OPTIMIZATIONS=1
+      RUN_CHECK_SUGGESTION=1
       shift
       ;;
-    --agent-b-limit)
-      AGENT_B_LIMIT="${2:-0}"
+    --check-limit|--agent-b-limit)
+      CHECK_LIMIT="${2:-0}"
       shift 2
       ;;
     --human-review)
       HUMAN_REVIEW_FILE="${2:-}"
-      RUN_AGENT_B=1
+      RUN_CHECK_SUGGESTION=1
       shift 2
       ;;
     --pattern-release-json)
       PATTERN_RELEASE_JSONS+=("${2:-}")
-      RUN_AGENT_B=1
+      RUN_CHECK_SUGGESTION=1
       shift 2
       ;;
     -h|--help)
@@ -110,13 +110,13 @@ WORKFLOW_ARGS=("$SOURCE_CSV" "$RUN_DIR")
 if [[ -n "$LABELS_CSV" ]]; then
   WORKFLOW_ARGS+=("$LABELS_CSV")
 fi
-if [[ "$RUN_AGENT_B" == "1" ]]; then
-  WORKFLOW_ARGS+=(--run-agent-b)
-  if [[ "$APPLY_AGENT_OPTIMIZATIONS" == "1" ]]; then
-    WORKFLOW_ARGS+=(--apply-agent-optimizations)
+if [[ "$RUN_CHECK_SUGGESTION" == "1" ]]; then
+  WORKFLOW_ARGS+=(--run-check-suggestion)
+  if [[ "$APPLY_OPERATION_OPTIMIZATIONS" == "1" ]]; then
+    WORKFLOW_ARGS+=(--apply-operation-optimizations)
   fi
-  if [[ "$AGENT_B_LIMIT" != "0" ]]; then
-    WORKFLOW_ARGS+=(--agent-b-limit "$AGENT_B_LIMIT")
+  if [[ "$CHECK_LIMIT" != "0" ]]; then
+    WORKFLOW_ARGS+=(--check-limit "$CHECK_LIMIT")
   fi
   if [[ -n "$HUMAN_REVIEW_FILE" ]]; then
     WORKFLOW_ARGS+=(--human-review "$HUMAN_REVIEW_FILE")
