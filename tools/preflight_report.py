@@ -426,7 +426,7 @@ def _recommended_commands(
         ),
         "review_learning_after_manual_fill": (
             f"PYTHONPATH=.vendor_eval:. python3 tools/run_review_learning.py --run-dir {run_dir} "
-            f"--review {run_dir / 'review_task.xlsx'} --write-xlsx --update-config"
+            f"--review {run_dir / 'review_task.xlsx'} --write-xlsx"
             + (f" --labels {labels_csv}" if labels_csv else "")
         ),
     }

@@ -3,6 +3,7 @@ set -euo pipefail
 
 if [[ $# -lt 2 ]]; then
   echo "Usage: ./run_review_cycle.sh outputs/run_dir /path/to/filled_manual_review.csv-or.xlsx [labels.csv] [--update-config]" >&2
+  echo "Note: --update-config is a maintainer/development option; normal users should omit it." >&2
   exit 2
 fi
 
@@ -48,8 +49,8 @@ fi
 
 PYTHONPATH=.vendor_eval:. python3 tools/run_review_learning.py "${ARGS[@]}"
 
-PYTHONPATH=.vendor_eval:. python3 tools/run_agent_b_recommendations.py --run-dir "$RUN_DIR" --human-review "$REVIEW_FILE"
 if [[ "$UPDATE_CONFIG" == "1" ]]; then
+  PYTHONPATH=.vendor_eval:. python3 tools/run_agent_b_recommendations.py --run-dir "$RUN_DIR" --human-review "$REVIEW_FILE"
   PYTHONPATH=.vendor_eval:. python3 tools/apply_agent_optimizations.py --run-dir "$RUN_DIR" --apply
 fi
 
@@ -64,7 +65,7 @@ echo "Done."
 echo "Reviewed final CSV: $RUN_DIR/reviewed/official_sites.csv"
 echo "Reviewed clickable XLSX: $RUN_DIR/reviewed/official_sites.xlsx"
 echo "Learning report: $RUN_DIR/reviewed/learning.md"
-echo "Suggestions: $RUN_DIR/check_suggestion/suggestions.md"
 if [[ "$UPDATE_CONFIG" == "1" ]]; then
+  echo "Suggestions: $RUN_DIR/check_suggestion/suggestions.md"
   echo "Operation optimization: enabled for safe repeated patterns."
 fi

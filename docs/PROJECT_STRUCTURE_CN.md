@@ -137,10 +137,10 @@ notes：可选，写判断依据
 Use amazon-official-site-finder skill.
 Run directory: outputs/my_run
 Filled review file: outputs/my_run/review_task.xlsx
-Please apply the review feedback, optimize the workflow where safe, verify everything, and report the final output files.
+Please apply the review feedback, verify everything, and report the final output files.
 ```
 
-Codex 会在内部调用 `run_review_cycle.sh`，读取学习报告，执行安全的规则优化，并输出最终 reviewed 文件。
+Codex 会在内部调用 `run_review_cycle.sh`，读取复核表并输出最终 reviewed 文件。只有维护者明确要求开发优化时，才额外使用 `--update-config`、Check and Suggestion 和 Operation and Optimization。
 
 ## 文件运行顺序
 
@@ -160,9 +160,9 @@ run_codex_assisted.sh
            -> tools/plan_unresolved_second_pass.py
            -> tools/build_linked_workbook.py
      -> tools/build_manual_review_task.py
-     -> 可选 Check and Suggestion：tools/run_agent_b_verification.py + tools/run_agent_b_recommendations.py
+     -> 开发流程可选 Check and Suggestion：tools/run_agent_b_verification.py + tools/run_agent_b_recommendations.py
         -> 可选读取 filled human-review XLSX，生成 notes 分类、无官网标签和回归样例建议
-     -> 可选 Operation and Optimization 安全应用：tools/apply_agent_optimizations.py --apply
+     -> 开发流程可选 Operation and Optimization 安全应用：tools/apply_agent_optimizations.py --apply
      -> tools/verify_run_outputs.py
 ```
 
@@ -170,22 +170,19 @@ run_codex_assisted.sh
 
 ```text
 Codex receives filled manual review workbook
-  -> run_review_cycle.sh --update-config
+  -> run_review_cycle.sh
   -> tools/run_review_learning.py
      -> 合并 second-pass 决策和人工填写结果
      -> 重新生成 reviewed final/unresolved
      -> 生成 reviewed/labels.csv
      -> 重新跑 quality gate
      -> 生成 reviewed/learning.md
-     -> 对重复出现且安全的排除域名更新 config/scoring.json
      -> tools/build_linked_workbook.py
-  -> tools/run_agent_b_recommendations.py
-     -> 汇总 Check and Suggestion、人工复核 XLSX 和学习报告里的重复模式
-  -> tools/apply_agent_optimizations.py --apply
-     -> 只应用安全、可解释的 excluded_domains 更新，并写出 human/identity/no_official/reachability 回归样例
   -> tools/verify_run_outputs.py
   -> Codex 读取 learning report 并汇报最终输出
 ```
+
+如果维护者明确要求开发优化，则改用 `run_review_cycle.sh --update-config`，再额外运行 Check and Suggestion 建议和 Operation and Optimization 安全吸收。
 
 ### 每个关键文件做什么
 
@@ -251,9 +248,6 @@ outputs/my_run/unresolved.csv
 outputs/my_run/quality.json
 outputs/my_run/review_task.xlsx
 outputs/my_run/review_task.csv
-outputs/my_run/check_suggestion/check.csv
-outputs/my_run/check_suggestion/check.xlsx
-outputs/my_run/check_suggestion/suggestions.md
 ```
 
 `details/input/`、`details/first_pass/`、`details/second_pass/` 保存中间证据和调试文件。新版默认只写短文件名；旧版公开文件名仍可作为读取 fallback，例如 `provider_final_official_websites_second_pass.csv` 和 `manual_official_site_review_task.xlsx`。只有设置 `FINDER_WRITE_LEGACY_ALIASES=1` 时才额外写出旧名副本。
@@ -266,6 +260,13 @@ outputs/my_run/reviewed/official_sites.xlsx
 outputs/my_run/reviewed/unresolved.csv
 outputs/my_run/reviewed/learning.md
 outputs/my_run/reviewed/labels.csv
+```
+
+开发流程额外输出：
+
+```text
+outputs/my_run/check_suggestion/check.csv
+outputs/my_run/check_suggestion/check.xlsx
 outputs/my_run/check_suggestion/suggestions.md
 outputs/my_run/operation_optimization/applied.json
 ```

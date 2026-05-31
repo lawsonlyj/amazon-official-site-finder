@@ -9,12 +9,12 @@ Use this skill to operate the `amazon-official-site-finder` workflow. The workfl
 
 ## Workflow Terminology
 
-Use the current public names in user-facing responses:
+Separate two modes in user-facing responses:
 
-- **Operation and Optimization**: the structured main workflow plus safe optimization application.
-- **Check and Suggestion**: high-risk row verification, DOM/evidence collection, and suggestion generation.
+- **Workflow Body**: normal reusable workflow for GitHub users. It runs structured search, scoring, second-pass, review task generation, output verification, and reviewed output generation. This is the default.
+- **Development Workflow**: maintainer workflow for calibration and improvement. It can add Operation and Optimization, Check and Suggestion, human high-value labels, regression fixtures, and deterministic gates.
 
-Legacy script names still include `agent_b` and `agent_optimizations` for compatibility. Do not describe the current default workflow as autonomous multi-agent execution unless an LLM agent layer is explicitly added.
+Legacy script names still include `agent_b` and `agent_optimizations` for compatibility. Do not describe the normal Workflow Body as autonomous multi-agent execution. Only use Development Workflow tools when the user explicitly asks to optimize, calibrate, compare rules, run Check and Suggestion, or work on maintainer/development flow.
 
 ## Default User Experience
 
@@ -38,7 +38,7 @@ Run directory: outputs/my_run
 Filled review file: /path/to/review_task.xlsx
 ```
 
-Then Codex should apply the feedback, run safe workflow optimization from the learning report, verify the reviewed outputs, and report the final reviewed files. Do not ask the user to run `run_review_cycle.sh` themselves.
+Then Codex should apply the feedback, verify the reviewed outputs, and report the final reviewed files. Do not ask the user to run `run_review_cycle.sh` themselves.
 
 Never print API key contents. Avoid showing `.env` values. If a key file path is missing or unreadable, ask only for the missing path.
 
@@ -73,15 +73,12 @@ Run this from the repo root. Substitute the paths provided by the user.
   --brave-key-file "/path/to/brave_key.txt" \
   --exa-key-file "/path/to/exa_key.txt" \
   --source "/path/to/provider_details.csv" \
-  --run-dir "outputs/my_run" \
-  --run-check-suggestion
+  --run-dir "outputs/my_run"
 ```
 
 This command creates/updates `.env` and then runs the full workflow. The configure step prints only a boolean summary and must not print secrets.
 If the user did not provide an output directory, omit `--run-dir`; the script will create `outputs/codex_run_YYYYMMDD_HHMMSS`.
-Use `--run-check-suggestion` when the user asks for the Check and Suggestion loop or candidate-first verification. Check and Suggestion checks only high-risk rows by default, writes verification evidence plus suggestions, and uses structured DOM evidence from candidate pages: title/meta, H1/H2, nav/footer, mailto/tel links, JSON-LD/schema.org Organization, page-role hints, page-risk hints, country/location corroboration, service consistency, and high-similarity Amazon listing logo matches as positive identity evidence. Logo-only evidence is review risk, not an automatic accept. It only runs lightweight independent search when candidate evidence is weak or conflicting. Ambiguous-name candidates can still auto-accept when page-level provider identity and marketplace/service evidence agree, which avoids excessive unresolved rows; however specific high-confidence `consulting`/`seller` style names and slug-extended domains without exact logo corroboration are still sent to Check and Suggestion/manual review, and Check and Suggestion keeps 70-84 score rows in those lanes as `unsure`. High-confidence second-pass accepts at 85+ are not included in the default review task. For rows coming from `review_task`, it keeps recall and replacement candidates as evidence but does not auto-fill a `replace` decision. `--human-review /path/to/filled_review.xlsx` lets it use filled human review notes, including no-official labels, as regression evidence. Add `--apply-operation-optimizations` when Operation and Optimization should apply only safe recommendations and write regression artifacts. New runs write short canonical filenames by default; legacy names and flags are read as fallback and can be written with `FINDER_WRITE_LEGACY_ALIASES=1`.
-
-For large Check and Suggestion runs, use `python3 tools/run_agent_b_verification.py --run-dir outputs/my_run --resume --write-xlsx` so progress is written incrementally and interrupted runs can continue. The script keeps its legacy filename for compatibility. For batch validation, add `--row-timeout 15 --per-query 1` to mark slow rows `unsure` rather than letting one site block the whole run.
+New runs write short canonical filenames by default; legacy names and flags are read as fallback and can be written with `FINDER_WRITE_LEGACY_ALIASES=1`.
 
 If you need to run the two steps separately:
 
@@ -111,9 +108,6 @@ outputs/my_run/unresolved.csv
 outputs/my_run/quality.json
 outputs/my_run/review_task.csv
 outputs/my_run/review_task.xlsx
-outputs/my_run/check_suggestion/check.csv
-outputs/my_run/check_suggestion/check.xlsx
-outputs/my_run/check_suggestion/suggestions.md
 outputs/my_run/manifest.json
 ```
 
@@ -172,26 +166,31 @@ When the user provides a filled review file, Codex should run this from the repo
 ```bash
 ./run_review_cycle.sh \
   "outputs/my_run" \
-  "/path/to/filled_manual_review_task.xlsx" \
-  --update-config
+  "/path/to/filled_manual_review_task.xlsx"
 ```
 
-This calls `tools/run_review_learning.py`, which merges the filled manual decisions with existing second-pass decisions, writes reviewed final outputs, creates `reviewed/labels.csv`, reruns the quality gate, writes `reviewed/learning.md`, and applies only safe repeated excluded-domain config additions.
-It also writes Check and Suggestion suggestions and, with `--update-config`, applies only safe excluded-domain recommendations plus human/identity/no-official/reachability regression artifacts.
+This calls `tools/run_review_learning.py`, which merges the filled manual decisions with existing second-pass decisions, writes reviewed final outputs, creates `reviewed/labels.csv`, reruns the quality gate, and writes `reviewed/learning.md`.
 
-For calibration work, run `tools/evaluate_workflow_balance.py` against the baseline final CSV, candidate final CSV, and filled yellow-row review workbook to compare false official URLs, over-rejected correct sites, precision, recall, unresolved rows, manual-review workload, review-lane burden/risk, and unresolved recall auto-release risk before deciding whether a threshold/rule change is better. If old baseline artifacts have been cleaned, pass `--labeled-details <balance_eval_details.csv|json>` with the current candidate final CSV and run directory to recompute the same metrics from preserved labels. Then run `tools/build_balance_report.py` with the labeled balance JSON, larger unlabeled check batches and `--pattern-release-json` from `tools/simulate_pattern_release.py`; the report recommends the global threshold separately from any narrow selected actionable pattern-release set. Use `tools/run_calibration_cycle.py` to generate the next review package in one command; it now includes recall pattern release simulation, threshold boundary report, a selected actionable pattern-release set, pattern reports, application gate checks, and the review sample. Pass `--policy-report-json` when a final release policy report exists so the cycle keeps larger-batch stability evidence such as `enabled_with_guard_no_batch_release`. After one or more label-gap/sample/protected-lane files are filled, prefer `tools/run_calibration_followup.py --previous-summary-json <calibration_cycle_summary.json> --filled-sample <filled.xlsx>` so Codex can reuse the previous cycle inputs, verify protected-lane fills when relevant, merge labels, rerun calibration, and write `calibration_followup_decision.json/md`; add `--filled-policy-validation <filled_policy_validation.xlsx>` when a candidate policy validation workbook is filled so followup also writes `filled_policy_validation_evaluation.json/md` and includes supported, blocked, and still-thin exact policy patterns in the same decision report. The decision file includes the convergence audit summary, filled lane recommendations, and pattern-rule candidate buckets, so use it as the first go/no-go file for threshold, review-lane, guarded pattern-release, and candidate-rule changes. If filled labels generate `calibration_regression_cases.csv` and `--candidate-final-csv` is provided, the cycle automatically writes `calibration_regression_overlay_official_sites.csv/xlsx`, an overlay gate report, and `calibration_regression_overlay_balance.json/csv` when row-level labeled details are available in the labeled-eval JSON. Run `tools/apply_calibration_regression_cases.py` directly only when you need the same exact human-label overlay outside the cycle. This blocks only known wrong provider/URL pairs and restores only known correct URLs. The lower-level repeated `--filled-sample` flow still works for custom reruns. Treat `candidate_for_rule` items as advisory until Operation and Optimization adds regression tests; keep `needs_more_labels` patterns in calibration samples; do not auto-release `reject_pattern` rows. If the user asks whether any narrower rule can be safely relaxed, run `tools/mine_evidence_patterns.py`, `tools/simulate_pattern_release.py`, and `tools/build_threshold_boundary_report.py`; use `tools/apply_pattern_release_experiment.py` to create an experimental final CSV/XLSX before changing production workflow behavior. If the experiment improves labeled balance but touches unlabeled rows, run `tools/build_policy_validation_task.py` with the same hold/release patterns to produce a compact clickable XLSX for only the remaining unlabeled affected rows; after it is filled, run `tools/evaluate_policy_validation_task.py` to summarize support/blockers and decide whether the exact pattern is blocked, still thin, or ready for regression-tested application. Prefer selected actionable identity-plus-corroboration pattern releases over global threshold relaxation when labeled wrong releases stay at zero. After deciding to apply a calibrated set to a run, use `tools/apply_pattern_release_to_run.py` or pass that JSON to `run_workflow.sh --pattern-release-json`; the applied rows stay in the review task as `precision_calibrated_pattern_release` spot-checks. Calibrated release still blocks docs/help/support/api/app/login-style subdomains. Use `tools/build_release_policy_report.py` to combine baseline/candidate balance metrics, threshold simulations, pattern-release simulation, and batch application summaries into the final release policy report: thresholds stay fixed unless labels justify a change, 75-82 ordinary auto-match scores can be treated as high-value review lanes, second-pass accepts below 85 still go to review, raw recall candidates remain manual-only if any labeled wrong release appears, and calibrated pattern release can run only under the risky-subdomain guard. Treat zero-error evidence combinations as validation candidates until more human labels confirm them.
+## Development Workflow
 
-`run_calibration_cycle.py` also writes `balance_report.json/md`, including protected review lanes, clean spot-check candidate lanes, and lanes that need more labels.
+Use the development workflow only when the user asks to optimize, calibrate, compare rules, run Check and Suggestion, or continue workflow development. The normal GitHub user path should not include these steps.
 
-Pass `--pattern-release-json` to `run_calibration_cycle.py` when a previously validated pattern-release simulation should stay in the next balance report, threshold boundary report, and review sample.
+Development command:
 
-When `calibration_cycle_summary.json`, `calibration_status.json`, or `convergence_audit.json` reports `delivery_recommendation.decision=use_regression_overlay_final`, use that overlay CSV/XLSX as the current deliverable. Treat it as an exact human-label output correction only; do not treat it as proof that thresholds, review lanes, or pattern-release rules have converged.
+```bash
+./run_codex_assisted.sh \
+  --brave-key-file "/path/to/brave_key.txt" \
+  --exa-key-file "/path/to/exa_key.txt" \
+  --source "/path/to/provider_details.csv" \
+  --run-dir "outputs/dev_run" \
+  --run-check-suggestion
+```
 
-`run_calibration_cycle.py` also writes `calibration_status.json/md`, a top-level convergence report that says whether the workflow still needs human labels, whether thresholds can stay fixed, and whether any candidate lane/rule changes require regression tests. It also records the exact calibration sample CSV/XLSX, label targets by `review_reason`, priority lanes, decisive-label gaps, and the `manual_decision` / `manual_url` / `notes` fields reviewers should fill. The same cycle now writes `label_gap_task.csv/xlsx`, a smaller worker-facing subset containing only the rows still needed to close those label gaps, plus `label_gap_high_priority_task.csv/xlsx` for the smallest high-impact subset to fill first. When those decisive gaps are closed but protected review lanes remain, it also writes `protected_lanes_next_review_task.csv/xlsx`, `protected_lanes_next_review_task_summary.json`, and a protected-lane verification report; give the XLSX to the worker only when verification passes. It also writes `protected_lanes_priority_task.csv/xlsx`, a smaller balanced first-batch task that covers low-confidence accepts, unresolved recall, generic/same-name risks, slug-extension risks, country/language issues, logo-only or logo-near-match evidence, missing provider-name evidence, and unfetchable candidates; use this first when review capacity is limited, then fill the full protected-lane task before reducing protected lanes. When prior run outputs or filled human-label files exist, pass `--reuse-label-path <file-or-directory>` to `run_calibration_cycle.py`; it writes `protected_lanes_*_prefilled.csv/xlsx`, historical-label reuse reports, and prefilled verification reports. If the cycle was generated without that option, run `tools/reuse_historical_labels_for_task.py` manually before sending a protected-lane task to a reviewer. The reuse step pre-fills only trusted historical human labels, leaves conflicts blank, writes a reuse report, and ignores Check and Suggestion/automatic outputs as label sources. Verify any prefilled workbook with `tools/verify_protected_lane_review_task.py --allow-filled`, then ask the reviewer to fill only the remaining blank `manual_decision` / `manual_url` / `notes` rows. When a filled protected-lane task comes back, run `tools/run_calibration_followup.py --previous-summary-json <calibration_cycle_summary.json> --filled-sample <filled.xlsx>`; followup automatically verifies protected-lane priority/full files with `--allow-filled --require-filled`, writes `filled_protected_sample_verification.json/md`, and fails closed if a decision is invalid or a replace row lacks `manual_url`. It also writes `convergence_audit.json/md`, the compact Operation and Optimization-facing go/no-go report for threshold, review-lane, and guarded pattern-release decisions. Before Operation and Optimization applies threshold, review-lane, or pattern-release changes, run `tools/check_calibration_application_gate.py --status-json <calibration_status.json> --gate <gate_name>`; it fails closed unless the gate says `can_apply_now=true`, while `--allow-candidate` only permits blocker-free candidate gates for controlled rollouts.
+Check and Suggestion checks high-risk rows, writes evidence plus suggestions, and uses structured DOM evidence from candidate pages. Add `--human-review /path/to/filled_review.xlsx` to use filled human labels as regression evidence. Add `--apply-operation-optimizations` only when Operation and Optimization should apply safe recommendations and write regression artifacts.
 
-When more labels are needed, run `tools/build_calibration_review_sample.py` with the batch `review_task.csv` and `check_suggestion/check.csv` to produce a small high-value XLSX. Add `--pattern-json` from `tools/mine_evidence_patterns.py` when the next review should validate narrow candidate rules, and set `--max-per-pattern` to keep labels balanced across candidate patterns. Ask the worker to fill `manual_decision`, `manual_url`, and `notes`; then run `tools/evaluate_calibration_review_sample.py` on the filled CSV/XLSX. Use its `review_reason` lane recommendations, `pattern_match`, and `pattern_rule_candidates` outputs before changing thresholds or widening/narrowing review lanes.
+For large Check and Suggestion runs, use `python3 tools/run_agent_b_verification.py --run-dir outputs/dev_run --resume --write-xlsx`. For batch validation, add `--row-timeout 15 --per-query 1`.
 
-Before converting a protected review lane into an automatic routing rule, run `tools/simulate_review_lane_output_policy.py`. It creates an experimental final CSV/XLSX by holding selected `review_reason` lanes, or narrower Check and Suggestion evidence `--hold-pattern` rules, out of automatic official-site output, then can evaluate labeled balance and the calibration regression gate. Apply a lane-routing change only if the simulation improves the intended metric without unacceptable over-rejection and the regression gate passes.
+For calibration work, follow `docs/DEVELOPMENT_WORKFLOW_CN.md`. Treat candidate rules as advisory until Operation and Optimization adds regression tests and a deterministic gate passes.
 
 Expected reviewed outputs:
 
@@ -201,17 +200,15 @@ outputs/my_run/reviewed/official_sites.xlsx
 outputs/my_run/reviewed/unresolved.csv
 outputs/my_run/reviewed/learning.md
 outputs/my_run/reviewed/labels.csv
-outputs/my_run/check_suggestion/suggestions.md
-outputs/my_run/operation_optimization/applied.json
 ```
 
 After running review learning, inspect `reviewed/learning.md` and `reviewed/learning.json`. Only make workflow/config changes when the report shows repeated safe patterns, such as repeated rejected directory/platform domains. Then run tests and rerun the relevant workflow step.
 
 Codex follow-up checklist after a filled review file:
 
-1. Run `./run_review_cycle.sh "$RUN_DIR" "$FILLED_REVIEW" --update-config`.
+1. Run `./run_review_cycle.sh "$RUN_DIR" "$FILLED_REVIEW"`.
 2. Read `reviewed/learning.json` and `reviewed/learning.md`.
-3. If `config_update.updated=true`, report the added excluded domains and run `PYTHONPATH=.vendor_eval:. python3 -m unittest discover -s tests`.
+3. If the user explicitly asked for development optimization, rerun with `--update-config`, report any added excluded domains, and run `PYTHONPATH=.vendor_eval:. python3 -m unittest discover -s tests`.
 4. Verify reviewed outputs with `tools/verify_run_outputs.py` if the shell script did not complete verification.
 5. Final response must list the reviewed final CSV, reviewed clickable XLSX, reviewed unresolved CSV, learning report, manual labels, quality status, and any config optimization applied.
 
