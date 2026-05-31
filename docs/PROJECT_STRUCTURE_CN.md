@@ -183,7 +183,7 @@ Codex receives filled manual review workbook
 | 文件或目录 | 作用 |
 |---|---|
 | `run_codex_assisted.sh` | 给 Codex 用的一键入口。先从 key 文件生成 `.env`，再启动完整 workflow。 |
-| `tools/configure_env_from_key_files.py` | 从 Brave/Exa/OpenAI key 文件读取密钥，写入 `.env`，但不会在输出里打印密钥。 |
+| `tools/configure_env_from_key_files.py` | 从 Brave/Exa key 文件读取密钥，写入 `.env`，但不会在输出里打印密钥。 |
 | `run_workflow.sh` | 普通用户的一键入口。检查 `.env`、安装可选依赖、跑 preflight、pipeline 和最终验证。 |
 | `run_review_cycle.sh` | Codex 在人工复核填完后内部调用。把反馈应用回结果，生成 reviewed 输出和学习报告，可启用安全规则优化。 |
 | `tools/preflight_report.py` | 开跑前检查输入文件、API key、依赖和搜索 API 是否可用。 |
@@ -194,7 +194,7 @@ Codex receives filled manual review workbook
 | `finder/logo.py` | 从候选官网提取 logo/favicon/og:image，并与 Amazon listing logo 做感知哈希相似度比较；作为正向身份加分证据，但 logo-only 不足以自动接受。 |
 | `tools/run_unresolved_second_pass.py` | 对第一轮没解决的商家做二轮补漏，用 Brave/Exa 找更可能的官网；默认接受阈值为 `75`，与 first pass 对齐，同时保留强证据、风险 URL 和身份 cap 约束。 |
 | `tools/build_manual_review_task.py` | 生成简化人工复核 CSV/XLSX，只保留工作人员需要判断和填写的列；普通 auto-match 默认复核 75-82 分，second-pass accepted 仍复核 85 分以下。 |
-| `tools/run_agent_b_verification.py` | B 的高风险候选优先复核部分。只复核低置信、二轮新增、平台页、logo-only、同名/通用名、身份 cap 等风险行；优先用 title/meta、H1/H2、nav/footer、联系方式、schema.org Organization、页面角色和页面风险做 DOM 结构化验证，只在证据弱或冲突时做轻量独立搜索；可选 LLM 对比会写入 `agent_b/llm_check.*`，不覆盖默认结果。 |
+| `tools/run_agent_b_verification.py` | B 的高风险候选优先复核部分。只复核低置信、二轮新增、平台页、logo-only、同名/通用名、身份 cap 等风险行；优先用 title/meta、H1/H2、nav/footer、联系方式、schema.org Organization、页面角色和页面风险做 DOM 结构化验证，只在证据弱或冲突时做轻量独立搜索。 |
 | `tools/run_agent_b_recommendations.py` | B 的建议部分。读取 B 复核结果和人工复核学习报告，输出可执行或需人工评估的优化建议。 |
 | `tools/run_review_learning.py` | 读取填好的复核表，合并人工反馈，输出 reviewed 结果、人工标签和优化建议。 |
 | `tools/run_agent_c_recommendations.py` | 旧名称兼容入口，转调 AgentB 建议实现。 |

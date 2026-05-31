@@ -66,15 +66,6 @@ def agent_b_paths(run_dir: str | Path) -> dict[str, Path]:
     }
 
 
-def agent_b_llm_paths(run_dir: str | Path) -> dict[str, Path]:
-    root = run_root(run_dir)
-    return {
-        "csv": root / "agent_b/llm_check.csv",
-        "jsonl": root / "agent_b/llm_check.jsonl",
-        "summary": root / "agent_b/llm_summary.json",
-    }
-
-
 def agent_b_suggestion_paths(run_dir: str | Path) -> dict[str, Path]:
     root = run_root(run_dir)
     return {

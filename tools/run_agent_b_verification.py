@@ -10,8 +10,6 @@ import queue
 import sys
 from pathlib import Path
 from urllib.parse import urlparse
-from urllib import error as urllib_error
-from urllib import request as urllib_request
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
@@ -28,7 +26,6 @@ from tools.output_layout import (
     DEFAULT_MATCHED_REVIEW_CONFIDENCE_CUTOFF,
     DEFAULT_SECOND_PASS_REVIEW_CONFIDENCE_CUTOFF,
     WORKFLOW_VERSION,
-    agent_b_llm_paths,
     agent_b_paths,
     first_existing,
     publish_agent_b_aliases,
@@ -59,21 +56,6 @@ AGENT_B_FIELDS = [
     "review_reason",
 ]
 
-AGENT_B_LLM_FIELDS = [
-    "provider_id",
-    "provider_name",
-    "candidate_url",
-    "agent_b_decision",
-    "agent_b_confidence",
-    "evidence_score",
-    "llm_decision",
-    "llm_confidence",
-    "llm_supporting_facts",
-    "llm_counter_evidence",
-    "llm_reason_for_unsure",
-    "llm_error",
-]
-
 SUPPORTING_PATHS = ["/", "/about", "/contact", "/services", "/privacy", "/terms", "/about-us", "/contact-us"]
 
 
@@ -88,8 +70,6 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--per-query", type=int, default=2)
     parser.add_argument("--write-xlsx", action="store_true")
     parser.add_argument("--include-all-final", action="store_true")
-    parser.add_argument("--llm-review", action="store_true", help="Write optional AgentB LLM review files without changing default decisions.")
-    parser.add_argument("--llm-model", default=os.getenv("FINDER_AGENT_B_LLM_MODEL", "gpt-4.1-mini"))
     parser.add_argument("--resume", action="store_true", help="Reuse existing output rows and keep incremental progress.")
     parser.add_argument(
         "--row-timeout",
@@ -110,8 +90,6 @@ def main(argv: list[str] | None = None) -> int:
         per_query=args.per_query,
         write_xlsx=args.write_xlsx,
         include_all_final=args.include_all_final,
-        llm_review=args.llm_review,
-        llm_model=args.llm_model,
         resume=args.resume,
         row_timeout=args.row_timeout,
     )
@@ -130,8 +108,6 @@ def run_agent_b_verification(
     per_query: int = 2,
     write_xlsx: bool = True,
     include_all_final: bool = False,
-    llm_review: bool | None = None,
-    llm_model: str | None = None,
     resume: bool = False,
     row_timeout: int = 0,
 ) -> dict:
@@ -174,17 +150,6 @@ def run_agent_b_verification(
     if write_xlsx:
         xlsx_summary = build_workbook([("AgentB_Verification", output_csv_path)], output_xlsx_path)
 
-    llm_summary = {}
-    if llm_review is None:
-        llm_review = _env_flag("FINDER_AGENT_B_LLM_REVIEW")
-    if llm_review:
-        llm_summary = _write_llm_review(
-            run_dir=run_dir,
-            rows=result_rows,
-            details=json_rows,
-            model=llm_model or os.getenv("FINDER_AGENT_B_LLM_MODEL", "gpt-4.1-mini"),
-        )
-
     summary = {
         "workflow_version": WORKFLOW_VERSION,
         "input_rows": len(rows),
@@ -199,7 +164,6 @@ def run_agent_b_verification(
             "xlsx": str(output_xlsx_path) if write_xlsx else "",
         },
         "xlsx": xlsx_summary,
-        "llm_review": llm_summary,
     }
     summary_path = canonical["summary"] if not output_csv else run_dir / "agent_b_verification_summary.json"
     summary_path.parent.mkdir(parents=True, exist_ok=True)
@@ -1001,161 +965,6 @@ def _write_jsonl(path: Path, rows: list[dict]) -> None:
     with path.open("w", encoding="utf-8") as f:
         for row in rows:
             f.write(json.dumps(row, ensure_ascii=False) + "\n")
-
-
-def _write_llm_review(*, run_dir: Path, rows: list[dict[str, str]], details: list[dict], model: str) -> dict:
-    paths = agent_b_llm_paths(run_dir)
-    api_key = os.getenv("OPENAI_API_KEY", "").strip()
-    output_rows: list[dict[str, str]] = []
-    json_rows: list[dict] = []
-    if not api_key:
-        summary = {
-            "enabled": True,
-            "status": "skipped_missing_openai_api_key",
-            "model": model,
-            "output_rows": 0,
-            "outputs": {"csv": str(paths["csv"]), "jsonl": str(paths["jsonl"]), "summary": str(paths["summary"])},
-        }
-        paths["summary"].parent.mkdir(parents=True, exist_ok=True)
-        paths["summary"].write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
-        return summary
-    details_by_key = {_row_key(item): item for item in details if _row_key(item)}
-    for row in rows:
-        detail = details_by_key.get(_row_key(row), {})
-        payload = _llm_payload(row, detail)
-        response = _call_llm(payload, model=model, api_key=api_key)
-        parsed = _parse_llm_response(response)
-        out_row = {
-            "provider_id": row.get("provider_id", ""),
-            "provider_name": row.get("provider_name", ""),
-            "candidate_url": row.get("candidate_url", ""),
-            "agent_b_decision": row.get("agent_b_decision", ""),
-            "agent_b_confidence": row.get("confidence", ""),
-            "evidence_score": row.get("evidence_score", ""),
-            "llm_decision": parsed.get("decision", "unsure"),
-            "llm_confidence": str(parsed.get("confidence", "")),
-            "llm_supporting_facts": "; ".join(parsed.get("supporting_facts", []) or []),
-            "llm_counter_evidence": "; ".join(parsed.get("counter_evidence", []) or []),
-            "llm_reason_for_unsure": parsed.get("reason_for_unsure", ""),
-            "llm_error": parsed.get("error", ""),
-        }
-        output_rows.append(out_row)
-        json_rows.append({"provider_id": row.get("provider_id", ""), "payload": payload, "response": response, "parsed": parsed})
-    _write_rows(paths["csv"], output_rows, AGENT_B_LLM_FIELDS)
-    _write_jsonl(paths["jsonl"], json_rows)
-    summary = {
-        "enabled": True,
-        "status": "complete",
-        "model": model,
-        "output_rows": len(output_rows),
-        "decision_counts": _counts(output_rows, "llm_decision"),
-        "error_rows": sum(1 for row in output_rows if row.get("llm_error")),
-        "outputs": {"csv": str(paths["csv"]), "jsonl": str(paths["jsonl"]), "summary": str(paths["summary"])},
-    }
-    paths["summary"].write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
-    return summary
-
-
-def _llm_payload(row: dict[str, str], detail: dict) -> dict:
-    candidate = detail.get("candidate") or {}
-    return {
-        "provider": {
-            "provider_id": row.get("provider_id", ""),
-            "provider_name": row.get("provider_name", ""),
-            "provider_detail_url": row.get("provider_detail_url", ""),
-            "locations": _parse_locations(row.get("provider_locations", "")),
-        },
-        "candidate": {
-            "url": row.get("candidate_url", ""),
-            "domain": row.get("candidate_domain", ""),
-            "agent_b_score": row.get("evidence_score", ""),
-            "evidence_urls": candidate.get("evidence_urls", []),
-            "supporting_facts": candidate.get("supporting_facts", []),
-            "counter_evidence": candidate.get("counter_evidence", []),
-            "page_roles": candidate.get("page_roles", []),
-            "organizations": candidate.get("organizations", []),
-        },
-        "agent_b": {
-            "decision": row.get("agent_b_decision", ""),
-            "confidence": row.get("confidence", ""),
-            "reason_for_unsure": row.get("reason_for_unsure", ""),
-        },
-    }
-
-
-def _call_llm(payload: dict, *, model: str, api_key: str) -> dict:
-    system = (
-        "You verify whether a candidate URL is the independent official website for an Amazon service provider. "
-        "Use only the supplied structured evidence. Return compact JSON with keys decision, confidence, "
-        "supporting_facts, counter_evidence, reason_for_unsure. decision must be accept, reject, unsure, or possible_replace."
-    )
-    user = json.dumps(payload, ensure_ascii=False)
-    body = json.dumps(
-        {
-            "model": model,
-            "temperature": 0,
-            "response_format": {"type": "json_object"},
-            "messages": [
-                {"role": "system", "content": system},
-                {"role": "user", "content": user},
-            ],
-        }
-    ).encode("utf-8")
-    base_url = os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1").rstrip("/")
-    request = urllib_request.Request(
-        f"{base_url}/chat/completions",
-        data=body,
-        headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
-        method="POST",
-    )
-    try:
-        with urllib_request.urlopen(request, timeout=_llm_timeout()) as response:
-            return json.loads(response.read().decode("utf-8"))
-    except (urllib_error.URLError, TimeoutError, json.JSONDecodeError) as exc:
-        return {"error": type(exc).__name__, "message": str(exc)}
-
-
-def _parse_llm_response(response: dict) -> dict:
-    if response.get("error"):
-        return {"decision": "unsure", "confidence": 0, "supporting_facts": [], "counter_evidence": [], "reason_for_unsure": "llm_call_failed", "error": response.get("message") or response.get("error", "")}
-    try:
-        content = response["choices"][0]["message"]["content"]
-    except (KeyError, IndexError, TypeError):
-        return {"decision": "unsure", "confidence": 0, "supporting_facts": [], "counter_evidence": [], "reason_for_unsure": "llm_response_unparseable", "error": "missing_content"}
-    try:
-        data = json.loads(content)
-    except json.JSONDecodeError:
-        return {"decision": "unsure", "confidence": 0, "supporting_facts": [], "counter_evidence": [], "reason_for_unsure": "llm_response_unparseable", "error": "invalid_json"}
-    decision = str(data.get("decision", "unsure")).strip().lower()
-    if decision not in {"accept", "reject", "unsure", "possible_replace"}:
-        decision = "unsure"
-    return {
-        "decision": decision,
-        "confidence": max(0, min(100, _to_int(data.get("confidence")))),
-        "supporting_facts": _list_values(data.get("supporting_facts")),
-        "counter_evidence": _list_values(data.get("counter_evidence")),
-        "reason_for_unsure": str(data.get("reason_for_unsure", ""))[:500],
-        "error": "",
-    }
-
-
-def _list_values(value: object) -> list[str]:
-    if isinstance(value, list):
-        return [str(item)[:300] for item in value if str(item).strip()]
-    if isinstance(value, str) and value.strip():
-        return [value.strip()[:300]]
-    return []
-
-
-def _llm_timeout() -> int:
-    try:
-        return max(5, int(os.getenv("FINDER_AGENT_B_LLM_TIMEOUT", "30")))
-    except ValueError:
-        return 30
-
-
-def _env_flag(name: str) -> bool:
-    return os.getenv(name, "").strip().casefold() in {"1", "true", "yes", "on"}
 
 
 def _index_existing_rows(path: Path) -> dict[str, dict[str, str]]:

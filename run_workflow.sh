@@ -2,7 +2,7 @@
 set -euo pipefail
 
 if [[ $# -lt 2 ]]; then
-  echo "Usage: ./run_workflow.sh /path/to/input.csv outputs/run_dir [labels.csv] [--run-agent-b] [--agent-b-llm-review] [--apply-agent-optimizations] [--agent-b-limit N] [--human-review file.xlsx] [--pattern-release-json file.json]" >&2
+  echo "Usage: ./run_workflow.sh /path/to/input.csv outputs/run_dir [labels.csv] [--run-agent-b] [--apply-agent-optimizations] [--agent-b-limit N] [--human-review file.xlsx] [--pattern-release-json file.json]" >&2
   exit 2
 fi
 
@@ -10,7 +10,6 @@ SOURCE_CSV="$1"
 RUN_DIR="$2"
 LABELS_CSV=""
 RUN_AGENT_B=0
-AGENT_B_LLM_REVIEW=0
 APPLY_AGENT_OPTIMIZATIONS=0
 AGENT_B_LIMIT=0
 HUMAN_REVIEW_FILE=""
@@ -20,10 +19,6 @@ shift 2
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --run-agent-b)
-      RUN_AGENT_B=1
-      ;;
-    --agent-b-llm-review)
-      AGENT_B_LLM_REVIEW=1
       RUN_AGENT_B=1
       ;;
     --apply-agent-optimizations)
@@ -108,9 +103,6 @@ if [[ "$RUN_AGENT_B" == "1" ]]; then
   AGENT_B_ARGS=(--run-dir "$RUN_DIR" --write-xlsx)
   if [[ "$AGENT_B_LIMIT" != "0" ]]; then
     AGENT_B_ARGS+=(--limit "$AGENT_B_LIMIT")
-  fi
-  if [[ "$AGENT_B_LLM_REVIEW" == "1" ]]; then
-    AGENT_B_ARGS+=(--llm-review)
   fi
   PYTHONPATH=.vendor_eval:. python3 tools/run_agent_b_verification.py "${AGENT_B_ARGS[@]}"
   AGENT_B_RECOMMENDATION_ARGS=(--run-dir "$RUN_DIR")

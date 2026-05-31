@@ -89,12 +89,10 @@ class WorkflowTests(unittest.TestCase):
             root = Path(tmp)
             brave_file = root / "brave.txt"
             exa_file = root / "exa.env"
-            openai_file = root / "openaikey.rtf"
             env_file = root / ".env"
             example_file = root / ".env.example"
             brave_file.write_text("brave-secret-key\n", encoding="utf-8")
             exa_file.write_text("EXA_API_KEY='exa-secret-key'\n", encoding="utf-8")
-            openai_file.write_text(r"{\rtf1\ansi OPENAI_API_KEY=openai-secret-key-123\par}", encoding="utf-8")
             example_file.write_text("BRAVE_API_KEY=\nEXA_API_KEY=\nDDGS_ENABLED=1\nFINDER_HTTP_TIMEOUT=12\n", encoding="utf-8")
 
             out = io.StringIO()
@@ -105,8 +103,6 @@ class WorkflowTests(unittest.TestCase):
                         str(brave_file),
                         "--exa-key-file",
                         str(exa_file),
-                        "--openai-key-file",
-                        str(openai_file),
                         "--env",
                         str(env_file),
                         "--example",
@@ -117,12 +113,9 @@ class WorkflowTests(unittest.TestCase):
             text = env_file.read_text(encoding="utf-8")
             self.assertIn("BRAVE_API_KEY=brave-secret-key", text)
             self.assertIn("EXA_API_KEY=exa-secret-key", text)
-            self.assertIn("OPENAI_API_KEY=openai-secret-key-123", text)
-            self.assertIn("FINDER_AGENT_B_LLM_REVIEW=0", text)
             self.assertIn("FINDER_HTTP_TIMEOUT=12", text)
             self.assertNotIn("brave-secret-key", out.getvalue())
             self.assertNotIn("exa-secret-key", out.getvalue())
-            self.assertNotIn("openai-secret-key-123", out.getvalue())
 
     def test_extract_key_from_json_key_file(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -1781,64 +1774,6 @@ class OperationalCommandTests(unittest.TestCase):
         self.assertIn("candidate_looks_platform_profile", out["p-1"]["counter_evidence"])
         self.assertIn("candidate_looks_directory_page", out["p-1"]["counter_evidence"])
         self.assertIn("candidate_looks_parked_or_domain_sale", out["p-2"]["counter_evidence"])
-
-    def test_agent_b_llm_review_is_optional_and_writes_separate_outputs(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            run_dir = Path(tmp)
-            rows = [
-                {
-                    "provider_id": "p-1",
-                    "provider_name": "LLM Agency",
-                    "provider_detail_url": "https://amazon.example/p-1",
-                    "official_url": "https://llm.example",
-                    "provider_locations": json.dumps(["Germany"]),
-                    "confidence": "81",
-                    "status": "manual_accepted",
-                }
-            ]
-            _write_test_csv(run_dir / "review_task.csv", rows)
-            _write_test_csv(run_dir / "official_sites.csv", rows)
-
-            def fake_fetch(url):
-                html = "<html><body>LLM Agency GmbH Amazon marketplace ecommerce services Germany. Contact us.</body></html>"
-                return {"ok": True, "status": 200, "final_url": url, "text": html}
-
-            with patch("tools.run_agent_b_verification.fetch_text", side_effect=fake_fetch), patch(
-                "tools.run_agent_b_verification.collect_candidates_for_queries", return_value=[]
-            ):
-                default_summary = run_agent_b_verification(run_dir=run_dir, write_xlsx=False)
-            self.assertEqual(default_summary["llm_review"], {})
-            self.assertFalse((run_dir / "agent_b/llm_check.csv").exists())
-
-            fake_response = {
-                "choices": [
-                    {
-                        "message": {
-                            "content": json.dumps(
-                                {
-                                    "decision": "accept",
-                                    "confidence": 91,
-                                    "supporting_facts": ["provider identity confirmed"],
-                                    "counter_evidence": [],
-                                    "reason_for_unsure": "",
-                                }
-                            )
-                        }
-                    }
-                ]
-            }
-            with patch.dict(os.environ, {"OPENAI_API_KEY": "test-openai-key"}, clear=False), patch(
-                "tools.run_agent_b_verification.fetch_text", side_effect=fake_fetch
-            ), patch("tools.run_agent_b_verification.collect_candidates_for_queries", return_value=[]), patch(
-                "tools.run_agent_b_verification._call_llm", return_value=fake_response
-            ):
-                llm_summary = run_agent_b_verification(run_dir=run_dir, write_xlsx=False, llm_review=True)
-            with (run_dir / "agent_b/llm_check.csv").open(newline="", encoding="utf-8") as f:
-                llm_rows = list(csv.DictReader(f))
-
-        self.assertEqual(llm_summary["llm_review"]["status"], "complete")
-        self.assertEqual(llm_rows[0]["llm_decision"], "accept")
-        self.assertEqual(llm_rows[0]["agent_b_decision"], "accept")
 
     def test_agent_b_defaults_to_high_risk_rows_without_manual_task(self):
         with tempfile.TemporaryDirectory() as tmp:
