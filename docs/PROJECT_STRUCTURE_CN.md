@@ -49,6 +49,7 @@ amazon-official-site-finder/
     evaluate_policy_validation_task.py
     build_review_sheet.py
     configure_env_from_key_files.py
+    deduplicate_input.py
     enrich_result_links.py
     evaluate_labeled_results.py
     finalize_results.py
@@ -157,6 +158,7 @@ Codex 会在内部调用 `run_review_cycle.sh`，读取复核表并输出最终 
 run_codex_assisted.sh
   -> tools/configure_env_from_key_files.py
   -> run_workflow.sh
+     -> tools/deduplicate_input.py
      -> tools/preflight_report.py
      -> tools/run_pipeline.py
         -> finder/
@@ -200,8 +202,9 @@ Codex receives filled manual review workbook
 | `tools/configure_env_from_key_files.py` | 从 Brave/Exa key 文件读取密钥，写入 `.env`，但不会在输出里打印密钥。 |
 | `run_workflow.sh` | 普通用户的一键入口。检查 `.env`、安装可选依赖、跑 preflight、pipeline 和最终验证。 |
 | `run_review_cycle.sh` | Codex 在人工复核填完后内部调用。把反馈应用回结果，生成 reviewed 输出和学习报告，可启用安全规则优化。 |
+| `tools/deduplicate_input.py` | Workflow Body 的显式去重入口。按 `provider_id` 合并重复服务行，写出 `details/input/deduped_input.csv/xlsx` 和 `dedupe_report.json/md`；后续搜索从去重文件开始。 |
 | `tools/preflight_report.py` | 开跑前检查输入文件、API key、依赖和搜索 API 是否可用。 |
-| `tools/run_pipeline.py` | 主调度器。负责标准化输入、搜索候选、评分、生成初版结果、质量门禁和 second-pass。 |
+| `tools/run_pipeline.py` | 主调度器。读取去重输入，负责标准化输入、搜索候选、评分、生成初版结果、质量门禁和 second-pass。 |
 | `finder/` | 核心逻辑包。包括输入清洗、国家/语言相关搜索 query 构建、API 搜索、网页抓取、官网评分。 |
 | `finder/geo.py` | 国家/地区 profile。提供本地语言官网/联系方式查询词、国家 TLD 信号和页面国家文本 marker。 |
 | `finder/scoring.py` | 官网打分器。当前版本加入身份 cap：同名/通用名、国家冲突、服务不一致、logo-only、缺少服务或地区佐证时不能直接高分接受；但当页面级名称证据和 marketplace/service 证据同时存在时，会放宽同名/通用名 cap，避免过度拒绝正确官网。 |
@@ -261,7 +264,7 @@ outputs/my_run/review_task.xlsx
 outputs/my_run/review_task.csv
 ```
 
-`details/input/`、`details/first_pass/`、`details/second_pass/` 保存中间证据和调试文件。新版默认只写短文件名；旧版公开文件名仍可作为读取 fallback，例如 `provider_final_official_websites_second_pass.csv` 和 `manual_official_site_review_task.xlsx`。只有设置 `FINDER_WRITE_LEGACY_ALIASES=1` 时才额外写出旧名副本。
+`details/input/`、`details/first_pass/`、`details/second_pass/` 保存中间证据和调试文件。`details/input/` 会先写出 `deduped_input.csv`、`deduped_input.xlsx`、`dedupe_report.json` 和 `dedupe_report.md`，正式搜索从去重后的 provider 输入开始。新版默认只写短文件名；旧版公开文件名仍可作为读取 fallback，例如 `provider_final_official_websites_second_pass.csv` 和 `manual_official_site_review_task.xlsx`。只有设置 `FINDER_WRITE_LEGACY_ALIASES=1` 时才额外写出旧名副本。
 
 人工复核填完并交给 Codex 后，最终主要看：
 

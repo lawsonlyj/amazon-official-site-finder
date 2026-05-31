@@ -97,7 +97,7 @@ python3 tools/configure_env_from_key_files.py \
 ./run_workflow.sh "/path/to/provider_details.csv" "outputs/my_run"
 ```
 
-This runs preflight, first pass, second pass, simplified manual review task generation, XLSX generation, and verification.
+This runs explicit provider deduplication, preflight, first pass, second pass, simplified manual review task generation, XLSX generation, and verification. Duplicate service rows for the same `provider_id` are merged before search starts.
 
 ## Expected Outputs
 
@@ -109,6 +109,9 @@ outputs/my_run/quality.json
 outputs/my_run/review_task.csv
 outputs/my_run/review_task.xlsx
 outputs/my_run/manifest.json
+outputs/my_run/details/input/deduped_input.csv
+outputs/my_run/details/input/deduped_input.xlsx
+outputs/my_run/details/input/dedupe_report.md
 ```
 
 Report these files with absolute paths. Legacy public filenames are not written by default; old files such as `provider_final_official_websites_second_pass.csv`, `provider_official_websites_second_pass_with_clickable_links.xlsx`, and `manual_official_site_review_task.xlsx` are still accepted as fallback inputs, and can be written for external compatibility by setting `FINDER_WRITE_LEGACY_ALIASES=1`.

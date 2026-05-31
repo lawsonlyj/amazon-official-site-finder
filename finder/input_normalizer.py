@@ -24,6 +24,9 @@ def _loads_list(value: str) -> list[Any]:
 
 
 def normalize_provider_rows(input_csv: str | Path) -> list[dict[str, Any]]:
+    if is_normalized_provider_csv(input_csv):
+        return read_normalized_csv(input_csv)
+
     providers: OrderedDict[str, dict[str, Any]] = OrderedDict()
     with Path(input_csv).open(newline="", encoding="utf-8-sig") as f:
         reader = csv.DictReader(f)
@@ -65,6 +68,29 @@ def normalize_provider_rows(input_csv: str | Path) -> list[dict[str, Any]]:
             if not item["service_description"]:
                 item["service_description"] = compact_space(row.get("service_description", ""))[:400]
     return list(providers.values())
+
+
+def is_normalized_provider_csv(input_csv: str | Path) -> bool:
+    path = Path(input_csv)
+    if not path.exists():
+        return False
+    with path.open(newline="", encoding="utf-8-sig") as f:
+        reader = csv.reader(f)
+        try:
+            headers = set(next(reader))
+        except StopIteration:
+            return False
+    required = {
+        "provider_id",
+        "provider_name",
+        "service_apis",
+        "provider_locations",
+        "provider_languages",
+        "service_types",
+        "detail_url",
+        "source_rows",
+    }
+    return required.issubset(headers)
 
 
 def write_normalized_csv(providers: list[dict[str, Any]], output_csv: str | Path) -> None:

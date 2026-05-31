@@ -38,6 +38,7 @@ from tools.plan_unresolved_second_pass import build_second_pass_plan
 from tools.verify_run_outputs import verify_run_outputs
 from tools.run_unresolved_second_pass import run_unresolved_second_pass, _accepted
 from tools.configure_env_from_key_files import extract_key_from_file, main as configure_env_main
+from tools.deduplicate_input import deduplicate_input
 from tools.run_agent_b_verification import run_agent_b_verification
 from tools.run_agent_b_recommendations import run_agent_b_recommendations
 from tools.apply_agent_optimizations import apply_agent_optimizations
@@ -224,6 +225,74 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual(providers[0]["source_rows"], 2)
         self.assertEqual(providers[0]["service_apis"], ["Account Management", "Advertising Optimization"])
         self.assertEqual(providers[0]["provider_languages"], ["English", "German"])
+
+    def test_deduplicate_input_writes_explicit_workflow_body_input_and_report(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source = root / "raw.csv"
+            output = root / "details/input/deduped_input.csv"
+            xlsx = root / "details/input/deduped_input.xlsx"
+            report_json = root / "details/input/dedupe_report.json"
+            report_md = root / "details/input/dedupe_report.md"
+            rows = [
+                {
+                    "provider_id": "Amazon SPN 服务商唯一 ID；主表关联键之一",
+                    "provider_name": "服务商名称",
+                    "service_api": "一级服务名称；主表关联键之一",
+                    "detail_url": "详情页来源 URL",
+                    "listing_logo_url": "列表页 logo URL",
+                    "about_listing_text": "详情页 About this listing 区域文本",
+                    "service_description": "详情页 Service Description 文本",
+                    "service_types_json": "[]",
+                    "provider_locations_json": "[]",
+                    "provider_languages_json": "[]",
+                },
+                {
+                    "provider_id": "p-1",
+                    "provider_name": "Example Agency LLC",
+                    "service_api": "Account Management",
+                    "detail_url": "https://sellercentral-europe.amazon.com/gspn/provider-details/a/p-1",
+                    "listing_logo_url": "https://m.media-amazon.com/logo.png",
+                    "about_listing_text": "Amazon account management.",
+                    "service_description": "Account management services.",
+                    "service_types_json": json.dumps(["Complete Account Management"]),
+                    "provider_locations_json": json.dumps(["United Kingdom"]),
+                    "provider_languages_json": json.dumps(["English"]),
+                },
+                {
+                    "provider_id": "p-1",
+                    "provider_name": "Example Agency LLC",
+                    "service_api": "Advertising Optimization",
+                    "detail_url": "https://sellercentral-europe.amazon.com/gspn/provider-details/b/p-1",
+                    "listing_logo_url": "https://m.media-amazon.com/logo.png",
+                    "about_listing_text": "Amazon advertising.",
+                    "service_description": "Advertising services.",
+                    "service_types_json": json.dumps(["PPC"]),
+                    "provider_locations_json": json.dumps(["United Kingdom"]),
+                    "provider_languages_json": json.dumps(["English", "German"]),
+                },
+            ]
+            _write_test_csv(source, rows)
+
+            summary = deduplicate_input(
+                source_csv=source,
+                output_csv=output,
+                output_xlsx=xlsx,
+                report_json=report_json,
+                report_md=report_md,
+            )
+
+            with output.open(newline="", encoding="utf-8-sig") as f:
+                deduped_rows = list(csv.DictReader(f))
+            self.assertEqual(len(deduped_rows), 1)
+            self.assertEqual(deduped_rows[0]["provider_id"], "p-1")
+            self.assertEqual(json.loads(deduped_rows[0]["service_apis"]), ["Account Management", "Advertising Optimization"])
+            self.assertEqual(summary["valid_provider_rows"], 2)
+            self.assertEqual(summary["output_provider_rows"], 1)
+            self.assertEqual(summary["duplicate_extra_rows"], 1)
+            self.assertTrue(xlsx.exists())
+            self.assertTrue(report_json.exists())
+            self.assertIn("Duplicate extra rows removed", report_md.read_text(encoding="utf-8"))
 
     def test_query_builder_includes_web_queries_without_github_queries(self):
         provider = {

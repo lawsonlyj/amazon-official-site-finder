@@ -19,6 +19,10 @@ def pipeline_paths(run_dir: str | Path) -> dict[str, Path]:
     root = run_root(run_dir)
     return {
         "manifest": root / "manifest.json",
+        "deduped_input": root / "details/input/deduped_input.csv",
+        "deduped_input_xlsx": root / "details/input/deduped_input.xlsx",
+        "dedupe_report_json": root / "details/input/dedupe_report.json",
+        "dedupe_report_md": root / "details/input/dedupe_report.md",
         "normalized": root / "details/input/providers.csv",
         "results": root / "details/first_pass/search.csv",
         "results_enriched": root / "details/first_pass/enriched.csv",

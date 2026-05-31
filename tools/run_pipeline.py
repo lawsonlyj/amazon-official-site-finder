@@ -18,6 +18,7 @@ from finder.input_normalizer import normalize_provider_rows, read_normalized_csv
 from finder.scoring import load_config
 from tools.build_manual_review_task import build_manual_review_task
 from tools.build_review_sheet import build_review_sheet, write_review_sheet
+from tools.deduplicate_input import deduplicate_input
 from tools.enrich_result_links import enrich_result_links
 from tools.evaluate_labeled_results import read_rows as read_csv_rows
 from tools.output_layout import (
@@ -137,11 +138,24 @@ def run_pipeline(
         raise PipelineError(f"review decisions CSV does not exist: {review_decisions_csv}")
 
     run_dir.mkdir(parents=True, exist_ok=True)
-    normalized_count = len(normalize_provider_rows(source_csv))
+    original_source_csv = source_csv
+    if source_csv.resolve() == paths["deduped_input"].resolve() and paths["dedupe_report_json"].exists():
+        dedupe_summary = json.loads(paths["dedupe_report_json"].read_text(encoding="utf-8"))
+    else:
+        dedupe_summary = deduplicate_input(
+            source_csv=original_source_csv,
+            output_csv=paths["deduped_input"],
+            output_xlsx=paths["deduped_input_xlsx"],
+            report_json=paths["dedupe_report_json"],
+            report_md=paths["dedupe_report_md"],
+        )
+    source_csv = paths["deduped_input"]
+    normalized_count = int(dedupe_summary["output_provider_rows"])
     total_to_run = min(normalized_count, limit) if limit else normalized_count
     doctor_result = doctor(str(source_csv))
     manifest = build_manifest(
-        source_csv=source_csv,
+        source_csv=original_source_csv,
+        deduped_source_csv=source_csv,
         run_dir=run_dir,
         paths=paths,
         labels_csv=Path(labels_csv) if labels_csv else None,
@@ -167,6 +181,7 @@ def run_pipeline(
         min_auto_precision=min_auto_precision,
         min_official_url_rate=min_official_url_rate,
         max_unresolved_rate=max_unresolved_rate,
+        dedupe_summary=dedupe_summary,
     )
     write_manifest(paths["manifest"], manifest)
     if dry_run:
@@ -304,6 +319,7 @@ def pipeline_paths(run_dir: str | Path) -> dict[str, Path]:
 def build_manifest(
     *,
     source_csv: Path,
+    deduped_source_csv: Path,
     run_dir: Path,
     paths: dict[str, Path],
     labels_csv: Path | None,
@@ -329,18 +345,22 @@ def build_manifest(
     min_auto_precision: float,
     min_official_url_rate: float,
     max_unresolved_rate: float,
+    dedupe_summary: dict[str, Any],
 ) -> dict[str, Any]:
     batches = math.ceil(total_to_run / batch_size) if total_to_run else 0
     return {
         "workflow_version": WORKFLOW_VERSION,
         "created_at": datetime.now(timezone.utc).isoformat(),
         "source_csv": str(source_csv),
+        "deduped_source_csv": str(deduped_source_csv),
         "run_dir": str(run_dir),
         "config_path": str(config_path),
         "labels_csv": str(labels_csv) if labels_csv else "",
         "review_decisions_csv": str(review_decisions_csv) if review_decisions_csv else "",
         "parameters": {
             "normalized_provider_count": normalized_count,
+            "raw_csv_data_rows": dedupe_summary.get("raw_csv_data_rows", 0),
+            "duplicate_extra_rows_removed": dedupe_summary.get("duplicate_extra_rows", 0),
             "total_to_run": total_to_run,
             "batch_size": batch_size,
             "batches": batches,
@@ -363,8 +383,10 @@ def build_manifest(
         },
         "doctor": doctor_result,
         "outputs": {name: str(path) for name, path in paths.items()},
+        "dedupe": dedupe_summary,
         "commands": _equivalent_commands(
             source_csv=source_csv,
+            deduped_source_csv=deduped_source_csv,
             paths=paths,
             labels_csv=labels_csv,
             review_decisions_csv=review_decisions_csv,
@@ -402,6 +424,7 @@ def write_manifest(path: Path, manifest: dict[str, Any]) -> None:
 def _equivalent_commands(
     *,
     source_csv: Path,
+    deduped_source_csv: Path,
     paths: dict[str, Path],
     labels_csv: Path | None,
     review_decisions_csv: Path | None,
@@ -426,7 +449,11 @@ def _equivalent_commands(
     max_queries_arg = f" --max-queries {max_queries}" if max_queries else ""
     resume_arg = " --resume" if resume else ""
     commands = [
-        f"{python} -m finder.cli prepare --input {source_csv} --output {paths['normalized']}",
+        (
+            f"{python} tools/deduplicate_input.py --source {source_csv} "
+            f"--run-dir {paths['manifest'].parent} --write-xlsx"
+        ),
+        f"{python} -m finder.cli prepare --input {deduped_source_csv} --output {paths['normalized']}",
         f"{python} -m finder.cli doctor --input {paths['normalized']}",
         (
             f"{python} -m finder.cli run --input {paths['normalized']} --output {paths['results']} "

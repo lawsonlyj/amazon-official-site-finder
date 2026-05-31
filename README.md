@@ -71,6 +71,8 @@ The source CSV should keep the same Amazon provider format used by GSPN/SPN expo
 - Row 2: optional field descriptions.
 - Row 3+: provider rows.
 
+The Workflow Body now starts with an explicit deduplication step. Duplicate service rows for the same `provider_id` are merged into one provider row before search starts; service names, locations, languages, and service types are preserved as JSON list fields.
+
 Production search needs:
 
 - `BRAVE_API_KEY`
@@ -101,6 +103,15 @@ Intermediate evidence lives under:
 outputs/my_run/details/input/
 outputs/my_run/details/first_pass/
 outputs/my_run/details/second_pass/
+```
+
+The input folder includes the deduplication artifacts used by the run:
+
+```text
+outputs/my_run/details/input/deduped_input.csv
+outputs/my_run/details/input/deduped_input.xlsx
+outputs/my_run/details/input/dedupe_report.json
+outputs/my_run/details/input/dedupe_report.md
 ```
 
 Older public filenames such as `provider_final_official_websites_second_pass.csv`, `provider_official_websites_second_pass_with_clickable_links.xlsx`, and `manual_official_site_review_task.xlsx` are still accepted as fallback inputs. Duplicate legacy outputs are only written when `FINDER_WRITE_LEGACY_ALIASES=1`.
@@ -138,13 +149,14 @@ outputs/my_run/reviewed/labels.csv
 
 ## What The Workflow Body Runs
 
-1. `tools/preflight_report.py`
-2. `tools/run_pipeline.py`
-3. `finder/` scoring/search/fetch logic
-4. `tools/run_unresolved_second_pass.py`
-5. `tools/build_manual_review_task.py`
-6. `tools/build_linked_workbook.py`
-7. `tools/verify_run_outputs.py`
+1. `tools/deduplicate_input.py`
+2. `tools/preflight_report.py`
+3. `tools/run_pipeline.py`
+4. `finder/` scoring/search/fetch logic
+5. `tools/run_unresolved_second_pass.py`
+6. `tools/build_manual_review_task.py`
+7. `tools/build_linked_workbook.py`
+8. `tools/verify_run_outputs.py`
 
 The first-pass and second-pass default accept thresholds are both `75`. Second pass still requires strong evidence and URL-risk checks.
 

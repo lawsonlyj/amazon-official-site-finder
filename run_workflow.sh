@@ -97,6 +97,13 @@ if [[ ! -d .vendor_eval ]]; then
   python3 -m pip install --target .vendor_eval -r requirements-optional.txt
 fi
 
+RAW_SOURCE_CSV="$SOURCE_CSV"
+PYTHONPATH=.vendor_eval:. python3 tools/deduplicate_input.py \
+  --source "$RAW_SOURCE_CSV" \
+  --run-dir "$RUN_DIR" \
+  --write-xlsx
+SOURCE_CSV="$RUN_DIR/details/input/deduped_input.csv"
+
 PREFLIGHT_ARGS=(--source "$SOURCE_CSV" --run-dir "$RUN_DIR" --live-check)
 PIPELINE_ARGS=(--source "$SOURCE_CSV" --run-dir "$RUN_DIR")
 if [[ -n "$LABELS_CSV" ]]; then
@@ -193,6 +200,9 @@ if [[ "$RUN_CHECK_SUGGESTION" == "1" ]]; then
 fi
 
 echo "Done."
+echo "Deduplicated input CSV: $RUN_DIR/details/input/deduped_input.csv"
+echo "Deduplicated input XLSX: $RUN_DIR/details/input/deduped_input.xlsx"
+echo "Deduplication report: $RUN_DIR/details/input/dedupe_report.md"
 echo "Final CSV: $RUN_DIR/official_sites.csv"
 echo "Clickable XLSX: $RUN_DIR/official_sites.xlsx"
 echo "Unresolved CSV: $RUN_DIR/unresolved.csv"
