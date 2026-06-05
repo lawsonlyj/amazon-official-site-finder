@@ -28,7 +28,6 @@ from tools.evaluate_labeled_results import read_rows as read_csv_rows
 from tools.output_layout import (
     agent_b_paths,
     first_existing,
-    publish_second_pass_aliases,
     second_pass_paths,
 )
 from tools.quality_gate import evaluate_quality_gate, write_markdown as write_quality_markdown
@@ -151,7 +150,6 @@ def apply_pattern_release_to_run(
     )
     write_quality_markdown(quality, quality_md_path)
     quality_json_path.write_text(json.dumps(quality, ensure_ascii=False, indent=2), encoding="utf-8")
-    aliases = publish_second_pass_aliases(run_dir, paths)
     review_task = build_manual_review_task(run_dir=run_dir, write_xlsx=True)
 
     summary = {
@@ -177,7 +175,6 @@ def apply_pattern_release_to_run(
         "quality_passed": quality["overall"]["passed"],
         "quality_failures": quality["overall"]["failures"],
         "review_task": review_task,
-        "legacy_aliases": aliases,
         "workbook": xlsx_summary,
     }
 

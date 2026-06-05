@@ -28,7 +28,6 @@ from tools.output_layout import (
     WORKFLOW_VERSION,
     agent_b_paths,
     first_existing,
-    publish_agent_b_aliases,
 )
 
 
@@ -170,17 +169,6 @@ def run_agent_b_verification(
     summary_path.write_text(
         json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8"
     )
-    aliases = publish_agent_b_aliases(
-        run_dir,
-        {
-            "csv": output_csv_path,
-            "jsonl": output_jsonl_path,
-            "xlsx": output_xlsx_path,
-            "summary": summary_path,
-        },
-    )
-    summary["legacy_aliases"] = aliases
-    summary_path.write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
     _update_manifest(run_dir / "manifest.json", summary)
     return summary
 
@@ -1055,7 +1043,6 @@ def _update_manifest(path: Path, summary: dict) -> None:
     manifest = json.loads(path.read_text(encoding="utf-8"))
     manifest["check_suggestion_verification"] = summary
     manifest.setdefault("outputs", {}).update({f"check_suggestion_{key}": value for key, value in summary["outputs"].items()})
-    manifest.setdefault("legacy_aliases", {})["check_suggestion"] = summary.get("legacy_aliases", {})
     path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
 
 

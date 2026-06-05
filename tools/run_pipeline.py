@@ -25,7 +25,7 @@ from tools.output_layout import (
     DEFAULT_SECOND_PASS_ACCEPT_THRESHOLD,
     WORKFLOW_VERSION,
     pipeline_paths as canonical_pipeline_paths,
-    publish_first_pass_aliases,
+    publish_first_pass_outputs,
 )
 from tools.quality_gate import evaluate_quality_gate, write_markdown as write_quality_markdown
 from tools.run_unresolved_second_pass import run_unresolved_second_pass
@@ -246,7 +246,7 @@ def run_pipeline(
     )
     write_quality_markdown(quality, paths["quality_md"])
     paths["quality_json"].write_text(json.dumps(quality, ensure_ascii=False, indent=2), encoding="utf-8")
-    first_pass_aliases = publish_first_pass_aliases(run_dir, paths)
+    publish_first_pass_outputs(run_dir, paths)
     manifest["summary"].update(
         {
             "status": "complete",
@@ -260,7 +260,6 @@ def run_pipeline(
         }
     )
     manifest["outputs"] = {name: str(path) for name, path in paths.items()}
-    manifest.setdefault("legacy_aliases", {})["first_pass"] = first_pass_aliases
     manifest["enrich"] = enrich_summary
     manifest["audit"] = audit
     manifest["finalize"] = final_summary
@@ -307,7 +306,6 @@ def run_pipeline(
             "manual_review_task_xlsx": manual_review_task["output_xlsx"],
         }
     )
-    manifest.setdefault("legacy_aliases", {})["review_task"] = manual_review_task.get("legacy_aliases", {})
     write_manifest(paths["manifest"], manifest)
     return manifest
 

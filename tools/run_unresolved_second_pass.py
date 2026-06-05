@@ -22,7 +22,6 @@ from tools.evaluate_labeled_results import read_rows as read_csv_rows
 from tools.output_layout import (
     DEFAULT_SECOND_PASS_ACCEPT_THRESHOLD,
     first_existing,
-    publish_second_pass_aliases,
     second_pass_paths as canonical_second_pass_paths,
 )
 from tools.plan_unresolved_second_pass import build_second_pass_plan, summarize_plan
@@ -226,9 +225,6 @@ def run_unresolved_second_pass(
         "outputs": {name: str(path) for name, path in paths.items()},
         "xlsx": xlsx,
     }
-    paths["summary"].write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
-    aliases = publish_second_pass_aliases(run_dir, paths)
-    summary["legacy_aliases"] = aliases
     paths["summary"].write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
     _update_manifest(run_dir / "manifest.json", summary)
     return summary
@@ -812,7 +808,6 @@ def _update_manifest(path: Path, summary: dict) -> None:
             "second_pass_xlsx": summary["outputs"]["xlsx"],
         }
     )
-    manifest.setdefault("legacy_aliases", {})["second_pass"] = summary.get("legacy_aliases", {})
     path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
 
 

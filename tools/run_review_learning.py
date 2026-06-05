@@ -17,7 +17,7 @@ from finder.scoring import load_config
 from finder.text import domain_from_url
 from tools.build_linked_workbook import build_workbook
 from tools.evaluate_labeled_results import read_rows as read_csv_rows
-from tools.output_layout import first_existing, publish_reviewed_aliases, reviewed_paths as canonical_reviewed_paths
+from tools.output_layout import first_existing, reviewed_paths as canonical_reviewed_paths
 from tools.quality_gate import evaluate_quality_gate, write_markdown as write_quality_markdown
 
 
@@ -179,9 +179,6 @@ def run_review_learning(
     }
     paths["summary"].write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
     _write_report(paths["report_md"], summary)
-    aliases = publish_reviewed_aliases(run_dir, paths)
-    summary["legacy_aliases"] = aliases
-    paths["summary"].write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
     _update_manifest(run_dir / "manifest.json", summary)
     return summary
 
@@ -549,7 +546,6 @@ def _update_manifest(path: Path, summary: dict[str, Any]) -> None:
         }
     )
     manifest.setdefault("outputs", {}).update({f"review_{name}": value for name, value in summary["outputs"].items()})
-    manifest.setdefault("legacy_aliases", {})["reviewed"] = summary.get("legacy_aliases", {})
     path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
 
 

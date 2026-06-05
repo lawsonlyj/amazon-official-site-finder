@@ -15,7 +15,6 @@ from finder.text import domain_from_url
 from tools.output_layout import (
     agent_b_suggestion_paths,
     first_existing,
-    publish_agent_b_suggestion_aliases,
 )
 
 
@@ -87,9 +86,6 @@ def run_agent_b_recommendations(
     output_md_path.parent.mkdir(parents=True, exist_ok=True)
     output_json_path.write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
     _write_markdown(output_md_path, summary)
-    aliases = publish_agent_b_suggestion_aliases(run_dir, {"json": output_json_path, "md": output_md_path})
-    summary["legacy_aliases"] = aliases
-    output_json_path.write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
     _update_manifest(run_dir / "manifest.json", summary)
     return summary
 
@@ -584,7 +580,6 @@ def _update_manifest(path: Path, summary: dict) -> None:
     manifest.setdefault("outputs", {}).update(
         {f"check_suggestion_suggestions_{key}": value for key, value in summary["outputs"].items()}
     )
-    manifest.setdefault("legacy_aliases", {})["check_suggestion_suggestions"] = summary.get("legacy_aliases", {})
     path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
 
 

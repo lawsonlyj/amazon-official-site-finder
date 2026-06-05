@@ -15,7 +15,6 @@ from tools.output_layout import (
     DEFAULT_MATCHED_REVIEW_CONFIDENCE_CUTOFF,
     DEFAULT_SECOND_PASS_REVIEW_CONFIDENCE_CUTOFF,
     first_existing,
-    publish_review_task_aliases,
     review_task_paths,
 )
 
@@ -108,7 +107,6 @@ def build_manual_review_task(
     output_xlsx_path = Path(output_xlsx) if output_xlsx else canonical["xlsx"]
     if write_xlsx:
         xlsx_summary = build_workbook([("Manual_Review_Task", output_csv_path)], output_xlsx_path)
-    aliases = publish_review_task_aliases(run_dir, {"csv": output_csv_path, "xlsx": output_xlsx_path})
 
     return {
         "review_rows": len(task_rows),
@@ -117,7 +115,6 @@ def build_manual_review_task(
         "source_final_csv": str(final_path),
         "output_csv": str(output_csv_path),
         "output_xlsx": str(output_xlsx_path) if write_xlsx else "",
-        "legacy_aliases": aliases,
         "xlsx": xlsx_summary,
         "reason_counts": _reason_counts(task_rows),
     }

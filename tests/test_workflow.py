@@ -1507,7 +1507,6 @@ class OperationalCommandTests(unittest.TestCase):
         self.assertEqual(task_rows[1]["top_candidate_url"], "https://candidate.example")
         self.assertTrue(task_xlsx_exists)
         self.assertFalse(legacy_task_exists)
-        self.assertEqual(summary["legacy_aliases"], {})
 
     def test_build_manual_review_task_flags_high_confidence_ambiguous_identity_risks(self):
         with tempfile.TemporaryDirectory() as tmp:

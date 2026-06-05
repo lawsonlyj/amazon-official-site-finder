@@ -9,7 +9,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from finder.scoring import load_config
-from tools.output_layout import agent_a_paths, first_existing, publish_agent_a_aliases
+from tools.output_layout import agent_a_paths, first_existing
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -132,9 +132,6 @@ def apply_agent_optimizations(
     }
     canonical["applied"].parent.mkdir(parents=True, exist_ok=True)
     canonical["applied"].write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
-    aliases = publish_agent_a_aliases(run_dir, canonical)
-    summary["legacy_aliases"] = aliases
-    canonical["applied"].write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
     _update_manifest(run_dir / "manifest.json", summary)
     return summary
 
@@ -214,7 +211,6 @@ def _update_manifest(path: Path, summary: dict) -> None:
     manifest.setdefault("outputs", {})["operation_optimization_applied"] = summary.get("outputs", {}).get(
         "applied", str(path.parent / "operation_optimization/applied.json")
     )
-    manifest.setdefault("legacy_aliases", {})["operation_optimization"] = summary.get("legacy_aliases", {})
     path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
