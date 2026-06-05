@@ -527,13 +527,18 @@ def _has_blocking_identity_cap(result: dict) -> bool:
         "identity_cap_logo_only_evidence",
         "identity_cap_missing_service_country_corroboration",
     }
+    # Only the SELECTED official candidate's identity gates may block acceptance.
+    # Previously this also scanned every sibling candidate, so a clean high-confidence
+    # winner was wrongly rejected whenever any other (unselected) candidate for the same
+    # provider carried an identity cap. Match the chosen official_url; fall back to the
+    # result evidence summary, which already holds the selected candidate's reasons.
+    official_url = (result.get("official_url") or "").rstrip("/")
+    if official_url:
+        for candidate in result.get("candidates", []):
+            if (candidate.get("url") or "").rstrip("/") == official_url:
+                return bool(set(candidate.get("reasons") or []) & blocking)
     summary = set(str(result.get("evidence_summary", "")).split("; "))
-    if summary & blocking:
-        return True
-    for candidate in result.get("candidates", []):
-        if set(candidate.get("reasons") or []) & blocking:
-            return True
-    return False
+    return bool(summary & blocking)
 
 
 def _has_strong_second_pass_reason(result: dict) -> bool:

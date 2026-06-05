@@ -71,6 +71,8 @@ from tools.reuse_historical_labels_for_task import reuse_historical_labels_for_t
 from tools.apply_calibration_regression_cases import apply_calibration_regression_cases
 from tools.build_policy_validation_task import build_policy_validation_task
 from tools.evaluate_policy_validation_task import evaluate_policy_validation_task
+from tools.build_visual_verification_task import build_visual_verification_task
+from tools.apply_visual_verification import apply_visual_verification
 from tools.output_layout import (
     DEFAULT_MATCHED_REVIEW_CONFIDENCE_CUTOFF,
     DEFAULT_SECOND_PASS_ACCEPT_THRESHOLD,
@@ -9478,6 +9480,133 @@ class OperationalCommandTests(unittest.TestCase):
         self.assertEqual(DEFAULT_SECOND_PASS_ACCEPT_THRESHOLD, 75)
         self.assertTrue(_accepted(matched_75, config, DEFAULT_SECOND_PASS_ACCEPT_THRESHOLD))
         self.assertFalse(_accepted(matched_74, config, DEFAULT_SECOND_PASS_ACCEPT_THRESHOLD))
+
+    def test_second_pass_sibling_candidate_cap_does_not_block_clean_winner(self):
+        # Regression: a clean high-confidence selected candidate must not be rejected
+        # just because an unselected sibling candidate for the same provider carries an
+        # identity cap. (Previously _has_blocking_identity_cap scanned every candidate.)
+        config = load_config()
+        result = {
+            "official_url": "https://www.embarcconsulting.com/",
+            "status": "matched",
+            "confidence": "100",
+            "evidence_summary": "page_contains_exact_provider_name; page_contains_amazon_service_keywords; domain_exact_provider_slug",
+            "candidates": [
+                {
+                    "url": "https://www.embarcconsulting.com/",
+                    "reject": False,
+                    "source": "brave",
+                    "reasons": [
+                        "page_contains_exact_provider_name",
+                        "page_contains_amazon_service_keywords",
+                        "domain_exact_provider_slug",
+                    ],
+                },
+                {
+                    "url": "https://some-other-samename.com/",
+                    "reject": False,
+                    "source": "brave",
+                    "reasons": ["identity_cap_ambiguous_name_requires_page_and_service"],
+                },
+            ],
+        }
+        self.assertTrue(_accepted(result, config, DEFAULT_SECOND_PASS_ACCEPT_THRESHOLD))
+
+    def test_second_pass_selected_candidate_cap_still_blocks(self):
+        # The selected official candidate's own identity cap must still block acceptance.
+        config = load_config()
+        result = {
+            "official_url": "https://www.ambiguousname.com/",
+            "status": "matched",
+            "confidence": "100",
+            "evidence_summary": "identity_cap_ambiguous_name_requires_page_and_service; page_contains_exact_provider_name",
+            "candidates": [
+                {
+                    "url": "https://www.ambiguousname.com/",
+                    "reject": False,
+                    "source": "brave",
+                    "reasons": [
+                        "identity_cap_ambiguous_name_requires_page_and_service",
+                        "page_contains_exact_provider_name",
+                    ],
+                }
+            ],
+        }
+        self.assertFalse(_accepted(result, config, DEFAULT_SECOND_PASS_ACCEPT_THRESHOLD))
+
+    def test_build_visual_verification_task_selects_uncertain_rows(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            run_dir = Path(tmp)
+            final_rows = [
+                {"provider_id": "p-clean", "provider_name": "Bright Ledger Labs", "official_url": "https://brightledgerlabs.com/", "official_domain": "brightledgerlabs.com", "status": "matched", "confidence": "100", "evidence_summary": "page_contains_exact_provider_name; domain_exact_provider_slug", "provider_detail_url": "https://amazon/x", "listing_logo_url": "https://logo/clean.png"},
+                {"provider_id": "p-samename", "provider_name": "Amazon Seller Agency", "official_url": "https://amazonselleragency.com/", "official_domain": "amazonselleragency.com", "status": "matched", "confidence": "100", "evidence_summary": "domain_exact_provider_slug", "provider_detail_url": "https://amazon/y", "listing_logo_url": "https://logo/sn.png"},
+                {"provider_id": "p-lowconf", "provider_name": "Brightpeak Mercantile Atlas", "official_url": "https://brightpeak.com/", "official_domain": "brightpeak.com", "status": "matched", "confidence": "80", "evidence_summary": "domain_contains_provider_slug", "provider_detail_url": "https://amazon/z", "listing_logo_url": "https://logo/lc.png"},
+                {"provider_id": "p-unresolved-cand", "provider_name": "Northwind Trading House", "official_url": "", "official_domain": "", "status": "unresolved", "confidence": "", "evidence_summary": "", "provider_detail_url": "https://amazon/u", "listing_logo_url": "https://logo/u.png"},
+                {"provider_id": "p-unresolved-nocand", "provider_name": "Silverbrook Holdings", "official_url": "", "official_domain": "", "status": "not_found", "confidence": "", "evidence_summary": "", "provider_detail_url": "https://amazon/n", "listing_logo_url": ""},
+            ]
+            _write_test_csv(run_dir / "official_sites.csv", final_rows)
+            sp_rows = [
+                {"provider_id": "p-unresolved-cand", "provider_name": "Northwind Trading House", "previous_top_candidate_url": "https://northwindtrading.com/", "official_url": "", "evidence_summary": ""},
+                {"provider_id": "p-unresolved-nocand", "provider_name": "Silverbrook Holdings", "previous_top_candidate_url": "", "official_url": "", "evidence_summary": ""},
+            ]
+            _write_test_csv(run_dir / "details/second_pass/results.csv", sp_rows)
+
+            summary = build_visual_verification_task(run_dir=run_dir, render=False, write_xlsx=False)
+            with (run_dir / "visual_verification/visual_verification_task.csv").open(encoding="utf-8-sig") as f:
+                rows = list(csv.DictReader(f))
+            by_id = {row["provider_id"]: row for row in rows}
+
+            self.assertIn("p-samename", by_id)
+            self.assertIn("p-lowconf", by_id)
+            self.assertIn("p-unresolved-cand", by_id)
+            self.assertNotIn("p-clean", by_id)
+            self.assertNotIn("p-unresolved-nocand", by_id)
+            self.assertEqual(by_id["p-samename"]["review_reason"], "precision_same_name_risk")
+            self.assertEqual(by_id["p-lowconf"]["review_reason"], "precision_low_confidence_accept")
+            self.assertEqual(by_id["p-unresolved-cand"]["review_reason"], "recall_unresolved_candidate")
+            self.assertEqual(by_id["p-unresolved-cand"]["official_url"], "https://northwindtrading.com/")
+            self.assertFalse(summary["renderer_available"])
+            self.assertEqual(summary["rendered_screenshots"], 0)
+
+    def test_apply_visual_verification_overwrites_canonical_outputs(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            run_dir = Path(tmp)
+            enriched = [
+                {"provider_id": "p-clean", "provider_name": "Bright Ledger Labs", "status": "matched", "official_url": "https://brightledgerlabs.com/", "official_domain": "brightledgerlabs.com", "confidence": "100", "evidence_summary": "page_contains_exact_provider_name", "provider_detail_url": "https://amazon/x", "listing_logo_url": "", "candidate_count": "3", "scored_candidate_count": "3", "service_apis": "[]", "provider_locations": "[]"},
+                {"provider_id": "p-samename", "provider_name": "Amazon Seller Agency", "status": "needs_review", "official_url": "", "official_domain": "", "confidence": "100", "evidence_summary": "domain_exact_provider_slug", "provider_detail_url": "https://amazon/y", "listing_logo_url": "", "candidate_count": "4", "scored_candidate_count": "4", "service_apis": "[]", "provider_locations": "[]"},
+                {"provider_id": "p-unresolved-cand", "provider_name": "Northwind Trading House", "status": "not_found", "official_url": "", "official_domain": "", "confidence": "", "evidence_summary": "", "provider_detail_url": "https://amazon/u", "listing_logo_url": "", "candidate_count": "2", "scored_candidate_count": "2", "service_apis": "[]", "provider_locations": "[]"},
+            ]
+            _write_test_csv(run_dir / "details/first_pass/enriched.csv", enriched)
+            _write_test_csv(run_dir / "details/second_pass/decisions.csv", [
+                {"provider_id": "p-samename", "provider_name": "Amazon Seller Agency", "manual_decision": "replace", "manual_url": "https://amazonselleragency.com/", "notes": "second_pass_auto_accept", "source_status": "matched", "evidence_summary": "domain_exact_provider_slug"},
+            ])
+            _write_test_csv(run_dir / "details/second_pass/results.csv", [
+                {"provider_id": "p-unresolved-cand", "provider_name": "Northwind Trading House", "previous_top_candidate_url": "https://northwindtrading.com/", "official_url": "", "evidence_summary": ""},
+            ])
+            _write_test_csv(run_dir / "official_sites.csv", [
+                {"provider_id": "p-clean", "provider_name": "Bright Ledger Labs", "provider_detail_url": "https://amazon/x", "listing_logo_url": "", "official_url": "https://brightledgerlabs.com/", "official_domain": "brightledgerlabs.com", "status": "matched", "decision_source": "auto_matched", "confidence": "100", "source_status": "matched", "evidence_summary": "page_contains_exact_provider_name", "candidate_count": "3", "scored_candidate_count": "3", "service_apis": "[]", "provider_locations": "[]", "notes": ""},
+                {"provider_id": "p-samename", "provider_name": "Amazon Seller Agency", "provider_detail_url": "https://amazon/y", "listing_logo_url": "", "official_url": "https://amazonselleragency.com/", "official_domain": "amazonselleragency.com", "status": "manual_accepted", "decision_source": "manual_replace", "confidence": "100", "source_status": "needs_review", "evidence_summary": "domain_exact_provider_slug", "candidate_count": "4", "scored_candidate_count": "4", "service_apis": "[]", "provider_locations": "[]", "notes": ""},
+                {"provider_id": "p-unresolved-cand", "provider_name": "Northwind Trading House", "provider_detail_url": "https://amazon/u", "listing_logo_url": "", "official_url": "", "official_domain": "", "status": "unresolved", "decision_source": "pending_review", "confidence": "", "source_status": "not_found", "evidence_summary": "", "candidate_count": "2", "scored_candidate_count": "2", "service_apis": "[]", "provider_locations": "[]", "notes": ""},
+            ])
+            (run_dir / "manifest.json").write_text(json.dumps({"parameters": {"total_to_run": 3}}), encoding="utf-8")
+
+            verdict_csv = run_dir / "verdicts.csv"
+            _write_test_csv(verdict_csv, [
+                {"provider_id": "p-samename", "provider_name": "Amazon Seller Agency", "manual_decision": "reject", "manual_url": "", "official_url": "https://amazonselleragency.com/", "candidate_1_url": "https://amazonselleragency.com/", "notes": "wrong entity"},
+                {"provider_id": "p-unresolved-cand", "provider_name": "Northwind Trading House", "manual_decision": "replace", "manual_url": "https://northwindtrading.com/", "official_url": "", "candidate_1_url": "https://northwindtrading.com/", "notes": "confirmed official site"},
+            ])
+
+            summary = apply_visual_verification(run_dir=run_dir, verdicts_path=verdict_csv, write_xlsx=False)
+
+            with (run_dir / "official_sites.csv").open(encoding="utf-8-sig") as f:
+                final = {row["provider_id"]: row for row in csv.DictReader(f)}
+            self.assertEqual(final["p-samename"]["official_url"], "")
+            self.assertEqual(final["p-samename"]["status"], "rejected")
+            self.assertEqual(final["p-unresolved-cand"]["official_url"], "https://northwindtrading.com/")
+            self.assertEqual(final["p-clean"]["official_url"], "https://brightledgerlabs.com/")
+            self.assertEqual(summary["decision_counts"].get("reject"), 1)
+            self.assertEqual(summary["decision_counts"].get("replace"), 1)
+            self.assertTrue(Path(summary["outputs"]["combined_decisions"]).exists())
 
     def test_second_pass_accepts_lower_score_only_with_verified_identity(self):
         config = load_config()

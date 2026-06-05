@@ -174,6 +174,37 @@ When the user provides a filled review file, Codex should run this from the repo
 
 This calls `tools/run_review_learning.py`, which merges the filled manual decisions with existing second-pass decisions, writes reviewed final outputs, creates `reviewed/labels.csv`, reruns the quality gate, and writes `reviewed/learning.md`.
 
+## Visual Verification (codex-assisted)
+
+This is the one place where Codex (the agent) participates directly in the Workflow Body. The deterministic second pass still does all search, scoring, and the obvious accept/reject. Codex only adjudicates the uncertain rows by *looking* at the candidate site, which the rules cannot do. `run_workflow.sh` stays pure-script; this step belongs to the codex-assisted path only.
+
+Run it after the workflow completes, when the user wants higher precision/recall on the uncertain rows (or asks Codex to "check the sites").
+
+1. Build the task (renders one screenshot per uncertain candidate site and lays them into review grids):
+
+```bash
+python3 tools/build_visual_verification_task.py --run-dir "outputs/my_run"
+```
+
+   - Selected rows are the ones the deterministic pass is least reliable on: accepted rows with same-name/ambiguous-identity risk or `confidence < 85`, plus unresolved rows that still have a usable candidate URL. Clean high-confidence rows are not touched.
+   - Output: `outputs/my_run/visual_verification/` with `screenshots/`, `grids/grid_*.png`, and `visual_verification_task.csv`/`.xlsx`.
+   - Rendering needs Playwright + chromium (`python3 -m playwright install chromium`). If unavailable, the task is still written URL-only (`renderer_available: false`) and Codex should open the candidate URLs directly instead.
+
+2. Codex looks at each `grids/grid_*.png` (left = Amazon listing logo, right = the rendered candidate site) and fills the task's `manual_decision` / `manual_url` / `notes` for each row:
+   - `accept` — the screenshot is clearly this provider's official site.
+   - `reject` — wrong entity (e.g. a same-name t-shirt manufacturer or insurance company), parked/login/marketplace/social page, or a bot-challenge page that cannot be confirmed.
+   - `replace` — a different, correct official site was found; put it in `manual_url`.
+   - `unsure` — cannot tell; leaves the deterministic decision untouched.
+
+3. Apply the verdicts (overwrites the canonical `official_sites.csv`, `unresolved.csv`, `quality.json`, `official_sites.xlsx`, `review_task.*`, and `manifest.json` in place):
+
+```bash
+python3 tools/apply_visual_verification.py --run-dir "outputs/my_run" \
+  --verdicts "outputs/my_run/visual_verification/visual_verification_task.xlsx"
+```
+
+Never let visual verdicts auto-apply without the agent actually viewing the screenshots. Bot-blocked sites should be left `unsure`, not accepted.
+
 ## Development Workflow
 
 Use the development workflow only when the user asks to optimize, calibrate, compare rules, run Check and Suggestion, or continue workflow development. The normal GitHub user path should not include these steps.
