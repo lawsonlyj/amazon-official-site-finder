@@ -14,7 +14,7 @@ Separate two modes in user-facing responses:
 - **Workflow Body**: normal reusable workflow for GitHub users. It runs structured search, scoring, second-pass, review task generation, output verification, and reviewed output generation. This is the default.
 - **Development Workflow**: maintainer workflow for calibration and improvement. It is `Operation and Optimization -> CheckAgent -> human review -> OptimizationAgent -> deterministic gate -> Operation and Optimization`. CheckAgent and OptimizationAgent are development-stage agent roles; the normal Workflow Body remains structured and deterministic.
 
-Legacy script names still include `agent_b`, `agent_c`, and `agent_optimizations` for compatibility. Treat `agent_c` as a legacy wrapper for suggestion behavior, not as a current standalone role. Do not describe the normal Workflow Body as autonomous multi-agent execution. Only use Development Workflow tools when the user explicitly asks to optimize, calibrate, compare rules, run CheckAgent/Check and Suggestion, or work on maintainer/development flow.
+Legacy script names still include `agent_b` and `agent_optimizations` for compatibility. The old `agent_c` wrapper has been removed; suggestion behavior belongs to CheckAgent / Check and Suggestion in the development workflow. Do not describe the normal Workflow Body as autonomous multi-agent execution. Only use Development Workflow tools when the user explicitly asks to optimize, calibrate, compare rules, run CheckAgent/Check and Suggestion, or work on maintainer/development flow.
 
 ## Default User Experience
 
@@ -78,7 +78,7 @@ Run this from the repo root. Substitute the paths provided by the user.
 
 This command creates/updates `.env` and then runs the full workflow. The configure step prints only a boolean summary and must not print secrets.
 If the user did not provide an output directory, omit `--run-dir`; the script will create `outputs/codex_run_YYYYMMDD_HHMMSS`.
-New runs write short canonical filenames by default; legacy names and flags are read as fallback and can be written with `FINDER_WRITE_LEGACY_ALIASES=1`.
+New runs write short canonical filenames only. Legacy names and flags are still read as fallback when opening historical run directories, but duplicate legacy output writing has been removed.
 
 If you need to run the two steps separately:
 
@@ -114,7 +114,7 @@ outputs/my_run/details/input/deduped_input.xlsx
 outputs/my_run/details/input/dedupe_report.md
 ```
 
-Report these files with absolute paths. Legacy public filenames are not written by default; old files such as `provider_final_official_websites_second_pass.csv`, `provider_official_websites_second_pass_with_clickable_links.xlsx`, and `manual_official_site_review_task.xlsx` are still accepted as fallback inputs, and can be written for external compatibility by setting `FINDER_WRITE_LEGACY_ALIASES=1`.
+Report these files with absolute paths. Legacy public filenames are not written by new runs; old files such as `provider_final_official_websites_second_pass.csv`, `provider_official_websites_second_pass_with_clickable_links.xlsx`, and `manual_official_site_review_task.xlsx` are still accepted as fallback inputs when opening historical run directories.
 
 ## Verification
 

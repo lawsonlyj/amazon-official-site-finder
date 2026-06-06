@@ -2,7 +2,7 @@
 
 This repository provides a reusable, structured workflow for finding independent official websites for Amazon GSPN/SPN provider rows.
 
-The default GitHub workflow is the **Workflow Body**: search, score, second-pass, output files, quality checks, and a small manual review workbook. It does not require autonomous agents or an OpenAI API key.
+The default GitHub workflow is the **Workflow Body**: search, score, second-pass, output files, quality checks, and a small manual review workbook. It does not require autonomous agents or an OpenAI API key. The Codex-assisted path can optionally add visual verification after the deterministic workflow finishes.
 
 Maintainer-only calibration and optimization tools are documented separately in [docs/DEVELOPMENT_WORKFLOW_CN.md](docs/DEVELOPMENT_WORKFLOW_CN.md).
 
@@ -61,7 +61,7 @@ To run the real development agents, add `OPENAI_API_KEY` to `.env` and explicitl
 
 Optional maintainer flags include `--human-review`, `--run-check-agent`, `--run-optimization-agent`, `--apply-operation-optimizations`, and `--pattern-release-json`. They are not part of the normal user path.
 
-Legacy flags such as `--run-agent-b` and `--apply-agent-optimizations` are still accepted for old scripts. `agent_c` is only a legacy wrapper; suggestion behavior belongs to CheckAgent / Check and Suggestion in the development workflow.
+Legacy flags such as `--run-agent-b` and `--apply-agent-optimizations` are still accepted for old scripts. The old `agent_c` wrapper has been removed; suggestion behavior belongs to CheckAgent / Check and Suggestion in the development workflow.
 
 ## Inputs
 
@@ -114,7 +114,7 @@ outputs/my_run/details/input/dedupe_report.json
 outputs/my_run/details/input/dedupe_report.md
 ```
 
-Older public filenames such as `provider_final_official_websites_second_pass.csv`, `provider_official_websites_second_pass_with_clickable_links.xlsx`, and `manual_official_site_review_task.xlsx` are still accepted as fallback inputs. Duplicate legacy outputs are only written when `FINDER_WRITE_LEGACY_ALIASES=1`.
+Older public filenames such as `provider_final_official_websites_second_pass.csv`, `provider_official_websites_second_pass_with_clickable_links.xlsx`, and `manual_official_site_review_task.xlsx` are still accepted as fallback inputs for historical run directories. New runs only write the short canonical filenames shown above; duplicate legacy output writing has been removed.
 
 ## Manual Review
 
@@ -159,6 +159,24 @@ outputs/my_run/reviewed/labels.csv
 8. `tools/verify_run_outputs.py`
 
 The first-pass and second-pass default accept thresholds are both `75`. Second pass still requires strong evidence and URL-risk checks.
+
+## Codex-Assisted Visual Verification
+
+When higher precision is needed on uncertain rows, Codex can add a visual verification pass after `run_workflow.sh` completes. This is the only normal Workflow Body step where Codex directly judges candidates; `run_workflow.sh` itself remains pure script.
+
+```bash
+python3 -m playwright install chromium
+python3 tools/build_visual_verification_task.py --run-dir "outputs/my_run"
+```
+
+Codex then opens `outputs/my_run/visual_verification/grids/grid_*.png`, fills `manual_decision`, `manual_url`, and `notes` in the generated task, and applies the verdicts:
+
+```bash
+python3 tools/apply_visual_verification.py --run-dir "outputs/my_run" \
+  --verdicts "outputs/my_run/visual_verification/visual_verification_task.xlsx"
+```
+
+The apply step overwrites the canonical `official_sites.csv`, `official_sites.xlsx`, `unresolved.csv`, `quality.json`, `review_task.*`, and `manifest.json` in place. Use `unsure` for bot-blocked or visually inconclusive pages.
 
 ## Maintainer Development Outputs
 

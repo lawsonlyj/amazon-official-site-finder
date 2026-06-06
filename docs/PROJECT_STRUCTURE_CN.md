@@ -13,7 +13,7 @@
 - **OptimizationAgent**：真正的开发阶段 agent 2，读取 CheckAgent 建议、人工标签和指标报告，判断是否值得吸收、是否需要更多标签、模拟或规则修改。
 - **Deterministic Gate**：固定门禁，跑测试、指标和回归样例；只有通过后才允许 Operation and Optimization 应用规则。
 
-历史脚本名里仍保留 `agent_b`、`agent_c`、`agent_optimizations`，只是为了旧命令、旧输出读取兼容；`agent_c` 不再作为当前独立角色，建议功能并入 CheckAgent / Check and Suggestion。
+历史脚本名里仍保留 `agent_b` 和 `agent_optimizations`，只是为了旧命令、旧输出读取兼容；旧 `agent_c` wrapper 已删除，建议功能并入 CheckAgent / Check and Suggestion。
 
 ## 最终目录
 
@@ -42,8 +42,9 @@ amazon-official-site-finder/
     run_optimization_agent.py         # 真实 LLM OptimizationAgent；开发流程显式启用
     build_development_cycle_report.py # 汇总每轮 Development Workflow 指标
     run_agent_b_verification.py        # 旧脚本名；当前开发角色叫 CheckAgent / Check and Suggestion
-    run_agent_c_recommendations.py      # 旧命令兼容入口
     apply_agent_optimizations.py        # 旧脚本名；当前对外叫 Operation and Optimization 安全应用
+    build_visual_verification_task.py   # Codex-assisted 视觉核验任务生成
+    apply_visual_verification.py        # 应用 Codex 视觉核验判定并覆盖 canonical 输出
     apply_pattern_release_to_run.py
     build_policy_validation_task.py
     evaluate_policy_validation_task.py
@@ -169,6 +170,10 @@ run_codex_assisted.sh
            -> tools/plan_unresolved_second_pass.py
            -> tools/build_linked_workbook.py
      -> tools/build_manual_review_task.py
+     -> 可选 Codex-assisted 视觉核验：
+        -> tools/build_visual_verification_task.py
+        -> Codex 查看 visual_verification/grids/*.png 并填写判定
+        -> tools/apply_visual_verification.py
      -> 开发流程可选 CheckAgent / Check and Suggestion：tools/run_agent_b_verification.py + tools/run_agent_b_recommendations.py
         -> 可选读取 filled human-review XLSX，生成 notes 分类、无官网标签和回归样例建议
      -> 开发流程可选 OptimizationAgent 判断建议 + Deterministic Gate
@@ -210,6 +215,8 @@ Codex receives filled manual review workbook
 | `finder/scoring.py` | 官网打分器。当前版本加入身份 cap：同名/通用名、国家冲突、服务不一致、logo-only、缺少服务或地区佐证时不能直接高分接受；但当页面级名称证据和 marketplace/service 证据同时存在时，会放宽同名/通用名 cap，避免过度拒绝正确官网。 |
 | `finder/logo.py` | 从候选官网提取 logo/favicon/og:image，并与 Amazon listing logo 做感知哈希相似度比较；作为正向身份加分证据，但 logo-only 不足以自动接受。 |
 | `tools/run_unresolved_second_pass.py` | 对第一轮没解决的商家做二轮补漏，用 Brave/Exa 找更可能的官网；默认接受阈值为 `75`，与 first pass 对齐，同时保留强证据、风险 URL 和身份 cap 约束。 |
+| `tools/build_visual_verification_task.py` | Codex-assisted 视觉核验任务生成器。读取二轮结果，挑出低置信 accepted、同名/身份风险 accepted 和带候选的 unresolved 行，渲染候选官网截图并生成 `visual_verification/visual_verification_task.csv/xlsx` 及 `grids/grid_*.png`。 |
+| `tools/apply_visual_verification.py` | 读取 Codex 看图后填写的 `accept` / `reject` / `replace` / `unsure` 判定，合并 second-pass 决策，覆盖 canonical `official_sites.csv/xlsx`、`unresolved.csv`、`quality.json`、`review_task.*` 和 `manifest.json`。 |
 | `tools/build_manual_review_task.py` | 生成简化人工复核 CSV/XLSX，只保留工作人员需要判断和填写的列；普通 auto-match 默认复核 75-82 分，second-pass accepted 仍复核 85 分以下。 |
 | `tools/run_check_agent.py` | 真实 LLM CheckAgent 入口。只读取 `check_suggestion/check.csv` 等高风险行和结构化证据，输出到 `development/check_agent/`；没有 `OPENAI_API_KEY` 或 API 失败时只写 blocker summary，不改 Workflow Body 输出。 |
 | `tools/run_optimization_agent.py` | 真实 LLM OptimizationAgent 入口。读取 CheckAgent、人工标签、balance/convergence/gate 报告，判断建议是否值得吸收；输出到 `development/optimization_agent/`，不直接改配置或最终官网。 |
@@ -217,7 +224,6 @@ Codex receives filled manual review workbook
 | `tools/run_agent_b_verification.py` | CheckAgent / Check and Suggestion 的高风险候选优先复核部分。只复核低置信、二轮新增、平台页、logo-only、同名/通用名、身份 cap 等风险行；优先用 title/meta、H1/H2、nav/footer、联系方式、schema.org Organization、页面角色和页面风险做 DOM 结构化验证，只在证据弱或冲突时做轻量独立搜索。脚本名保留 `agent_b` 是为了兼容旧命令。 |
 | `tools/run_agent_b_recommendations.py` | CheckAgent / Check and Suggestion 的建议部分。读取复核结果和人工复核学习报告，输出可执行或需人工评估的优化建议。脚本名保留 `agent_b` 是为了兼容旧命令；真正是否吸收由 OptimizationAgent 判断，再交给 Deterministic Gate。 |
 | `tools/run_review_learning.py` | 读取填好的复核表，合并人工反馈，输出 reviewed 结果、人工标签和优化建议。 |
-| `tools/run_agent_c_recommendations.py` | 旧名称兼容入口，转调 CheckAgent / Check and Suggestion 建议实现。 |
 | `tools/apply_agent_optimizations.py` | Operation and Optimization 的安全应用器，只自动写入可解释、可回滚的 excluded_domains 配置，并生成 human/identity/no_official/reachability 回归样例。脚本名保留 `agent` 是为了兼容旧命令；它不是自主 agent，必须在 OptimizationAgent 和 Deterministic Gate 放行后使用。 |
 | `tools/build_linked_workbook.py` | 生成链接可点击的 XLSX。 |
 | `tools/verify_run_outputs.py` | 检查最终 CSV、unresolved CSV、质量 JSON、XLSX 链接公式是否正常。 |
@@ -264,7 +270,7 @@ outputs/my_run/review_task.xlsx
 outputs/my_run/review_task.csv
 ```
 
-`details/input/`、`details/first_pass/`、`details/second_pass/` 保存中间证据和调试文件。`details/input/` 会先写出 `deduped_input.csv`、`deduped_input.xlsx`、`dedupe_report.json` 和 `dedupe_report.md`，正式搜索从去重后的 provider 输入开始。新版默认只写短文件名；旧版公开文件名仍可作为读取 fallback，例如 `provider_final_official_websites_second_pass.csv` 和 `manual_official_site_review_task.xlsx`。只有设置 `FINDER_WRITE_LEGACY_ALIASES=1` 时才额外写出旧名副本。
+`details/input/`、`details/first_pass/`、`details/second_pass/` 保存中间证据和调试文件。`details/input/` 会先写出 `deduped_input.csv`、`deduped_input.xlsx`、`dedupe_report.json` 和 `dedupe_report.md`，正式搜索从去重后的 provider 输入开始。新版只写短文件名；旧版公开文件名仍可作为读取 fallback，例如 `provider_final_official_websites_second_pass.csv` 和 `manual_official_site_review_task.xlsx`，但不再额外写出旧名副本。
 
 人工复核填完并交给 Codex 后，最终主要看：
 

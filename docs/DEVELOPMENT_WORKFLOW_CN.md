@@ -74,7 +74,7 @@ Operation and Optimization
 - **OptimizationAgent**：真正的 agent 2。读取 CheckAgent 建议、人工标签和指标报告，判断建议是否值得吸收，或是否需要更多标签、模拟、回归测试、规则修改。
 - **Deterministic Gate**：固定门禁。用测试、指标、回归样例决定是否允许应用规则，防止 agent 直接改默认生产规则。
 
-当前仓库里的 `check_suggestion/`、`operation_optimization/` 是开发输出目录。历史脚本名仍保留 `agent_b`、`agent_c`、`agent_optimizations`，只是为了旧命令兼容；对外不要再把 `agent_c` 描述为独立角色，建议功能已经归入 CheckAgent / Check and Suggestion。
+当前仓库里的 `check_suggestion/`、`operation_optimization/` 是开发输出目录。历史脚本名仍保留 `agent_b` 和 `agent_optimizations`，只是为了旧命令兼容；旧 `agent_c` wrapper 已删除，建议功能已经归入 CheckAgent / Check and Suggestion。
 
 ## 普通用户不要默认运行的内容
 
